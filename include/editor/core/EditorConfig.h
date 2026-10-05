@@ -25,7 +25,7 @@ struct EditorConfigData {
     bool window_has_position = true;
     bool window_fullscreen = false;
     bool window_maximized = false;
-    std::string window_title = "PocketEngine Editor";
+    std::string window_title = "Pocket2D Editor";
     float ui_scale = 1.0f;
     int reference_width = 1600;
     int reference_height = 960;

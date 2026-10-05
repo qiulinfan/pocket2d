@@ -1,7 +1,7 @@
-site_name: PocketEngine Docs
-site_url: https://qiulinfan.github.io/pocketEngine/documentation/
-repo_url: https://github.com/qiulinfan/pocketEngine
-repo_name: qiulinfan/pocketEngine
+site_name: Pocket2D Docs
+site_url: https://qiulinfan.github.io/pocket2d/documentation/
+repo_url: https://github.com/qiulinfan/pocket2d
+repo_name: qiulinfan/pocket2d
 docs_dir: docs/lua-api
 site_dir: .site/documentation
 

@@ -1,13 +1,6 @@
 name: Deploy GitHub Pages
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "scripts/deploy_site_to_gh_pages.sh"
   workflow_dispatch:
 
 permissions:

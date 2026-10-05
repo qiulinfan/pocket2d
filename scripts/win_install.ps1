@@ -1,5 +1,5 @@
 param(
-    [string]$RepoUrl = "https://github.com/qiulinfan/pocketEngine.git",
+    [string]$RepoUrl = "https://github.com/qiulinfan/pocket2d.git",
     [string]$Branch = "main",
     [string]$InstallRoot = "",
     [switch]$SkipShortcuts,
@@ -32,7 +32,7 @@ function Ensure-GitCheckout {
             New-Item -ItemType Directory -Path $parentDir | Out-Null
         }
 
-        Write-Host "Cloning PocketEngine into $InstallRoot"
+        Write-Host "Cloning Pocket2D into $InstallRoot"
         & git clone --branch $Branch --depth 1 $RepoUrl $InstallRoot
         if ($LASTEXITCODE -ne 0) {
             throw "git clone failed."
@@ -75,7 +75,7 @@ function New-DesktopShortcut {
 }
 
 if (-not $InstallRoot) {
-    $InstallRoot = Join-Path $env:ProgramData "PocketEngine"
+    $InstallRoot = Join-Path $env:ProgramData "Pocket2D"
 }
 
 Require-Command "git"
@@ -114,22 +114,22 @@ if (-not (Test-Path $editorExe)) {
 
 if (-not $SkipShortcuts) {
     $desktopDir = [Environment]::GetFolderPath("Desktop")
-    $editorShortcut = Join-Path $desktopDir "PocketEngine Editor.lnk"
-    $runtimeShortcut = Join-Path $desktopDir "PocketEngine Runtime.lnk"
+    $editorShortcut = Join-Path $desktopDir "Pocket2D Editor.lnk"
+    $runtimeShortcut = Join-Path $desktopDir "Pocket2D Runtime.lnk"
 
     New-DesktopShortcut -ShortcutPath $editorShortcut `
         -TargetPath $editorExe `
-        -Description "PocketEngine editor (Release)"
+        -Description "Pocket2D editor (Release)"
     New-DesktopShortcut -ShortcutPath $runtimeShortcut `
         -TargetPath $runtimeExe `
-        -Description "PocketEngine runtime (Release)"
+        -Description "Pocket2D runtime (Release)"
 
     Write-Host "Created desktop shortcuts:"
     Write-Host "  $editorShortcut"
     Write-Host "  $runtimeShortcut"
 }
 
-Write-Host "PocketEngine Release is ready:"
+Write-Host "Pocket2D Release is ready:"
 Write-Host "  Editor : $editorExe"
 Write-Host "  Runtime: $runtimeExe"
 

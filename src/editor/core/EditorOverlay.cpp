@@ -323,7 +323,7 @@ std::optional<std::filesystem::path> OpenNativeProjectFolderPicker() {
         dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM |
                            FOS_PATHMUSTEXIST);
     }
-    dialog->SetTitle(L"Choose PocketEngine Project Folder");
+    dialog->SetTitle(L"Choose Pocket2D Project Folder");
 
     std::optional<std::filesystem::path> selected_path;
     if (SUCCEEDED(dialog->Show(nullptr))) {
@@ -345,7 +345,7 @@ std::optional<std::filesystem::path> OpenNativeProjectFolderPicker() {
 #elif defined(__APPLE__)
     FILE *pipe = popen(
         "osascript -e 'POSIX path of (choose folder with prompt "
-        "\"Choose PocketEngine project folder\")'",
+        "\"Choose Pocket2D project folder\")'",
         "r");
     if (pipe == nullptr) return std::nullopt;
 

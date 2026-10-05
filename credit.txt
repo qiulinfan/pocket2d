@@ -1,4 +1,4 @@
-1. The system font for the UI of PocketEngine is "Inter". A modern, clean, nice open source font.
+1. The system font for the UI of Pocket2D is "Inter". A modern, clean, nice open source font.
 Source: https://github.com/rsms/inter
 
 2. The example game "ball game" is an open source A2 game. source: https://a2engine.org/

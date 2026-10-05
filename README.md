@@ -1,18 +1,18 @@
-# <img src="docs/icon.png" alt="PocketEngine icon" width="10%"> PocketEngine 
+# <img src="docs/icon.png" alt="Pocket2D icon" width="10%"> Pocket2D
 
-PocketEngine is a cross-platform 2D runtime + editor game engine, written in C++17 on top of
+Pocket2D is a cross-platform 2D runtime + editor game engine, written in C++17 on top of
 SDL2, Lua, Box2D, Dear ImGui, and JSON scene assets. It hosts Lua for game logic scripting.
 It is a variant of the [A2 Engine](https://a2engine.org/). For basic usage, check the documentation of A2 engine for the APIs.
 
-PocketEngine Lua API documentation lives here:
+Pocket2D Lua API documentation lives here:
 - local source: [docs/lua-api/index.md](docs/lua-api/index.md)
-- GitHub Pages: https://qiulinfan.github.io/pocketEngine/
+- documentation site configuration: [mkdocs.yml](mkdocs.yml); deployment is manual.
 
 > Below is a demo of the editor and runtime in action, running the example
 > "ball game" included in `Projects/Default/`. This example game originates from the
 > [A2 Engine](https://a2engine.org/) ecosystem.
 
-![PocketEngine Demo](docs/show.gif)
+![Pocket2D Demo](docs/show.gif)
 
 The game has a Unity-like editor layout and runtime integration with:
 - `SceneView` panel with actor-picking and drag&drop editing;
@@ -28,12 +28,12 @@ The game has a Unity-like editor layout and runtime integration with:
 ### Linux Release
 Install:
 ```bash
-git clone https://github.com/qiulinfan/pocketEngine.git
+git clone https://github.com/qiulinfan/pocket2d.git
 ```
 
 Build:
 ```bash
-cd pocketEngine
+cd pocket2d
 cmake --preset unix-makefiles-release
 cmake --build --preset unix-makefiles-release -j4
 ```
@@ -52,7 +52,7 @@ Run the game executable:
 Requires:
 - Visual Studio 2022 with `Desktop development with C++`
 
-Download the source from GitHub and extract it. Then open PowerShell in the extracted `pocketEngine` folder.
+Download the source from GitHub and extract it. Then open PowerShell in the extracted `pocket2d` folder.
 
 Build:
 
@@ -86,7 +86,7 @@ Run the game executable:
 - `thirdparty/*`: dependencies
 
 ## Projects
-PocketEngine suggests project management in the `Projects/` directory, butyou are also welcome to create projects anywhere and open them with the editor through `File -> Open Project...`.
+Pocket2D suggests project management in the `Projects/` directory, butyou are also welcome to create projects anywhere and open them with the editor through `File -> Open Project...`.
 
 There is a sample project(the ballgame) bundled with installation of the engine, located at `Projects/Default/`. The editor opens this project by default on startup, so it is recommended to keep it
  and the editor's default project root. 
@@ -107,6 +107,6 @@ All files under `docs/architecture/` are diagram-only for explaining the archite
 
 ## License
 
-PocketEngine is released under the [MIT License](LICENSE).
+Pocket2D is released under the [MIT License](LICENSE).
 
 Third-party libraries under `thirdparty/` keep their own upstream licenses.

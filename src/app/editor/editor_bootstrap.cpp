@@ -278,7 +278,7 @@ void EditorApp::ApplyEditorWindowSettings() {
             SDL_MaximizeWindow(window);
         }
     }
-    SDL_SetWindowTitle(window, "PocketEngine Editor");
+    SDL_SetWindowTitle(window, "Pocket2D Editor");
 }
 
 void EditorApp::SetEditorFullscreen(bool enabled) {

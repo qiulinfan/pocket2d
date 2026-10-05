@@ -1,4 +1,4 @@
-# PocketEngine build/test commands
+# Pocket2D build/test commands
 
 Linux configure/build:
 cmake --preset unix-makefiles-debug
@@ -27,8 +27,8 @@ cmake --preset ninja-debug
 cmake --build --preset ninja-debug -j4
 
 Windows Visual Studio generate/build:
-git clone https://github.com/qiulinfan/pocketEngine.git
-cd .\pocketEngine
+git clone https://github.com/qiulinfan/pocket2d.git
+cd .\pocket2d
 cmake --preset vs2022-x64
 cmake --build --preset vs-debug
 cmake --build --preset vs-release
