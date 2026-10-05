@@ -1,6 +1,6 @@
 # Lua API Overview
 
-Pocket2D exposes its Lua APIs from the files under
+pocket2d exposes its Lua APIs from the files under
 `src/engine/scripting/luaapi/`. The runtime loads those registrations once, and
 every component or gameplay script sees the same global namespaces and built-in
 classes.
@@ -35,7 +35,7 @@ metatables.
 
 ### 2. Supported property types
 
-Pocket2D currently supports these property shapes:
+pocket2d currently supports these property shapes:
 
 - `bool`
 - `int`

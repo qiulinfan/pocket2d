@@ -103,7 +103,7 @@ engine and is not directly exposed as writable Lua properties.
 
 ### Notes
 
-Pocket2D derives an `effective_body_type` internally for dynamic actor
+pocket2d derives an `effective_body_type` internally for dynamic actor
 hierarchies. The authored Lua-visible `body_type` remains the requested value.
 
 ## `ParticleSystem`

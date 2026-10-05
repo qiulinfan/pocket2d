@@ -1,6 +1,6 @@
 # Component Model
 
-Pocket2D gameplay code is built around Lua component tables.
+pocket2d gameplay code is built around Lua component tables.
 
 ## Declaring a component type
 
@@ -46,7 +46,7 @@ A component property can come from three places:
 2. scene/template overrides stored in JSON
 3. runtime edits applied to the live instance
 
-Pocket2D now uses the same array-aware property writer for both:
+pocket2d now uses the same array-aware property writer for both:
 
 - scene/template override application
 - live runtime property editing

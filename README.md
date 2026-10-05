@@ -6,7 +6,7 @@ It is a variant of the [A2 Engine](https://a2engine.org/). For basic usage, chec
 
 Pocket2D Lua API documentation lives here:
 - local source: [docs/lua-api/index.md](docs/lua-api/index.md)
-- documentation site configuration: [mkdocs.yml](mkdocs.yml); deployment is manual.
+- GitHub Pages: https://qiulinfan.github.io/pocket2d/
 
 > Below is a demo of the editor and runtime in action, running the example
 > "ball game" included in `Projects/Default/`. This example game originates from the
