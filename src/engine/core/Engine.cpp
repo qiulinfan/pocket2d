@@ -2,6 +2,10 @@
 #include "audio/AudioManager.h"
 #include "core/FrameClock.h"
 #include "scripting/ComponentManager.h"
+#include "scripting/GameSave.h"
+#include "scripting/SceneComponentPlan.h"
+#include "scripting/RuntimeActorPlan.h"
+#include "scripting/ScriptReloadCandidate.h"
 #include "particles/ParticleManager.h"
 #include "rendering/Renderer.h"
 #include "rendering/SDLRenderHelper.h"
@@ -10,109 +14,78 @@
 #include "input/SDLEventHelper.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
-#include "SDL2_image/SDL_image.h"
+#include "SDL3_image/SDL_image.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <limits>
+#include <iterator>
+#include <stdexcept>
 #include <unordered_set>
 #include <type_traits>
 #include <vector>
 
 namespace {
 
-/*
-Builtin components are reconstructed from serialized specs when their type or
-properties change, because they do not use the generic Lua property patch path.
-*/
-bool IsBuiltinRuntimeComponentType(const std::string &type_name) {
-    return type_name == "Rigidbody" || type_name == "ParticleSystem" ||
-           type_name == "Transform" || type_name == "SpriteRenderer";
-}
+struct SceneTransitionScope {
+    bool &active;
+    explicit SceneTransitionScope(bool &value):active(value){active=true;}
+    ~SceneTransitionScope(){active=false;}
+};
 
-bool CanBuiltinRuntimeComponentPatchInPlace(const std::string &type_name) {
-    return type_name == "Transform" || type_name == "SpriteRenderer";
-}
-
-bool ValidateRuntimeActorComponents(const std::vector<Actor> &runtime_actors,
-                                    const std::string &scene_name,
-                                    std::string &out_error) {
-    for (std::size_t actor_index = 0; actor_index < runtime_actors.size();
-         ++actor_index) {
-        const Actor &actor = runtime_actors[actor_index];
-        const std::string actor_label =
-            actor.actor_name.empty()
-                ? ("#" + std::to_string(actor_index + 1))
-                : ("\"" + actor.actor_name + "\"");
-        for (const Actor::ComponentSpec &component_spec :
-             actor.component_specs) {
-            if (component_spec.type.empty()) {
-                out_error = "scene " + scene_name + " actor " + actor_label +
-                            " has component \"" + component_spec.key +
-                            "\" with no type";
+struct PreparedScene {
+    std::vector<Actor> incoming;
+    std::list<Actor> nodes;
+    // Reverse destruction order matters: instance refs go before the script
+    // plan resumes the live VM's collector.
+    std::unique_ptr<SceneScriptPlan> scripts;
+    std::unique_ptr<SceneComponentPlan> components;
+    ~PreparedScene() {
+        components.reset(); scripts.reset();
+        ComponentManager::ClearPreparedTilemapAssets();
+        ComponentManager::ClearPreparedSpriteAnimationAssets();
+    }
+};
+bool PrepareScene(const SceneFormat::SceneAsset &asset,
+                  const std::list<Actor> &current, bool keep_persistent,
+                  PreparedScene &prepared, std::string &error) {
+    try {
+        if (!SceneFormat::ValidateSceneAssetForRuntime(asset,&error)) {error=ScriptReloadCandidate::SanitizeDiagnosticText(error);return false;}
+        prepared.incoming=SceneFormat::BuildRuntimeActors(asset);
+        std::unordered_set<Actor::UID> incoming_uids;
+        for(const auto &actor:prepared.incoming)incoming_uids.insert(actor.uid);
+        for(const auto &actor:prepared.incoming)if(actor.parent_uid!=Actor::kInvalidUID && !incoming_uids.contains(actor.parent_uid)) {
+            error="incoming actor "+std::to_string(actor.uid)+" references a parent outside the incoming scene";return false;
+        }
+        std::vector<Actor::UID> persistent;
+        std::unordered_set<Actor::UID> retained;
+        if (keep_persistent) {
+            for (const auto &actor:current) if (!actor.runtime_destroyed&&actor.dont_destroy_on_scene_load) {
+                retained.insert(actor.uid);persistent.push_back(actor.uid);
+            }
+            for (const auto &actor:current) if(retained.contains(actor.uid)&&actor.parent_uid!=Actor::kInvalidUID&&
+                                               !retained.contains(actor.parent_uid)) {
+                error="persistent actor "+std::to_string(actor.uid)+" has a nonpersistent parent; retain its parent or detach it before scene load";
                 return false;
             }
-            if (ComponentManager::IsRegisteredComponentType(
-                    component_spec.type)) {
-                continue;
+            for (const auto &actor:prepared.incoming) if(retained.contains(actor.uid)) {
+                error="incoming scene actor uid "+std::to_string(actor.uid)+" conflicts with a persistent actor";return false;
             }
-
-            out_error = "scene " + scene_name + " actor " + actor_label +
-                        " references missing component type \"" +
-                        component_spec.type + "\"";
-            return false;
         }
-    }
-    return true;
-}
-
-bool PrepareRuntimeActorsFromSceneAsset(
-    const SceneFormat::SceneAsset &scene_asset,
-    std::vector<Actor> &out_runtime_actors,
-    std::string &out_error) {
-    if (!SceneFormat::ValidateSceneAssetForRuntime(scene_asset, &out_error)) {
-        return false;
-    }
-
-    Scene::SetActiveSceneSubdirectory(scene_asset.scene_subdirectory);
-    ComponentManager::ReloadComponentTypes();
-
-    out_runtime_actors = SceneFormat::BuildRuntimeActors(scene_asset);
-    return ValidateRuntimeActorComponents(out_runtime_actors,
-                                          scene_asset.scene_name, out_error);
-}
-
-bool PrepareRuntimeActorsForScene(
-    const std::string &scene_name,
-    const std::filesystem::path &preferred_subdirectory,
-    std::vector<Actor> &out_runtime_actors,
-    SceneFormat::SceneAsset *out_scene_asset,
-    std::string &out_error) {
-    SceneFormat::SceneAsset scene_asset =
-        SceneFormat::LoadSceneAsset(scene_name, preferred_subdirectory);
-    if (!PrepareRuntimeActorsFromSceneAsset(scene_asset, out_runtime_actors,
-                                            out_error)) {
-        return false;
-    }
-    if (out_scene_asset != nullptr) {
-        *out_scene_asset = std::move(scene_asset);
-    }
-    return true;
-}
-
-void InstantiateComponentsForActorRange(std::deque<Actor> &actors,
-                                        std::size_t begin_index) {
-    for (std::size_t actor_index = begin_index; actor_index < actors.size();
-         ++actor_index) {
-        const Actor &actor = actors[actor_index];
-        for (const Actor::ComponentSpec &component_spec :
-             actor.component_specs) {
-            ComponentManager::InstantiateComponentForActor(actor.uid,
-                                                           component_spec);
-        }
-    }
+        prepared.scripts=ComponentManager::PrepareSceneScripts(asset.scene_subdirectory,prepared.incoming,persistent,error);
+        if(!prepared.scripts)return false;
+        prepared.components=PrepareSceneComponents(prepared.incoming,*prepared.scripts,error);
+        if(!prepared.components){error=ScriptReloadCandidate::SanitizeDiagnosticText(error);return false;}
+        ComponentManager::PrepareTilemapAssets(prepared.incoming);
+        ComponentManager::PrepareSpriteAnimationAssets(prepared.incoming);
+        // Allocate actor nodes before the commit boundary. Splicing them later
+        // preserves addresses without an allocation after the old world is gone.
+        for(auto &actor:prepared.incoming)prepared.nodes.emplace_back(std::move(actor));
+        return true;
+    }catch(const std::exception &failure){error=ScriptReloadCandidate::SanitizeDiagnosticText(failure.what());return false;}
 }
 
 bool ShouldLogSceneDiagnostics() {
@@ -127,12 +100,9 @@ bool ShouldLogRendererDiagnostics() {
     return std::getenv("ENGINE_LOG_RENDERER") != nullptr;
 }
 
-#if defined(_WIN32)
 std::string ToLowerASCII(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) {
-                       return static_cast<char>(std::tolower(c));
-                   });
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return value;
 }
 
@@ -140,87 +110,37 @@ std::string ReadEnvironmentString(const char *name) {
     const char *value = std::getenv(name);
     return value == nullptr ? "" : value;
 }
-#endif
 
-void LogRendererInfo(SDL_Renderer *renderer) {
-    if (!ShouldLogRendererDiagnostics() || renderer == nullptr) return;
-
-    SDL_RendererInfo info;
-    if (SDL_GetRendererInfo(renderer, &info) != 0) {
-        std::cout << "renderer: unable to query SDL renderer info: "
-                  << SDL_GetError() << std::endl;
-        return;
-    }
-
-    std::cout << "renderer: driver=" << (info.name == nullptr ? "unknown" : info.name)
-              << " accelerated="
-              << ((info.flags & SDL_RENDERER_ACCELERATED) != 0 ? "yes" : "no")
-              << " vsync="
-              << ((info.flags & SDL_RENDERER_PRESENTVSYNC) != 0 ? "yes" : "no")
-              << " target_texture="
-              << ((info.flags & SDL_RENDERER_TARGETTEXTURE) != 0 ? "yes" : "no")
-              << std::endl;
-}
-
-SDL_Renderer *CreateRendererWithPlatformFallback(SDL_Window *window) {
-    Uint32 accelerated_flags =
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE;
-
-#if defined(_WIN32)
-    const std::string requested_vsync =
-        ToLowerASCII(ReadEnvironmentString("POCKET_RENDER_VSYNC"));
-    if (requested_vsync == "1" || requested_vsync == "true" ||
-        requested_vsync == "on") {
-        accelerated_flags |= SDL_RENDERER_PRESENTVSYNC;
-    }
-
-    std::vector<std::string> candidate_drivers;
+SDL_Renderer *CreateConfiguredRenderer(SDL_Window *window) {
     const std::string requested_driver =
-        ReadEnvironmentString("POCKET_RENDER_DRIVER");
-    if (!requested_driver.empty()) {
-        candidate_drivers.emplace_back(requested_driver);
+        ToLowerASCII(ReadEnvironmentString("POCKET_RENDER_DRIVER"));
+    const char *driver = requested_driver.empty() || requested_driver == "auto"
+                             ? nullptr : requested_driver.c_str();
+    SDL_Renderer *renderer = SDLRenderHelper::SDL_CreateRenderer(window, driver);
+    if (renderer == nullptr) {
+        throw std::runtime_error("renderer '" +
+            (driver == nullptr ? std::string("auto") : requested_driver) +
+            "' unavailable: " + SDL_GetError());
     }
-    candidate_drivers.emplace_back("direct3d11");
-    candidate_drivers.emplace_back("direct3d");
-    candidate_drivers.emplace_back("opengl");
-
-    std::unordered_set<std::string> attempted_drivers;
-    for (const std::string &driver : candidate_drivers) {
-        if (driver.empty() || attempted_drivers.find(driver) != attempted_drivers.end()) {
-            continue;
-        }
-        attempted_drivers.insert(driver);
-        SDL_SetHint(SDL_HINT_RENDER_DRIVER, driver.c_str());
-        SDL_Renderer *renderer = ::SDL_CreateRenderer(window, -1, accelerated_flags);
-        if (renderer != nullptr) {
-            LogRendererInfo(renderer);
-            return renderer;
-        }
-        if (ShouldLogRendererDiagnostics()) {
-            std::cout << "renderer: failed to create " << driver
-                      << " renderer: " << SDL_GetError() << std::endl;
+    const std::string vsync = ToLowerASCII(ReadEnvironmentString("POCKET_RENDER_VSYNC"));
+    if (!vsync.empty()) {
+        const bool enabled = vsync == "1" || vsync == "true" || vsync == "on";
+        if (!SDL_SetRenderVSync(renderer, enabled ? 1 : 0)) {
+            const std::string error = SDL_GetError();
+            SDL_DestroyRenderer(renderer);
+            throw std::runtime_error("requested renderer VSync unavailable: " + error);
         }
     }
-    SDL_ResetHint(SDL_HINT_RENDER_DRIVER);
-#endif
-
-    SDL_Renderer *renderer =
-        SDLRenderHelper::SDL_CreateRenderer(window, -1, accelerated_flags);
-    LogRendererInfo(renderer);
+    if (ShouldLogRendererDiagnostics()) {
+        int interval = 0;
+        SDL_GetRenderVSync(renderer, &interval);
+        std::cout << "renderer: driver=" << SDL_GetRendererName(renderer)
+                  << " vsync=" << interval << std::endl;
+    }
     return renderer;
 }
 
-void RotateClockwise(float x, float y, float rotation_degrees, float &out_x,
-                     float &out_y) {
-    const float radians =
-        rotation_degrees * (3.14159265358979323846f / 180.0f);
-    const float cos_theta = std::cos(radians);
-    const float sin_theta = std::sin(radians);
-    out_x = cos_theta * x + sin_theta * y;
-    out_y = -sin_theta * x + cos_theta * y;
-}
-
-std::string BuildUniqueRuntimeActorName(const std::deque<Actor> &actors,
+std::string BuildUniqueRuntimeActorName(const std::list<Actor> &actors,
                                         const std::string &base_name) {
     const std::string safe_base_name =
         base_name.empty() ? "New Actor" : base_name;
@@ -315,34 +235,32 @@ Engine::Engine() {
     Construction loads config and prepares the initial actor/component world,
     but SDL/window resources are created later by InitializeRuntime().
     */
-    config_ = GameConfig::Read();
-    current_scene_name = config_.initial_scene_name;
-    /*
-    Initialize the scripting runtime before scene load so scene-backed
-    components can be instantiated immediately and run OnStart on frame 0.
-    */
-    ComponentManager::Initialize();
-    ComponentManager::BindEngine(this);
-    ComponentManager::ClearActorComponents();
-    if (!config_.initial_scene_name.empty()) {
-        std::vector<Actor> loaded_actors;
-        std::string validation_error;
-        if (!PrepareRuntimeActorsForScene(config_.initial_scene_name, {},
-                                          loaded_actors, nullptr,
-                                          validation_error)) {
-            last_scene_load_error_ = validation_error;
-            std::cout << "error: " << validation_error << std::endl;
-        } else {
-            actors.clear();
-            for (Actor &actor : loaded_actors) {
-                actors.emplace_back(std::move(actor));
-            }
+    try {
+        FrameClock::Reset();
+        Scene::SetActiveSceneSubdirectory({});
+        GameSave::Configure({});
+        config_ = GameConfig::Read();
+        GameSave::Configure(config_.save_namespace);
+        current_scene_name = config_.initial_scene_name;
+        SceneFormat::SceneAsset initial;
+        if(!config_.initial_scene_name.empty())
+            initial=SceneFormat::LoadSceneAsset(config_.initial_scene_name,{});
+        Scene::SetActiveSceneSubdirectory(initial.scene_subdirectory);
+        ComponentManager::Initialize();
+        ComponentManager::BootstrapComponentTypes(initial.scene_subdirectory);
+        ComponentManager::BindEngine(this);
+        ComponentManager::ClearActorComponents();
+        if(!config_.initial_scene_name.empty())LoadSceneAsset(initial);
+        if(!scene_reset_required_){
             ComponentManager::BindActorsForScene(actors);
-            InstantiateComponentsForActorRange(actors, 0);
+            rebuildRuntimeActorUIDMap();
         }
+    } catch (...) {
+        // Constructors do not run ~Engine on failure. Release the Lua VM and
+        // partially constructed physics/components before the host can retry.
+        ShutdownRuntime();
+        throw;
     }
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
 }
 
 Engine::~Engine() {
@@ -365,9 +283,31 @@ Editor can call this without entering GameLoop()
 so the host can bootstrap runtime services on demand
 */
 void Engine::InitializeRuntime() {
-    if (window != nullptr || renderer != nullptr) return;
+    if(scene_reset_required_)throw std::runtime_error("runtime requires reset after failed publication");
+    if (runtime_initialized_ || runtime_shutdown_) return;
     is_game_running = true;
     initialize();
+    runtime_initialized_ = true;
+}
+
+void Engine::InitializeHeadless() {
+    if(scene_reset_required_)throw std::runtime_error("runtime requires reset after failed publication");
+    if (runtime_initialized_ || runtime_shutdown_) return;
+    if (!SDL_Init(0)) {
+        throw std::runtime_error(std::string("headless SDL initialization failed: ") +
+                                 SDL_GetError());
+    }
+    FrameClock::Reset();
+    ::Input::Init();
+    ::Input::SetExternalInputEnabled(true);
+    AudioManager::SetPlaybackEnabled(false);
+    runtime_zoom_factor = (config_.zoom_factor > 0.0f)
+                              ? std::clamp(config_.zoom_factor, kMinZoomFactor,
+                                           kMaxZoomFactor)
+                              : 1.0f;
+    ResetPerformanceCounters();
+    is_game_running = true;
+    runtime_initialized_ = true;
 }
 
 /*
@@ -376,16 +316,20 @@ They need to be cleared once actors and components are destroyed.
 */
 void Engine::ShutdownRuntime() {
     
-    if (window == nullptr && renderer == nullptr) return;
+    if (runtime_shutdown_) return;
+    runtime_shutdown_ = true;
+    is_game_running = false;
 
     destroyRuntimeRenderTarget();
     destroyScenePreviewRenderTarget();
     runtime_actor_by_uid_.clear();
+    ComponentManager::ClearPreparedTilemapAssets();
+    ComponentManager::ClearPreparedSpriteAnimationAssets();
     ComponentManager::Shutdown();
+    Scene::SetActiveSceneSubdirectory({});
     ParticleManager::Clear();
     Renderer::Shutdown();
     AudioManager::Shutdown();
-    IMG_Quit();
     if (renderer != nullptr) {
         SDL_DestroyRenderer(renderer);
         renderer = nullptr;
@@ -395,6 +339,11 @@ void Engine::ShutdownRuntime() {
         window = nullptr;
     }
     SDL_Quit();
+    SDLEventHelper::Reset();
+    SDLRenderHelper::Reset();
+    ::Input::Init();
+    ::Input::SetExternalInputEnabled(false);
+    runtime_initialized_ = false;
 }
 
 /*
@@ -416,19 +365,43 @@ void Engine::RunSingleFrame() {
 void Engine::RunSingleFrame(bool quit_requested_this_frame) {
     if (!IsRunning()) return;
     /* Run one full gameplay frame: scene load, starts, update, render, input late update. */
-    processPendingSceneLoad();
-    ::Input::BeginFrame();
-    ComponentManager::ApplyEffectiveRigidbodyBodyTypes();
-    ComponentManager::ProcessPendingOnStart();
-    update();
+    advanceGameplay();
+    if(scene_reset_required_)return;
     render();
-    RecordGameplayFrame();
-    ::Input::LateUpdate();
+    finishGameplayFrame();
 
     /* Apply deferred quit after the frame finishes. */
     if (quit_requested_this_frame) {
         is_game_running = false;
     }
+}
+
+void Engine::advanceGameplay() {
+    if(scene_transition_active_)throw std::logic_error("cannot advance gameplay during a scene transaction");
+    processPendingSceneLoad();
+    if(scene_reset_required_)return;
+    ::Input::BeginFrame();
+    ComponentManager::ApplyEffectiveRigidbodyBodyTypes();
+    ComponentManager::ProcessPendingOnStart();
+    if (scene_reset_required_) return;
+    update();
+}
+
+void Engine::finishGameplayFrame() {
+    RecordGameplayFrame();
+    ::Input::LateUpdate();
+    FrameClock::AdvanceFrame();
+}
+
+void Engine::StepSimulation() {
+    if (!IsRunning() || !runtime_initialized_) return;
+    advanceGameplay();
+    if(scene_reset_required_)return;
+    // The visible path resolves final transforms in render(). Headless observers
+    // need the same post-mutation world values even in scenes without physics.
+    ComponentManager::ResolveTransformHierarchy();
+    Renderer::DiscardFrameRequests();
+    finishGameplayFrame();
 }
 
 
@@ -449,10 +422,12 @@ void Engine::RunRenderFrozenFrame(bool quit_requested_this_frame,
     logic unless live preview is enabled.
     */
     processPendingSceneLoad();
+    if(scene_reset_required_)return;
     ComponentManager::ApplyEffectiveRigidbodyBodyTypes();
     if (process_pending_on_start) {
         ComponentManager::ProcessPendingOnStart();
     }
+    ComponentManager::CommitTilemaps();
     render();
     ::Input::LateUpdate();
 
@@ -471,7 +446,7 @@ void Engine::RunPresentPausedFrame(bool quit_requested_this_frame) {
 
     if (render_runtime_to_texture_) {
         SDL_SetRenderTarget(renderer, nullptr);
-        SDL_RenderSetViewport(renderer, nullptr);
+        SDL_SetRenderViewport(renderer, nullptr);
         clearEditorHostFrame();
     }
 
@@ -489,7 +464,7 @@ But: both standalone runtime and editor embedding feed the same input path
 void Engine::ProcessSDLEvent(const SDL_Event &event,
                              bool &quit_requested_this_frame) {
     ::Input::ProcessEvent(event);
-    if (event.type == SDL_QUIT) {
+    if (event.type == SDL_EVENT_QUIT) {
         quit_requested_this_frame = true;
     }
 }
@@ -534,7 +509,7 @@ std::size_t Engine::CountLiveActors() const {
                       [](const Actor &actor) { return !actor.runtime_destroyed; }));
 }
 std::size_t Engine::GetActorCount() const {return CountLiveActors();}
-const std::deque<Actor> &Engine::GetRuntimeActors() const {return actors;}
+const std::list<Actor> &Engine::GetRuntimeActors() const {return actors;}
 const Actor *Engine::GetRuntimeActorByUID(Actor::UID actor_uid) const {
     return findRuntimeActorByUID(actor_uid);
 }
@@ -564,7 +539,20 @@ Actor::UID Engine::AllocateRuntimeGeneratedActorUID() {
         next_runtime_generated_actor_uid_ =
             Actor::kRuntimeGeneratedUIDStart;
     }
-    return next_runtime_generated_actor_uid_++;
+    const Actor::UID start = next_runtime_generated_actor_uid_;
+    auto advance = [this] {
+        next_runtime_generated_actor_uid_ =
+            next_runtime_generated_actor_uid_ == std::numeric_limits<Actor::UID>::max()
+                ? Actor::kRuntimeGeneratedUIDStart : next_runtime_generated_actor_uid_ + 1;
+    };
+    while (runtime_actor_by_uid_.count(next_runtime_generated_actor_uid_) != 0) {
+        advance();
+        if (next_runtime_generated_actor_uid_ == start)
+            throw std::runtime_error("runtime actor UID space exhausted");
+    }
+    const Actor::UID allocated = next_runtime_generated_actor_uid_;
+    advance();
+    return allocated;
 }
 
 /*
@@ -572,38 +560,52 @@ Duplicate a live actor entirely inside the runtime world.
 This path intentionally does not write back to the authoring scene document;
 it is the transient play-mode equivalent of scene-backed duplication.
 */
+void Engine::NotifyRuntimeActorPublished(Actor &actor) {
+    runtime_actor_by_uid_.insert_or_assign(actor.uid, &actor);
+    invalidateRuntimePhysicsHierarchyCache();
+}
+
+void Engine::ReportRuntimeActorPublicationFailure(const std::string &message) {
+    last_scene_edit_error_.clear();
+    last_runtime_actor_error_ = ScriptReloadCandidate::SanitizeDiagnosticText(
+        "runtime actor publication failed; reset required: " + message);
+    runtime_actor_by_uid_.clear();
+    runtime_physics_hierarchy_state_by_uid_.clear();
+    runtime_physics_hierarchy_cache_dirty_ = true;
+    scene_reset_required_ = true;
+    is_game_running = false;
+    has_pending_scene_load = false;
+    pending_scene_name.clear();
+}
+
 bool Engine::DuplicateRuntimeActorByUID(Actor::UID actor_uid,
                                         Actor::UID *out_new_actor_uid) {
+    if (scene_reset_required_) return false;
+    last_runtime_actor_error_.clear();
     const Actor *source_actor = GetRuntimeActorByUID(actor_uid);
     if (source_actor == nullptr) return false;
-
-    Actor duplicated_actor = *source_actor;
-    const std::string duplicate_base_name =
-        source_actor->actor_name.empty() ? "New Actor"
-                                         : source_actor->actor_name + " (copy)";
-    duplicated_actor.actor_name =
-        BuildUniqueRuntimeActorName(actors, duplicate_base_name);
-    duplicated_actor.uid = AllocateRuntimeGeneratedActorUID();
-    duplicated_actor.scene_backed = false;
-    duplicated_actor.parent_uid = Actor::kInvalidUID;
-    duplicated_actor.runtime_destroyed = false;
-
-    actors.emplace_back(std::move(duplicated_actor));
-    Actor *runtime_actor = &actors.back();
-
-    ComponentManager::BindActorsForScene(actors);
-    for (const Actor::ComponentSpec &component_spec :
-        runtime_actor->component_specs) {
-        ComponentManager::InstantiateComponentForActor(runtime_actor->uid,
-                                                       component_spec);
+    std::unique_ptr<PreparedRuntimeActor> prepared;
+    try {
+        Actor actor = *source_actor;
+        actor.actor_name = BuildUniqueRuntimeActorName(actors,
+            source_actor->actor_name.empty() ? "New Actor" : source_actor->actor_name + " (copy)");
+        actor.uid = AllocateRuntimeGeneratedActorUID();
+        actor.runtime_generation = 0;
+        actor.scene_backed = false;
+        actor.parent_uid = Actor::kInvalidUID;
+        actor.runtime_destroyed = false;
+        prepared = PrepareRuntimeActor(std::move(actor), last_runtime_actor_error_);
+        if (!prepared) return false;
+        Actor *published = PublishRuntimeActor(*prepared, actors, false);
+        NotifyRuntimeActorPublished(*published);
+        if (out_new_actor_uid) *out_new_actor_uid = published->uid;
+        return true;
+    } catch (const std::exception &failure) {
+        if (prepared && prepared->CommitStarted()) ReportRuntimeActorPublicationFailure(failure.what());
+        else last_runtime_actor_error_ = ScriptReloadCandidate::SanitizeDiagnosticText(failure.what());
+        std::cerr << "actor duplication rejected: " << last_runtime_actor_error_ << '\n';
+        return false;
     }
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-
-    if (out_new_actor_uid != nullptr) {
-        *out_new_actor_uid = runtime_actor->uid;
-    }
-    return true;
 }
 /*
 Remove one runtime actor and immediately flush the component-system destruction
@@ -651,7 +653,7 @@ bool Engine::SetRuntimeActorParentByUID(Actor::UID actor_uid,
         mutation.parent_uid = parent_actor->uid;
     }
 
-    return applySetActorParentMutation(mutation);
+    return ApplySceneEditCommand(SceneFormat::SceneEditCommand::Single({mutation}));
 }
 
 /*
@@ -660,47 +662,55 @@ Reload the runtime from a shared scene asset snapshot. (instead of re-reading fr
 Notice: Play/Stop transitions can leave transient input/audio state from the
 previous runtime snapshot, so clear those caches before rebind.
 */
-bool Engine::LoadSceneAsset(const SceneFormat::SceneAsset &scene_asset) {
-    std::string validation_error;
-    std::vector<Actor> runtime_actors;
-    if (!PrepareRuntimeActorsFromSceneAsset(scene_asset, runtime_actors,
-                                            validation_error)) {
-        last_scene_load_error_ = validation_error;
-        std::cout << "error: " << validation_error << std::endl;
-        return false;
+void Engine::failSceneCommit(const std::string &message) {
+    last_scene_edit_error_.clear();
+    last_runtime_actor_error_.clear();
+    // No stale Actor* may survive a failed destructive commit. Partial new state
+    // remains owned for shutdown, but must not resume gameplay or rendering.
+    runtime_actor_by_uid_.clear();
+    runtime_physics_hierarchy_state_by_uid_.clear();
+    runtime_physics_hierarchy_cache_dirty_=true;
+    scene_reset_required_=true;is_game_running=false;
+    has_pending_scene_load=false;pending_scene_name.clear();
+    last_scene_load_error_=ScriptReloadCandidate::SanitizeDiagnosticText("scene commit failed; reset required: "+message);
+}
+
+bool Engine::LoadSceneAsset(const SceneFormat::SceneAsset &scene_asset,
+                           const std::function<bool()> &before_commit) {
+    ++scene_load_attempt_revision_;
+    if(scene_transition_active_){last_scene_load_error_="another scene transaction is already active";return false;}
+    SceneTransitionScope transition(scene_transition_active_);
+    if(scene_reset_required_){last_scene_load_error_="runtime requires reset after failed publication";return false;}
+    PreparedScene prepared;std::string error;
+    if(!PrepareScene(scene_asset,actors,false,prepared,error)){
+        last_scene_load_error_=error;return false;
     }
-
-    ::Input::Init();
-    AudioManager::StopAllPlayback();
-    SDL_FlushEvent(SDL_KEYDOWN);
-    SDL_FlushEvent(SDL_KEYUP);
-    SDL_FlushEvent(SDL_TEXTEDITING);
-    SDL_FlushEvent(SDL_TEXTINPUT);
-    SDL_FlushEvent(SDL_MOUSEMOTION);
-    SDL_FlushEvent(SDL_MOUSEBUTTONDOWN);
-    SDL_FlushEvent(SDL_MOUSEBUTTONUP);
-    SDL_FlushEvent(SDL_MOUSEWHEEL);
-
-    ComponentManager::ClearActorComponents();
-    actors.clear();
-    for (Actor &actor : runtime_actors) {
-        actors.emplace_back(std::move(actor));
-    }
-
-    ComponentManager::BindActorsForScene(actors);
-    InstantiateComponentsForActorRange(actors, 0);
-    /*
-    Component instances are created after the deque is stable. Rebind once so
-    actor pointers and cached lifecycle lists both see the fresh components.
-    */
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-
-    current_scene_name = scene_asset.scene_name;
-    has_pending_scene_load = false;
-    pending_scene_name.clear();
-    last_scene_load_error_.clear();
-    return true;
+    try {
+        if(before_commit&&!before_commit()){
+            last_scene_load_error_="scene pre-commit host action failed; current world preserved";return false;
+        }
+    }catch(const std::exception &failure){last_scene_load_error_=ScriptReloadCandidate::SanitizeDiagnosticText(failure.what());return false;}
+    try {
+        ::Input::ResetForSceneChange();AudioManager::StopAllPlayback();
+        for(const auto event:{SDL_EVENT_KEY_DOWN,SDL_EVENT_KEY_UP,SDL_EVENT_TEXT_EDITING,SDL_EVENT_TEXT_INPUT,
+                              SDL_EVENT_MOUSE_MOTION,SDL_EVENT_MOUSE_BUTTON_DOWN,SDL_EVENT_MOUSE_BUTTON_UP,SDL_EVENT_MOUSE_WHEEL})
+            SDL_FlushEvent(event);
+        const auto errors_before_teardown=ComponentManager::GetRuntimeErrorCount();
+        ComponentManager::ClearActorComponents();
+        if(ComponentManager::GetRuntimeErrorCount()!=errors_before_teardown)
+            throw std::runtime_error("scene teardown callback failed: "+ComponentManager::GetLastRuntimeError());
+        runtime_actor_by_uid_.clear();invalidateRuntimePhysicsHierarchyCache();
+        actors.clear();
+        ComponentManager::CommitSceneScripts(*prepared.scripts);
+        Scene::SetActiveSceneSubdirectory(scene_asset.scene_subdirectory);
+        actors.splice(actors.end(),prepared.nodes);
+        ComponentManager::BindActorsForScene(actors);
+        InstallSceneComponents(*prepared.components,actors,0);
+        ComponentManager::BindActorsForScene(actors);rebuildRuntimeActorUIDMap();
+        current_scene_name=scene_asset.scene_name;
+        has_pending_scene_load=false;pending_scene_name.clear();last_scene_load_error_.clear();last_runtime_actor_error_.clear();last_scene_edit_error_.clear();
+        return true;
+    }catch(const std::exception &failure){failSceneCommit(failure.what());return false;}
 }
 
 /*
@@ -713,18 +723,6 @@ It applys a batch of scene mutations,
 if any single mutation fails to apply then the whole command is rejected and rolled back.
 (apply 一系列的 scene mutations, 如果其中一个无法 apply 就拒绝整个 command 并 rollback)
 */
-bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command) {
-    if (command.empty()) return false;
-
-    /* Fail fast on the first mutation that cannot be mirrored into the runtime. */
-    for (const SceneFormat::SceneMutation &mutation : command.mutations) {
-        if (!applySceneMutation(mutation)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /* Toggle offscreen runtime rendering for the docked editor viewport. */
 void Engine::SetRenderRuntimeToTexture(bool enabled) {
     render_runtime_to_texture_ = enabled;
@@ -761,7 +759,7 @@ SDL_Texture *Engine::RenderScenePreview(float camera_x, float camera_y,
     if (scene_preview_render_target_ == nullptr) return nullptr;
 
     SDL_SetRenderTarget(renderer, scene_preview_render_target_);
-    SDL_RenderSetViewport(renderer, nullptr);
+    SDL_SetRenderViewport(renderer, nullptr);
     clearFrame();
 
     /*
@@ -773,12 +771,18 @@ SDL_Texture *Engine::RenderScenePreview(float camera_x, float camera_y,
     ParticleManager::QueueRenderBatches();
 
     const float clamped_zoom = std::clamp(zoom_factor, kMinZoomFactor, kMaxZoomFactor);
+    if (scene_backed_only) ComponentManager::CommitTilemaps();
+    const float half_width = scene_preview_render_target_width_ / (200.0f * clamped_zoom);
+    const float half_height = scene_preview_render_target_height_ / (200.0f * clamped_zoom);
+    ComponentManager::QueueTilemaps(camera_x - half_width, camera_y - half_height,
+                                    camera_x + half_width, camera_y + half_height,
+                                    scene_backed_only);
     Renderer::RenderFrame(renderer, camera_x, camera_y, clamped_zoom,
                           scene_preview_render_target_width_,
                           scene_preview_render_target_height_);
 
     SDL_SetRenderTarget(renderer, nullptr);
-    SDL_RenderSetViewport(renderer, nullptr);
+    SDL_SetRenderViewport(renderer, nullptr);
     return scene_preview_render_target_;
 }
 int Engine::GetScenePreviewRenderTargetWidth() const {
@@ -804,39 +808,23 @@ runtime window/renderer are needed by either the game or the editor host.
 void Engine::initialize() {
     FrameClock::Reset();
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) exit(0);
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        throw std::runtime_error(std::string("SDL video initialization failed: ") + SDL_GetError());
+    }
 
-    /* Create the SDL renderer lazily on demand. */
     window = SDLRenderHelper::SDL_CreateWindow(
-        config_.game_title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        config_.window_width, config_.window_height,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+        config_.game_title.c_str(), config_.window_width, config_.window_height,
+        SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (window == nullptr) {
-        SDL_Quit();
-        exit(0);
+        throw std::runtime_error(std::string("window creation failed: ") + SDL_GetError());
     }
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     SDL_RaiseWindow(window);
-    SDL_SetWindowInputFocus(window);
-
-    renderer = CreateRendererWithPlatformFallback(window);
-    if (renderer == nullptr) {
-        SDL_DestroyWindow(window);
-        window = nullptr;
-        SDL_Quit();
-        exit(0);
-    }
-
-    if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0) {
-        SDL_DestroyRenderer(renderer);
-        renderer = nullptr;
-        SDL_DestroyWindow(window);
-        window = nullptr;
-        SDL_Quit();
-        exit(0);
-    }
+    renderer = CreateConfiguredRenderer(window);
 
     Renderer::Init();
     ::Input::Init();
+    ::Input::SetExternalInputEnabled(false);
 
     runtime_zoom_factor = (config_.zoom_factor > 0.0f)
                               ? std::clamp(config_.zoom_factor, kMinZoomFactor,
@@ -849,20 +837,28 @@ void Engine::initialize() {
 
 void Engine::update() {
     /* Gameplay update is component-driven and always runs in this order. */
+    ComponentManager::ProcessSpriteAnimations();
+    if (scene_reset_required_) return;
     ComponentManager::ProcessOnUpdate();
+    if (scene_reset_required_) return;
     ComponentManager::ProcessOnLateUpdate();
+    if (scene_reset_required_) return;
 
     /*
     Only pre-physics destruction/removal work is flushed here. Other
     end-of-frame mutations still wait until after the Box2D step.
     */
     ComponentManager::FinalizePrePhysicsDestructions();
-
+    if (scene_reset_required_) return;
+    ComponentManager::CommitTilemaps();
+    if (scene_reset_required_) return;
     ComponentManager::StepPhysics();
+    if (scene_reset_required_) return;
     ParticleManager::Update(1.0f / 60.0f);
 
     /* Full end-of-frame reconciliation happens once, after physics/callbacks. */
     ComponentManager::FinalizeFrameMutations();
+    if (scene_reset_required_) return;
     PruneDestroyedRuntimeActors();
 }
 
@@ -873,51 +869,38 @@ boundary so actor destruction/creation never races the current update.
 (gameplay 请求的场景切换被延迟到下一帧边界, 这样 actor 销毁/创建就永远不会和当前 update 竞争)
 */
 void Engine::processPendingSceneLoad() {
-    if (!has_pending_scene_load) return;
-
-    const std::string scene_to_load = pending_scene_name;
-    has_pending_scene_load = false;
-    pending_scene_name.clear();
-
-    std::vector<Actor> loaded_actors;
-    SceneFormat::SceneAsset loaded_scene_asset;
-    std::string validation_error;
-    if (!PrepareRuntimeActorsForScene(scene_to_load,
-                                      Scene::GetActiveSceneSubdirectory(),
-                                      loaded_actors, &loaded_scene_asset,
-                                      validation_error)) {
-        last_scene_load_error_ = validation_error;
-        std::cout << "error: " << validation_error << std::endl;
-        return;
-    }
-
-    /* Unload current scene actors, except ones marked DontDestroy. */
-    for (Actor &actor : actors) {
-        if (actor.runtime_destroyed) continue;
-        if (actor.dont_destroy_on_scene_load) continue;
-        ComponentManager::DestroyActor(&actor);
-    }
-    /* Apply removals immediately before loading new scene. */
-    ComponentManager::FinalizeFrameMutations();
-    PruneDestroyedRuntimeActors();
-
-    /* Load new scene actors and append them to runtime container. */
-    const std::size_t first_loaded_actor_index = actors.size();
-    for (Actor &actor : loaded_actors) {
-        actors.emplace_back(std::move(actor));
-    }
-    /* Rebuild actor indices and re-inject actor refs into component tables. */
-    ComponentManager::BindActorsForScene(actors);
-    InstantiateComponentsForActorRange(actors, first_loaded_actor_index);
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-    current_scene_name = loaded_scene_asset.scene_name;
-    last_scene_load_error_.clear();
-    if (ShouldLogSceneDiagnostics()) {
-        std::cout << "scene_load: " << current_scene_name
-                  << " live_actors=" << CountLiveActors()
-                  << " stored_actors=" << actors.size() << std::endl;
-    }
+    if(!has_pending_scene_load||scene_reset_required_||scene_transition_active_)return;
+    SceneTransitionScope transition(scene_transition_active_);
+    const auto requested=pending_scene_name;has_pending_scene_load=false;pending_scene_name.clear();
+    ++scene_load_attempt_revision_;
+    PreparedScene prepared;SceneFormat::SceneAsset asset;std::string error;
+    try { asset=SceneFormat::LoadSceneAsset(requested,Scene::GetActiveSceneSubdirectory()); }
+    catch(const std::exception &failure){last_scene_load_error_=ScriptReloadCandidate::SanitizeDiagnosticText(failure.what());return;}
+    if(!PrepareScene(asset,actors,true,prepared,error)){last_scene_load_error_=error;return;}
+    try {
+        const auto errors_before_teardown=ComponentManager::GetRuntimeErrorCount();
+        for(auto &actor:actors)if(!actor.runtime_destroyed&&!actor.dont_destroy_on_scene_load)
+            ComponentManager::DestroyActor(&actor);
+        ComponentManager::FinalizeFrameMutations();
+        if(ComponentManager::GetRuntimeErrorCount()!=errors_before_teardown)
+            throw std::runtime_error("scene teardown callback failed: "+ComponentManager::GetLastRuntimeError());
+        PruneDestroyedRuntimeActors();
+        // User destruction callbacks have run after the commit boundary. If they
+        // introduce an identity conflict, classify it as fatal rather than bind
+        // a persistent component to an unrelated actor.
+        std::unordered_set<Actor::UID> surviving;
+        for(const auto &actor:actors)if(!actor.runtime_destroyed)surviving.insert(actor.uid);
+        for(const auto &actor:prepared.nodes)if(surviving.contains(actor.uid))
+            throw std::runtime_error("destruction callback introduced an incoming actor UID conflict");
+        ComponentManager::CommitSceneScripts(*prepared.scripts);
+        Scene::SetActiveSceneSubdirectory(asset.scene_subdirectory);
+        const auto first=actors.size();actors.splice(actors.end(),prepared.nodes);
+        ComponentManager::BindActorsForScene(actors);
+        InstallSceneComponents(*prepared.components,actors,first);
+        ComponentManager::BindActorsForScene(actors);rebuildRuntimeActorUIDMap();
+        current_scene_name=asset.scene_name;last_scene_load_error_.clear();
+        if(ShouldLogSceneDiagnostics())std::cout<<"scene_load: "<<current_scene_name<<" live_actors="<<CountLiveActors()<<" stored_actors="<<actors.size()<<std::endl;
+    }catch(const std::exception &failure){failSceneCommit(failure.what());}
 }
 
 void Engine::SetCameraPosition(float x, float y) {camera_position.x = x; camera_position.y = y;}
@@ -1115,21 +1098,21 @@ void Engine::rebuildRuntimeActorUIDMap() {
     Runtime-only actors allocate from a monotonic cursor after the highest live
     UID so instantiate/duplicate stay O(1) during play mode.
     */
+    // Do not wrap max UID to zero or rewind over UIDs allocated earlier in
+    // this world. The allocator skips authored IDs when the cursor wraps.
     next_runtime_generated_actor_uid_ =
-        std::max<std::uint64_t>(Actor::kRuntimeGeneratedUIDStart,
-                                max_existing_uid + 1);
+        std::max(next_runtime_generated_actor_uid_, Actor::kRuntimeGeneratedUIDStart);
+    if (max_existing_uid != std::numeric_limits<Actor::UID>::max())
+        next_runtime_generated_actor_uid_ =
+            std::max(next_runtime_generated_actor_uid_, max_existing_uid + 1);
 }
 
 void Engine::PruneDestroyedRuntimeActors() {
     if (CountLiveActors() == actors.size()) return;
 
-    std::deque<Actor> compacted_actors;
-    for (Actor &actor : actors) {
-        if (actor.runtime_destroyed) continue;
-        compacted_actors.emplace_back(std::move(actor));
-    }
-
-    actors.swap(compacted_actors);
+    // Lua userdata and Box2D fixture metadata hold Actor pointers. Erase only
+    // dead nodes so live actors retain their addresses across arbitrary churn.
+    actors.remove_if([](const Actor &actor) { return actor.runtime_destroyed; });
     ComponentManager::BindActorsForScene(actors);
     rebuildRuntimeActorUIDMap();
 }
@@ -1149,393 +1132,6 @@ const Actor* Engine::findRuntimeActorByUID(Actor::UID actor_uid) const {
         return nullptr;
     }
     return actor_it->second;
-}
-
-/*
-applySceneMutation: variant visitor, 
-apply one scene mutation to the runtime world. 
-*/
-bool Engine::applySceneMutation(const SceneFormat::SceneMutation &mutation) {
-    /*
-    Scene mutations are variant-dispatched here so the editor can stream one
-    serialized command format into the live runtime mirror.
-    */
-    return std::visit(
-        [&](const auto &typed_mutation) -> bool {
-            using MutationType = std::decay_t<decltype(typed_mutation)>;
-            if constexpr (std::is_same_v<MutationType,
-                                         SceneFormat::CreateActorMutation>) {
-                return applyCreateActorMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::DeleteActorMutation>) {
-                return applyDeleteActorMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::SetActorNameMutation>) {
-                return applySetActorNameMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::SetActorParentMutation>) {
-                return applySetActorParentMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::AddComponentMutation>) {
-                return applyAddComponentMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::DeleteComponentMutation>) {
-                return applyDeleteComponentMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::RenameComponentMutation>) {
-                return applyRenameComponentMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::SetComponentTypeMutation>) {
-                return applySetComponentTypeMutation(typed_mutation);
-            } else if constexpr (std::is_same_v<
-                                     MutationType,
-                                     SceneFormat::SetComponentPropertyMutation>) {
-                return applySetComponentPropertyMutation(typed_mutation);
-            }
-            return false;
-        },
-        mutation.payload);
-}
-
-bool Engine::applyCreateActorMutation( const SceneFormat::CreateActorMutation &mutation) {
-    /*
-    Create the effective runtime actor from editor data, insert it at the
-    requested hierarchy position, then instantiate all component instances.
-    */
-    if (mutation.actor_uid == SceneFormat::kInvalidSceneActorUID) return false;
-    if (findRuntimeActorByUID(mutation.actor_uid) != nullptr) return false;
-
-    Actor actor = SceneFormat::BuildEffectiveActor(
-        mutation.actor_record, Scene::GetActiveSceneSubdirectory());
-    actor.uid = mutation.actor_uid;
-
-    auto insert_it = actors.end();
-    if (mutation.insert_after_actor_uid.has_value()) {
-        insert_it = std::find_if(
-            actors.begin(), actors.end(), [&](const Actor &existing_actor) {
-                return !existing_actor.runtime_destroyed &&
-                existing_actor.uid == *mutation.insert_after_actor_uid;
-            });
-        if (insert_it == actors.end()) return false;
-        ++insert_it;
-    }
-
-    actors.insert(insert_it, std::move(actor));
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-
-    Actor *runtime_actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (runtime_actor == nullptr) return false;
-    for (const Actor::ComponentSpec &component_spec :
-         runtime_actor->component_specs) {
-        ComponentManager::InstantiateComponentForActor(runtime_actor->uid,
-                                                       component_spec);
-    }
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-    return true;
-}
-
-bool Engine::applyDeleteActorMutation( const SceneFormat::DeleteActorMutation &mutation) {
-    /*
-    Deletion is two-phase in the component system, so finalize immediately
-    before rebuilding lookup tables.
-    */
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-
-    ComponentManager::DestroyActor(actor);
-    ComponentManager::FinalizeFrameMutations();
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-    return true;
-}
-
-bool Engine::applySetActorNameMutation( const SceneFormat::SetActorNameMutation &mutation) {
-    /*
-    Renaming is structurally simple, but we still rebind so cached actor
-    references in subsystems see a consistent container state.
-    */
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-    if (mutation.actor_name.empty()) return false;
-    if (actor->actor_name == mutation.actor_name) return false;
-
-    actor->actor_name = mutation.actor_name;
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-    return true;
-}
-
-/*
-Apply one scene-backed reparent operation to the live runtime mirror.
-The actor keeps its previous world transform, and we rewrite the local
-Transform values afterward so the visual pose does not jump on screen.
-*/
-bool Engine::applySetActorParentMutation( const SceneFormat::SetActorParentMutation &mutation) {
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-
-    Actor *parent_actor = nullptr;
-    if (mutation.parent_uid.has_value()) {
-        parent_actor = findRuntimeActorByUID(*mutation.parent_uid);
-        if (parent_actor == nullptr) return false;
-        if (parent_actor->uid == actor->uid) return false;
-
-        /*
-        Runtime parenting still rejects cycles even though actors live in a
-        flat deque. We validate by walking the proposed parent's ancestors.
-        */
-        std::unordered_set<Actor::UID> visited_actor_uids;
-        const Actor *ancestor_actor = parent_actor;
-        while (ancestor_actor != nullptr) {
-            if (ancestor_actor->uid == actor->uid) return false;
-            if (!visited_actor_uids.insert(ancestor_actor->uid).second) {
-                return false;
-            }
-            if (ancestor_actor->parent_uid ==
-                SceneFormat::kInvalidSceneActorUID) {
-                break;
-            }
-            ancestor_actor = findRuntimeActorByUID(ancestor_actor->parent_uid);
-        }
-    }
-
-    const std::uint64_t current_parent_uid = actor->parent_uid;
-    const std::uint64_t new_parent_uid =
-        mutation.parent_uid.value_or(SceneFormat::kInvalidSceneActorUID);
-    if (current_parent_uid == new_parent_uid) return false;
-
-    float actor_world_x = 0.0f;
-    float actor_world_y = 0.0f;
-    float actor_world_rotation = 0.0f;
-    std::string transform_component_key;
-    const bool has_transform = ComponentManager::TryGetRuntimeTransformWorld(
-        actor->uid, actor_world_x, actor_world_y, actor_world_rotation,
-        &transform_component_key);
-
-    std::optional<float> parent_world_x;
-    std::optional<float> parent_world_y;
-    std::optional<float> parent_world_rotation;
-    if (has_transform && parent_actor != nullptr) {
-        float resolved_parent_world_x = 0.0f;
-        float resolved_parent_world_y = 0.0f;
-        float resolved_parent_world_rotation = 0.0f;
-        if (ComponentManager::TryGetRuntimeTransformWorld(
-                parent_actor->uid, resolved_parent_world_x,
-                resolved_parent_world_y, resolved_parent_world_rotation,
-                nullptr)) {
-            parent_world_x = resolved_parent_world_x;
-            parent_world_y = resolved_parent_world_y;
-            parent_world_rotation = resolved_parent_world_rotation;
-        }
-    }
-
-    actor->parent_uid = new_parent_uid;
-    invalidateRuntimePhysicsHierarchyCache();
-
-    if (has_transform) {
-        /*
-        Preserve the actor's visible pose by converting the old world pose into
-        a new local Transform under the just-updated parent chain.
-        */
-        float local_x = actor_world_x;
-        float local_y = actor_world_y;
-        float local_rotation = actor_world_rotation;
-        if (parent_world_x.has_value() && parent_world_y.has_value() &&
-            parent_world_rotation.has_value()) {
-            const float relative_world_x = actor_world_x - *parent_world_x;
-            const float relative_world_y = actor_world_y - *parent_world_y;
-            RotateClockwise(relative_world_x, relative_world_y,
-                            -*parent_world_rotation, local_x, local_y);
-            local_rotation = actor_world_rotation - *parent_world_rotation;
-        }
-
-        ComponentManager::SetRuntimeComponentPropertyValue(
-            actor->uid, transform_component_key, "x",
-            static_cast<double>(local_x));
-        ComponentManager::SetRuntimeComponentPropertyValue(
-            actor->uid, transform_component_key, "y",
-            static_cast<double>(local_y));
-        ComponentManager::SetRuntimeComponentPropertyValue(
-            actor->uid, transform_component_key, "rotation",
-            static_cast<double>(local_rotation));
-    }
-
-    return true;
-}
-
-bool Engine::applyAddComponentMutation( const SceneFormat::AddComponentMutation &mutation) {
-    /*
-    Component specs are the authoritative serialized form; append the spec,
-    instantiate the live component, then refresh actor/component bindings.
-    */
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-    if (mutation.component_spec.key.empty() || mutation.component_spec.type.empty()) {
-        return false;
-    }
-    if (SceneFormat::FindComponentSpec(actor->component_specs,
-                                       mutation.component_spec.key) != nullptr) {
-        return false;
-    }
-
-    actor->component_specs.emplace_back(mutation.component_spec);
-    SceneFormat::SortComponentSpecs(actor->component_specs);
-    ComponentManager::InstantiateComponentForActor(actor->uid,
-                                                   mutation.component_spec);
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-    return true;
-}
-
-bool Engine::applyDeleteComponentMutation( const SceneFormat::DeleteComponentMutation &mutation) {
-    /*
-    Remove from serialized specs and live runtime together so the mirrored
-    world stays aligned with what the editor believes exists.
-    */
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-
-    const Actor::ComponentSpec *component_spec =
-        SceneFormat::FindComponentSpec(actor->component_specs,
-                                       mutation.component_key);
-    if (component_spec == nullptr) return false;
-
-    const luabridge::LuaRef component_ref =
-        ComponentManager::GetComponentByKey(actor->uid, mutation.component_key);
-    if (component_ref.isNil()) return false;
-
-    actor->component_specs.erase(
-        std::remove_if(actor->component_specs.begin(), actor->component_specs.end(),
-                       [&](const Actor::ComponentSpec &component_spec_to_remove) {
-                           return component_spec_to_remove.key == mutation.component_key;
-                       }),
-        actor->component_specs.end());
-    ComponentManager::RemoveComponent(actor->uid, component_ref);
-    ComponentManager::FinalizeFrameMutations();
-    ComponentManager::BindActorsForScene(actors);
-    rebuildRuntimeActorUIDMap();
-    return true;
-}
-
-bool Engine::applyRenameComponentMutation( const SceneFormat::RenameComponentMutation &mutation) {
-    /*
-    Renaming updates both the serialized component key and the live component
-    registry entry used by scripting lookups.
-    */
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-    if (mutation.component_key.empty() || mutation.new_component_key.empty()) {
-        return false;
-    }
-    if (SceneFormat::FindComponentSpec(actor->component_specs,
-                                       mutation.new_component_key) != nullptr) {
-        return false;
-    }
-
-    Actor::ComponentSpec *component_spec =
-        SceneFormat::FindComponentSpec(actor->component_specs,
-                                       mutation.component_key);
-    if (component_spec == nullptr) return false;
-    component_spec->key = mutation.new_component_key;
-    SceneFormat::SortComponentSpecs(actor->component_specs);
-    if (!ComponentManager::RenameComponentKey(actor->uid, mutation.component_key,
-                                              mutation.new_component_key)) {
-        return false;
-    }
-    return true;
-}
-
-bool Engine::applySetComponentTypeMutation( const SceneFormat::SetComponentTypeMutation &mutation) {
-    /*
-    Changing type is effectively a remove+recreate operation because the old
-    instance layout/script binding is no longer valid.
-    */
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-    Actor::ComponentSpec *component_spec =
-        SceneFormat::FindComponentSpec(actor->component_specs,
-                                       mutation.component_key);
-    if (component_spec == nullptr) return false;
-    if (component_spec->type == mutation.type_name) return false;
-
-    const luabridge::LuaRef component_ref =
-        ComponentManager::GetComponentByKey(actor->uid, mutation.component_key);
-    if (component_ref.isNil()) return false;
-
-    ComponentManager::RemoveComponent(actor->uid, component_ref);
-    ComponentManager::FinalizeFrameMutations();
-    component_spec = SceneFormat::FindComponentSpec(actor->component_specs,
-                                                    mutation.component_key);
-    if (component_spec == nullptr) return false;
-    component_spec->type = mutation.type_name;
-    if (!rebuildRuntimeComponentFromSpec(*actor, mutation.component_key)) {
-        return false;
-    }
-    rebuildRuntimeActorUIDMap();
-    return true;
-}
-
-bool Engine::applySetComponentPropertyMutation( const SceneFormat::SetComponentPropertyMutation &mutation) {
-    /*
-    Prefer in-place property patching for generic script components. Builtin
-    components fall back to full reconstruction so native state stays synced.
-    */
-    Actor *actor = findRuntimeActorByUID(mutation.actor_uid);
-    if (actor == nullptr) return false;
-    Actor::ComponentSpec *component_spec =
-        SceneFormat::FindComponentSpec(actor->component_specs,
-                                       mutation.component_key);
-    if (component_spec == nullptr) return false;
-    SceneFormat::UpsertComponentProperty(*component_spec, mutation.property_name,
-                                         mutation.value);
-    if (component_spec->type == "Rigidbody" &&
-        (mutation.property_name == "enabled" ||
-         mutation.property_name == "body_type")) {
-        invalidateRuntimePhysicsHierarchyCache();
-    }
-    if ((!IsBuiltinRuntimeComponentType(component_spec->type) ||
-         CanBuiltinRuntimeComponentPatchInPlace(component_spec->type)) &&
-        ComponentManager::SetComponentPropertyValue(
-            actor->uid, mutation.component_key, mutation.property_name,
-            mutation.value)) {
-        return true;
-    }
-
-    const luabridge::LuaRef component_ref =
-        ComponentManager::GetComponentByKey(actor->uid, mutation.component_key);
-    if (component_ref.isNil()) return false;
-
-    ComponentManager::RemoveComponent(actor->uid, component_ref);
-    ComponentManager::FinalizeFrameMutations();
-    if (!rebuildRuntimeComponentFromSpec(*actor, mutation.component_key)) {
-        return false;
-    }
-    rebuildRuntimeActorUIDMap();
-    return true;
-}
-
-/*
-Rehydrate one live runtime component from the actor's serialized spec
-after a destructive edit such as type/property replacement.
-*/
-bool Engine::rebuildRuntimeComponentFromSpec(Actor &actor,
-                                             const std::string &component_key) {
-    const Actor::ComponentSpec *component_spec =
-        SceneFormat::FindComponentSpec(actor.component_specs, component_key);
-    if (component_spec == nullptr) return false;
-
-    ComponentManager::InstantiateComponentForActor(actor.uid, *component_spec);
-    ComponentManager::BindActorsForScene(actors);
-    return true;
 }
 
 /*

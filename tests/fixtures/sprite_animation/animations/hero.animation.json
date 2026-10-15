@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "image": "hero.png",
+  "columns": 5,
+  "rows": 1,
+  "tile_width_px": 16,
+  "tile_height_px": 16,
+  "clips": [
+    {
+      "name": "idle",
+      "loop": true,
+      "frames": [
+        {
+          "row": 1,
+          "column": 1,
+          "ticks": 4,
+          "event": "rest"
+        }
+      ]
+    },
+    {
+      "name": "walk",
+      "loop": true,
+      "frames": [
+        {
+          "row": 1,
+          "column": 2,
+          "ticks": 2,
+          "event": "left"
+        },
+        {
+          "row": 1,
+          "column": 3,
+          "ticks": 2,
+          "event": "right"
+        }
+      ]
+    },
+    {
+      "name": "attack",
+      "loop": false,
+      "frames": [
+        {
+          "row": 1,
+          "column": 4,
+          "ticks": 1,
+          "event": "swing"
+        },
+        {
+          "row": 1,
+          "column": 5,
+          "ticks": 2,
+          "event": "hit"
+        }
+      ]
+    }
+  ]
+}

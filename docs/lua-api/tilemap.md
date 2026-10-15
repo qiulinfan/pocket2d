@@ -1,0 +1,214 @@
+# Native Tilemap
+
+`Tilemap` 是原生组件。地图格子存放在独立资源中，不是单独的 Actor 或 Lua
+component。每个运行实例有自己的 cell 数据；引用同一资源的两个地图不会共享
+游戏中的种植、拆墙等修改。
+
+可运行示例见 [tilemap_farm fixture](../../tests/fixtures/tilemap_farm/)，其中
+[FarmLogic.lua](../../tests/fixtures/tilemap_farm/component_types/FarmLogic.lua)
+实现种植、生长和采收，[CollisionEditProbe.lua](../../tests/fixtures/tilemap_farm/component_types/CollisionEditProbe.lua)
+演示物理回调内排队修改。
+
+## 配置地图
+
+在 scene 或 actor template 中声明资源引用和 root Transform：
+
+```json
+{
+  "uid": 10,
+  "name": "terrain",
+  "components": {
+    "map": {
+      "type": "Tilemap",
+      "map_resource": "demo.tilemap.json",
+      "enabled": true
+    },
+    "transform": {"type": "Transform", "x": 0, "y": 0, "rotation": 0}
+  }
+}
+```
+
+`map_resource` 是相对于项目 `maps/` 的明确路径，文件名必须以
+`.tilemap.json` 结尾。它不使用递归同名搜索。资源及 atlas 路径不能为绝对路径、
+包含 `..` 或越出各自的资源目录。`atlas.image` 始终相对于项目 `images/`，
+不相对于地图所在子目录。
+
+一个 actor 最多有一个 Tilemap，必须没有 parent，world rotation 必须为 `0`，
+不能同时有 Rigidbody。其他 actor 上的 Rigidbody 可以与地图碰撞。当前支持平移，
+不支持旋转地图、自动拼接、流式加载、任意 polygon tile 或额外地图层。
+
+非空资源在场景组装时解析并校验，frame 0 就能读取初始格子。地图原点、世界范围
+和渲染缩放还必须能被引擎的浮点类型表达。无效资源不能通过静默截断或占位图片
+替代来完成地图载入。
+
+编辑器允许先添加尚未选择资源的空组件。空组件的 `width`、`height` 为 `0`，
+`GetCell` 返回 `nil`，`InBounds` 返回 `false`，不创建碰撞或绘制。Lua 没有
+`Tilemap()` 构造器，也没有用于加载资源的 `SetResource` 方法；在作者工具中配置
+资源，或实例化已经配置好资源的 actor template。
+
+## 资源格式
+
+下面的 2×2 地图需要 `images/tiles/demo.png`，图片尺寸必须恰好为 32×16：
+
+```json
+{
+  "version": 1,
+  "width": 2,
+  "height": 2,
+  "cell_size": 1.0,
+  "atlas": {
+    "image": "tiles/demo.png",
+    "columns": 2,
+    "rows": 1,
+    "tile_width_px": 16,
+    "tile_height_px": 16
+  },
+  "layers": {
+    "ground": {"sorting_order": -100, "cells": [1,1,1,1]},
+    "solid": {"sorting_order": 0, "cells": [0,0,2,0]}
+  }
+}
+```
+
+- `version` 仅支持整数 `1`；`width`、`height` 是 1..512 的整数；
+  `cell_size` 必须有限且大于零。
+- 仅支持 `ground`、`solid` 两层，每层恰好有 `width * height` 个整数。
+  JSON schema 拒绝缺字段、未知字段、重复字段、错误类型和非法编号。
+- 数组为 row-major，cell `(x,y)` 的零基索引是 `y * width + x`。
+  Lua 中如自行保存一个普通数组，同一位置的 Lua 数组索引要再加 `1`。
+- `0` 表示空格。非零 ID 从 `1` 到 `columns * rows`，按 atlas 从左到右、
+  从上到下排列。列号为 `((id-1) % columns) + 1`，行号为
+  `math.floor((id-1) / columns) + 1`。
+- atlas 的 grid 和 tile 像素尺寸必须为正整数，乘积不能溢出支持范围。
+  实际图片必须恰好满足 `width = columns * tile_width_px`、
+  `height = rows * tile_height_px`。
+- `ground` 非零 cell 只显示；`solid` 非零 cell 同时显示并产生实心碰撞。
+  ID 是否代表作物、成熟状态或材料，由玩法脚本决定。
+
+Tilemap 的 atlas grid 以地图 JSON 为准，不读取普通 SpriteRenderer 的
+`.pocketengine/spritesheets.json` 网格配置，也不自动改写它。tile 的世界宽高均为
+`cell_size`；例如 16 px 的 tile 配合 `cell_size=1`，占一整格世界单位，
+不会缩成 0.16 格。贴图使用 nearest 采样，允许透明像素；透明的 solid tile
+仍然产生整个 cell 的碰撞。
+
+## 获取组件与属性
+
+```lua
+local terrain = Actor.Find("terrain")
+local map = terrain:GetComponentByKey("map")
+-- 同一 actor 只允许一个 Tilemap，也可以用 GetComponent("Tilemap")。
+```
+
+| 属性 | 访问 | 含义 |
+| --- | --- | --- |
+| `map_resource` | 只读 | 配置的地图资源相对路径。 |
+| `width`, `height` | 只读 | 已加载地图的 cell 维度。 |
+| `cell_size` | 只读 | 每个正方形 cell 的世界边长。 |
+| `revision` | 只读 | 已提交的 cell 数据版本，与 `GetRevision()` 相同。 |
+| `enabled` | 读写 | 请求的启用状态；绘制和碰撞在提交点共同应用。 |
+| `actor`, `key` | 引擎管理 | 所属 actor handle 与组件 key；玩法脚本不要重新赋值。 |
+
+`enabled` 的读取反映当前请求值，不能在物理回调中据此断言碰撞已经切换。
+提交过程会快照该请求，并将同一个值应用到所有 chunk body 和绘制状态。
+如果 `EndContact` 回调又写入 `enabled`，新请求等下一次提交处理。
+
+禁用地图后，cell 仍可查询和修改；提交仍进行，只是不绘制且静态 body 停用。
+重新启用使用当前已提交的数据，不会重新载入磁盘资源。
+
+## Cell API
+
+坐标系为 world X 向右、Y 向下，origin 为 root Transform 的已提交世界位置。
+以下返回的 `Vector2` 是现有的原生类型，通过 `.x`、`.y` 读取。
+
+| 方法 | 返回与行为 |
+| --- | --- |
+| `WorldToCell(world_x, world_y)` | `Vector2(floor((world_x-origin_x)/cell_size), floor((world_y-origin_y)/cell_size))`，不 clamp。 |
+| `GetCellCenter(x, y)` | `Vector2(origin_x+(x+0.5)*cell_size, origin_y+(y+0.5)*cell_size)`，允许地图外整数坐标。 |
+| `InBounds(x, y)` | 坐标是否位于 `[0,width) × [0,height)`。 |
+| `GetCell(layer, x, y)` | 已提交的整数 ID；地图外返回 `nil`，地图内空格返回 `0`。 |
+| `SetCell(layer, x, y, id)` | 校验后排队。有效的新写入返回 `true`；地图外、无有效地图或值与已有待提交/当前值相同返回 `false`。 |
+| `GetRevision()` | 初始为 `0`；一次提交至少有一个最终 cell 值改变时加 `1`。 |
+
+`layer` 必须精确为 `"ground"` 或 `"solid"`。cell 坐标和 ID 必须是有限整数数值；
+Lua 的 `1.0` 可以接受，`1.2` 不会被截断。未知 layer、非法 ID、非整数坐标或
+不能表达的坐标转换会抛 Lua 错误，而不是悄悄 clamp。有效配置上的非法
+`SetCell` 不改变待提交队列。
+
+例如 origin=(-8,-8)、cell_size=1：
+
+```lua
+map:WorldToCell(-8, -8)       -- (0, 0)
+map:WorldToCell(-8.001, -8)   -- (-1, 0)
+map:WorldToCell(-7, -8)       -- (1, 0)
+map:GetCellCenter(8, 8)      -- (0.5, 0.5)
+```
+
+## 提交与生命周期
+
+`SetCell` 不会立即改变 `GetCell`。同一提交前多次写同一格，最后一次写入胜出。
+改回原值不会增加 revision；一次提交改 64 格也只增加一次 revision。
+平移和 enabled 切换本身不会增加 cell revision。
+
+正常 tick 顺序是待执行的 `OnStart` → `OnUpdate` → `OnLateUpdate` →
+延迟销毁处理 → Tilemap 提交 → Box2D Step。提交前排队的有效编辑，在该 tick
+的物理步和绘制中一起生效。
+碰撞/trigger 回调发生在物理步内，其中的编辑留到下一次提交；当前完成帧的
+`GetCell`、raycast、绘制仍使用旧的已提交格子。`observe` 不会主动 flush 编辑。
+
+Tilemap 的 Lua 绑定不暴露 `CommitPending`、`ReplaceAsset` 或地图磁盘保存方法。
+编辑器在冻结预览前
+使用同一个安全提交点应用作者修改，不推进 Lua gameplay 或 FrameClock。
+运行时修改不自动写回地图 JSON，scene 保存也不把当前 cell 数组嵌入 scene。
+作者工具的 **Save Map** 保存其独立作者副本，先成功写临时文件再替换目标。
+
+移除地图使用正常的延迟 API：
+
+```lua
+terrain:RemoveComponent(map) -- 保留 terrain actor
+-- 或 Actor.Destroy(terrain)
+```
+
+`OnStart`、`OnDestroy` 虽属于注册的生命周期入口，玩法脚本不应手工调用。
+在物理回调中直接调用 `Tilemap:OnDestroy()` 会明确报错并提示使用上述延迟 API，
+不会在 locked world 中删除 Box2D body。销毁会取消待提交编辑、移除碰撞并解除
+fixture metadata。
+
+缓存的过期 map 引用不能修改新地图：有效参数的 `GetCell` 返回 `nil`，
+`SetCell` 返回 `false`。同 UID 的新场景对象不会复用旧实例身份。
+`map.actor:IsValid()` 只检查 actor；组件可能已被单独移除，所以需要时重新通过
+`actor:GetComponentByKey(...)` 获取当前组件。旧引用的尺寸、revision 或数学
+坐标转换不是组件存活检查。
+
+## 最小玩法脚本
+
+这个组件对上面的 `terrain` 地图，在新按下 E 时切换一个 ground cell：
+
+```lua
+PaintTile = {
+    OnStart = function(self)
+        self.map = Actor.Find("terrain"):GetComponentByKey("map")
+    end,
+    OnUpdate = function(self)
+        if not Input.GetKeyDown("e") then return end
+        local before = self.map:GetCell("ground", 0, 0)
+        if before == nil then return end
+        local next_id = before == 1 and 2 or 1
+        if self.map:SetCell("ground", 0, 0, next_id) then
+            assert(self.map:GetCell("ground", 0, 0) == before)
+            -- 本 tick 的 pre-physics 提交后才能读到 next_id。
+        end
+    end
+}
+```
+
+内部 chunk 固定为 32×32。地图只重建实际变更 layer 的相关 CPU 绘制记录，solid
+变化另外重建该 chunk 的碰撞。每个含 solid cell 的 chunk 使用一个 static body，每一行
+连续非零 cell 合并为矩形 fixture；没有每 tile 的 actor、脚本或独立碰撞事件身份。
+raycast/contact 命中的是 owning actor。绘制请求先提交 ground，再提交 solid；
+最终显示顺序由各层的全局 `sorting_order` 决定，同序值保持提交顺序。
+当前没有额外 y-sort 或超出 cell 的图块。
+
+有界的 agent cell 查询见 [agent protocol](../development/agent-protocol.md#bounded-tilemap-observations)。
+格式和验收范围见 [Tilemap slice](../development/tilemap-slice.md)；真实用例见
+[native tests](../../tests/tilemap_test.cpp)、[runtime tests](../../tests/tilemap_runtime_test.cpp)
+和 [pixel readback tests](../../tests/tilemap_render_test.cpp)。

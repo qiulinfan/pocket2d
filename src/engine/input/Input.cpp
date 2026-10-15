@@ -13,9 +13,10 @@ std::vector<SDL_Scancode> Input::just_became_up_scancodes_ = {};
 std::unordered_map<SDL_Keycode, Input::INPUT_STATE, Input::SDLKeycodeHash> Input::keycode_states_ = {};
 std::vector<SDL_Keycode> Input::just_became_down_keycodes_ = {};
 std::vector<SDL_Keycode> Input::just_became_up_keycodes_ = {};
-std::array<bool, SDL_NUM_SCANCODES> Input::keyboard_held_snapshot_ = {};
+std::array<bool, SDL_SCANCODE_COUNT> Input::keyboard_held_snapshot_ = {};
 bool Input::keyboard_held_snapshot_valid_ = false;
 int Input::keyboard_held_snapshot_frame_ = -1;
+bool Input::external_input_enabled_ = false;
 std::array<bool, 4> Input::mouse_button_held_ = {};
 std::array<bool, 4> Input::mouse_button_down_ = {};
 std::array<bool, 4> Input::mouse_button_up_ = {};
@@ -31,7 +32,7 @@ std::string ToLowerASCII(std::string value) {
 }
 
 bool IsValidScancode(SDL_Scancode key) {
-    return key > SDL_SCANCODE_UNKNOWN && key < SDL_NUM_SCANCODES;
+    return key > SDL_SCANCODE_UNKNOWN && key < SDL_SCANCODE_COUNT;
 }
 
 bool IsValidKeycode(SDL_Keycode key) {
@@ -39,11 +40,11 @@ bool IsValidKeycode(SDL_Keycode key) {
 }
 
 SDL_Scancode ResolveKeyboardEventScancode(const SDL_KeyboardEvent &event) {
-    if (IsValidScancode(event.keysym.scancode)) {
-        return event.keysym.scancode;
+    if (IsValidScancode(event.scancode)) {
+        return event.scancode;
     }
 
-    const SDL_Scancode fallback = SDL_GetScancodeFromKey(event.keysym.sym);
+    const SDL_Scancode fallback = SDL_GetScancodeFromKey(event.key, nullptr);
     return IsValidScancode(fallback) ? fallback : SDL_SCANCODE_UNKNOWN;
 }
 
@@ -69,25 +70,25 @@ void LogKeyboardEvent(const SDL_KeyboardEvent &event, SDL_Scancode resolved_key)
     if (logged_events >= 80) return;
     ++logged_events;
 
-    const char *type = event.type == SDL_KEYDOWN ? "down" : "up";
+    const char *type = event.type == SDL_EVENT_KEY_DOWN ? "down" : "up";
     std::cout << "input: key " << type
-              << " scancode=" << static_cast<int>(event.keysym.scancode)
+              << " scancode=" << static_cast<int>(event.scancode)
               << " resolved=" << static_cast<int>(resolved_key)
               << " scancode_name=" << SDL_GetScancodeName(resolved_key)
-              << " keycode=" << event.keysym.sym
-              << " key_name=" << SDL_GetKeyName(event.keysym.sym)
+              << " keycode=" << event.key
+              << " key_name=" << SDL_GetKeyName(event.key)
               << " repeat=" << static_cast<int>(event.repeat) << std::endl;
 }
 
 void LogWindowFocusEvent(const SDL_WindowEvent &event) {
     if (!ShouldLogInputDiagnostics()) return;
-    if (event.event != SDL_WINDOWEVENT_FOCUS_GAINED &&
-        event.event != SDL_WINDOWEVENT_FOCUS_LOST) {
+    if (event.type != SDL_EVENT_WINDOW_FOCUS_GAINED &&
+        event.type != SDL_EVENT_WINDOW_FOCUS_LOST) {
         return;
     }
 
     const char *focus_state =
-        event.event == SDL_WINDOWEVENT_FOCUS_GAINED ? "gained" : "lost";
+        event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "gained" : "lost";
     std::cout << "input: window focus " << focus_state << std::endl;
 }
 } // namespace
@@ -95,8 +96,8 @@ void LogWindowFocusEvent(const SDL_WindowEvent &event) {
 // initialize input state caches
 void Input::Init() {
     keyboard_states_.clear();
-    keyboard_states_.reserve(SDL_NUM_SCANCODES);
-    for (int code = SDL_SCANCODE_UNKNOWN; code < SDL_NUM_SCANCODES; ++code) {
+    keyboard_states_.reserve(SDL_SCANCODE_COUNT);
+    for (int code = SDL_SCANCODE_UNKNOWN; code < SDL_SCANCODE_COUNT; ++code) {
         keyboard_states_[static_cast<SDL_Scancode>(code)] = INPUT_STATE_UP;
     }
     keycode_states_.clear();
@@ -115,6 +116,25 @@ void Input::Init() {
     mouse_scroll_delta_ = 0.0f;
 }
 
+void Input::SetExternalInputEnabled(bool enabled) {
+    if (external_input_enabled_ == enabled) return;
+    // Switching owners must not carry a physically held key into an agent turn.
+    ResetKeyboardStates();
+    mouse_button_held_.fill(false);
+    mouse_button_down_.fill(false);
+    mouse_button_up_.fill(false);
+    mouse_scroll_delta_ = 0.0f;
+    external_input_enabled_ = enabled;
+}
+
+void Input::ResetForSceneChange() {
+    if (external_input_enabled_) {
+        LateUpdate();
+    } else {
+        Init();
+    }
+}
+
 void Input::ResetKeyboardStates() {
     for (auto &entry : keyboard_states_) {
         entry.second = INPUT_STATE_UP;
@@ -130,14 +150,20 @@ void Input::ResetKeyboardStates() {
 }
 
 void Input::BeginFrame() {
+    if (external_input_enabled_) {
+        keyboard_held_snapshot_.fill(false);
+        keyboard_held_snapshot_valid_ = true;
+        keyboard_held_snapshot_frame_ = FrameClock::GetFrameNumber();
+        return;
+    }
     SDL_PumpEvents();
 
     keyboard_held_snapshot_.fill(false);
     int key_count = 0;
-    const Uint8 *keyboard_state = SDL_GetKeyboardState(&key_count);
+    const bool *keyboard_state = SDL_GetKeyboardState(&key_count);
     if (keyboard_state != nullptr) {
         const int snapshot_count =
-            std::min(key_count, static_cast<int>(SDL_NUM_SCANCODES));
+            std::min(key_count, static_cast<int>(SDL_SCANCODE_COUNT));
         for (int code = 0; code < snapshot_count; ++code) {
             keyboard_held_snapshot_[code] = keyboard_state[code] != 0;
         }
@@ -165,10 +191,10 @@ bool Input::IsKeycodeHeldInSnapshot(SDL_Keycode keycode) {
     if (!IsValidKeycode(keycode)) return false;
     EnsureKeyboardSnapshotForCurrentFrame();
 
-    for (int code = 0; code < SDL_NUM_SCANCODES; ++code) {
+    for (int code = 0; code < SDL_SCANCODE_COUNT; ++code) {
         if (!keyboard_held_snapshot_[code]) continue;
         const SDL_Scancode scancode = static_cast<SDL_Scancode>(code);
-        if (SDL_GetKeyFromScancode(scancode) == keycode) {
+        if (SDL_GetKeyFromScancode(scancode, SDL_KMOD_NONE, false) == keycode) {
             return true;
         }
     }
@@ -177,10 +203,10 @@ bool Input::IsKeycodeHeldInSnapshot(SDL_Keycode keycode) {
 
 // feed one SDL event into the input state machine
 void Input::ProcessEvent(const SDL_Event &event) {
-    if (event.type == SDL_KEYDOWN) {
+    if (event.type == SDL_EVENT_KEY_DOWN) {
         const SDL_Scancode key = ResolveKeyboardEventScancode(event.key);
         LogKeyboardEvent(event.key, key);
-        const SDL_Keycode keycode = event.key.keysym.sym;
+        const SDL_Keycode keycode = event.key.key;
 
         if (IsValidScancode(key)) {
             INPUT_STATE &state = keyboard_states_[key];
@@ -197,10 +223,10 @@ void Input::ProcessEvent(const SDL_Event &event) {
             }
         }
     } 
-    else if (event.type == SDL_KEYUP) {
+    else if (event.type == SDL_EVENT_KEY_UP) {
         const SDL_Scancode key = ResolveKeyboardEventScancode(event.key);
         LogKeyboardEvent(event.key, key);
-        const SDL_Keycode keycode = event.key.keysym.sym;
+        const SDL_Keycode keycode = event.key.key;
 
         if (IsValidScancode(key)) {
             INPUT_STATE &state = keyboard_states_[key];
@@ -213,11 +239,11 @@ void Input::ProcessEvent(const SDL_Event &event) {
             just_became_up_keycodes_.push_back(keycode);
         }
     } 
-    else if (event.type == SDL_MOUSEMOTION) {
+    else if (event.type == SDL_EVENT_MOUSE_MOTION) {
         mouse_position_.x = static_cast<float>(event.motion.x);
         mouse_position_.y = static_cast<float>(event.motion.y);
     } 
-    else if (event.type == SDL_MOUSEBUTTONDOWN) {
+    else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         const int button = static_cast<int>(event.button.button);
         mouse_position_.x = static_cast<float>(event.button.x);
         mouse_position_.y = static_cast<float>(event.button.y);
@@ -229,7 +255,7 @@ void Input::ProcessEvent(const SDL_Event &event) {
             mouse_button_held_[button] = true;
         }
     } 
-    else if (event.type == SDL_MOUSEBUTTONUP) {
+    else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         const int button = static_cast<int>(event.button.button);
         mouse_position_.x = static_cast<float>(event.button.x);
         mouse_position_.y = static_cast<float>(event.button.y);
@@ -241,13 +267,18 @@ void Input::ProcessEvent(const SDL_Event &event) {
             mouse_button_held_[button] = false;
         }
     } 
-    else if (event.type == SDL_MOUSEWHEEL) {
-        mouse_scroll_delta_ += event.wheel.preciseY;
+    else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+        mouse_scroll_delta_ += event.wheel.y;
     }
-    else if (event.type == SDL_WINDOWEVENT) {
+    else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
+             event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         LogWindowFocusEvent(event.window);
-        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+        if (event.window.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
             ResetKeyboardStates();
+            mouse_button_held_.fill(false);
+            mouse_button_down_.fill(false);
+            mouse_button_up_.fill(false);
+            mouse_scroll_delta_ = 0.0f;
         }
     }
 }
@@ -331,32 +362,32 @@ Input::KeyBinding Input::ParseKeyBinding(const std::string &keycode) {
         {"delete", {SDL_SCANCODE_DELETE, SDLK_DELETE}},
         {"insert", {SDL_SCANCODE_INSERT, SDLK_INSERT}},
         {"space", {SDL_SCANCODE_SPACE, SDLK_SPACE}},
-        {"a", {SDL_SCANCODE_A, SDLK_a}},
-        {"b", {SDL_SCANCODE_B, SDLK_b}},
-        {"c", {SDL_SCANCODE_C, SDLK_c}},
-        {"d", {SDL_SCANCODE_D, SDLK_d}},
-        {"e", {SDL_SCANCODE_E, SDLK_e}},
-        {"f", {SDL_SCANCODE_F, SDLK_f}},
-        {"g", {SDL_SCANCODE_G, SDLK_g}},
-        {"h", {SDL_SCANCODE_H, SDLK_h}},
-        {"i", {SDL_SCANCODE_I, SDLK_i}},
-        {"j", {SDL_SCANCODE_J, SDLK_j}},
-        {"k", {SDL_SCANCODE_K, SDLK_k}},
-        {"l", {SDL_SCANCODE_L, SDLK_l}},
-        {"m", {SDL_SCANCODE_M, SDLK_m}},
-        {"n", {SDL_SCANCODE_N, SDLK_n}},
-        {"o", {SDL_SCANCODE_O, SDLK_o}},
-        {"p", {SDL_SCANCODE_P, SDLK_p}},
-        {"q", {SDL_SCANCODE_Q, SDLK_q}},
-        {"r", {SDL_SCANCODE_R, SDLK_r}},
-        {"s", {SDL_SCANCODE_S, SDLK_s}},
-        {"t", {SDL_SCANCODE_T, SDLK_t}},
-        {"u", {SDL_SCANCODE_U, SDLK_u}},
-        {"v", {SDL_SCANCODE_V, SDLK_v}},
-        {"w", {SDL_SCANCODE_W, SDLK_w}},
-        {"x", {SDL_SCANCODE_X, SDLK_x}},
-        {"y", {SDL_SCANCODE_Y, SDLK_y}},
-        {"z", {SDL_SCANCODE_Z, SDLK_z}},
+        {"a", {SDL_SCANCODE_A, SDLK_A}},
+        {"b", {SDL_SCANCODE_B, SDLK_B}},
+        {"c", {SDL_SCANCODE_C, SDLK_C}},
+        {"d", {SDL_SCANCODE_D, SDLK_D}},
+        {"e", {SDL_SCANCODE_E, SDLK_E}},
+        {"f", {SDL_SCANCODE_F, SDLK_F}},
+        {"g", {SDL_SCANCODE_G, SDLK_G}},
+        {"h", {SDL_SCANCODE_H, SDLK_H}},
+        {"i", {SDL_SCANCODE_I, SDLK_I}},
+        {"j", {SDL_SCANCODE_J, SDLK_J}},
+        {"k", {SDL_SCANCODE_K, SDLK_K}},
+        {"l", {SDL_SCANCODE_L, SDLK_L}},
+        {"m", {SDL_SCANCODE_M, SDLK_M}},
+        {"n", {SDL_SCANCODE_N, SDLK_N}},
+        {"o", {SDL_SCANCODE_O, SDLK_O}},
+        {"p", {SDL_SCANCODE_P, SDLK_P}},
+        {"q", {SDL_SCANCODE_Q, SDLK_Q}},
+        {"r", {SDL_SCANCODE_R, SDLK_R}},
+        {"s", {SDL_SCANCODE_S, SDLK_S}},
+        {"t", {SDL_SCANCODE_T, SDLK_T}},
+        {"u", {SDL_SCANCODE_U, SDLK_U}},
+        {"v", {SDL_SCANCODE_V, SDLK_V}},
+        {"w", {SDL_SCANCODE_W, SDLK_W}},
+        {"x", {SDL_SCANCODE_X, SDLK_X}},
+        {"y", {SDL_SCANCODE_Y, SDLK_Y}},
+        {"z", {SDL_SCANCODE_Z, SDLK_Z}},
         {"0", {SDL_SCANCODE_0, SDLK_0}},
         {"1", {SDL_SCANCODE_1, SDLK_1}},
         {"2", {SDL_SCANCODE_2, SDLK_2}},
@@ -376,7 +407,7 @@ Input::KeyBinding Input::ParseKeyBinding(const std::string &keycode) {
         {"[", {SDL_SCANCODE_LEFTBRACKET, SDLK_LEFTBRACKET}},
         {"]", {SDL_SCANCODE_RIGHTBRACKET, SDLK_RIGHTBRACKET}},
         {"\\", {SDL_SCANCODE_BACKSLASH, SDLK_BACKSLASH}},
-        {"'", {SDL_SCANCODE_APOSTROPHE, SDLK_QUOTE}}
+        {"'", {SDL_SCANCODE_APOSTROPHE, SDLK_APOSTROPHE}}
     };
 
     const std::string normalized = ToLowerASCII(keycode);
@@ -398,7 +429,7 @@ Input::KeyBinding Input::ParseKeyBinding(const std::string &keycode) {
     }
     if (!IsValidScancode(binding.scancode) &&
         IsValidKeycode(binding.keycode)) {
-        binding.scancode = SDL_GetScancodeFromKey(binding.keycode);
+        binding.scancode = SDL_GetScancodeFromKey(binding.keycode, nullptr);
     }
     return binding;
 }
@@ -467,10 +498,10 @@ float Input::GetMouseScrollDelta() {
 }
 
 void Input::HideCursor() {
-    SDL_ShowCursor(SDL_DISABLE);
+    SDL_HideCursor();
 }
 
 
 void Input::ShowCursor() {
-    SDL_ShowCursor(SDL_ENABLE);
+    SDL_ShowCursor();
 }

@@ -4,9 +4,10 @@
 #include "physics/Collision.h"
 #include "scene/Actor.h"
 #include "lua.hpp"
+#include "scripting/LuaBoundary.h"
 #include "LuaBridge/LuaBridge.h"
 #include <cstdint>
-#include <deque>
+#include <list>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -91,6 +92,16 @@ struct RuntimeState {
     lua_State *lua_state = nullptr;
     // component type registry：type 名 -> component type table (blueprint)
     std::unordered_map<std::string, luabridge::LuaRef> component_type_tables;
+    std::unordered_map<std::string, std::string> component_type_sources;
+    // Every successfully loaded canonical source survives variant switches
+    // until explicit reload replaces it or the project VM is shut down.
+    std::unordered_map<std::string, luabridge::LuaRef> component_source_cache;
+    std::unordered_map<std::string, std::string> component_source_owners;
+    // Snapshot of host/stdlib _G keys before trusted project bootstrap.
+    std::unordered_set<std::string> reserved_component_type_names;
+    bool component_types_bootstrapped = false;
+    unsigned scene_script_gc_guards = 0;
+    bool scene_script_gc_was_running = false;
     // actor_uid -> component instance tables of the actor
     std::unordered_map<Actor::UID, std::vector<std::unique_ptr<ComponentRecord>>>
         actor_components;
@@ -114,10 +125,11 @@ struct RuntimeState {
     std::unordered_map<std::string, std::vector<Actor *>> actors_by_name;
     // actor_uid -> current scene-order index among active actors
     std::unordered_map<Actor::UID, size_t> actor_order_by_uid;
+    size_t next_actor_order = 0;
     // ordered actor uid vec (not distroyed yet)
     std::vector<Actor::UID> actor_uids_sorted;
     // ptr to the actor container of current scene (stored by Engine)
-    std::deque<Actor> *scene_actors = nullptr;
+    std::list<Actor> *scene_actors = nullptr;
     // 本帧新建的 actors (finable, 但是到下一帧才进入生命周期迭代)
     std::vector<Actor::UID> pending_actor_uids_to_activate;
     // 本帧请求销毁的 actors, 帧末统一处理
@@ -129,6 +141,11 @@ struct RuntimeState {
 };
 
 extern RuntimeState g_runtime;
+
+// Owner-thread nested GC pause shared by scene plans and detached component
+// tokens. Release all owned LuaRefs before Resume; never outlive Lua Shutdown.
+void PauseScenePreparationGC(lua_State *state);
+void ResumeScenePreparationGC(lua_State *state) noexcept;
 
 bool IsBuiltinComponentType(const std::string &type_name);
 
@@ -145,7 +162,10 @@ void EstablishInheritance(luabridge::LuaRef &instance_table,
 // Component type loading
 // -----------------------------------------------------------------------------
 
-void LoadComponentTypes();
+void LogComponentTypeWarningOnce(const std::string &key, const std::string &message);
+luabridge::LuaRef CloneComponentDefaults(const luabridge::LuaRef &prototype,
+                                        const std::string &type_name,
+                                        const luabridge::LuaRef *retained_instance = nullptr);
 
 // Apply scene/template/runtime overrides after construction but before any
 // lifecycle method runs.
@@ -170,6 +190,13 @@ bool CompareLifecycleComponentRef(const LifecycleComponentRef &a,
                                   const LifecycleComponentRef &b);
 void RebuildLifecycleListsForDirtyActors(
     const std::unordered_set<Actor::UID> &dirty_actor_uids);
+// Metamethods are user code: protect the complete lookup and restore the caller's
+// stack on both success and failure. Callers still revalidate component identity.
+luabridge::LuaRef ProtectedField(const luabridge::LuaRef &object, const char *name);
+void ProtectedSetField(const luabridge::LuaRef &object, const char *name,
+                       const luabridge::LuaRef &value);
+void SetSystemField(const luabridge::LuaRef &object, const char *name,
+                    const luabridge::LuaRef &value);
 bool IsComponentEnabled(const ComponentRecord &component);
 void SyncBuiltinParticleSystemState(ComponentRecord &component);
 // Keep component order deterministic for all key-based lifecycle rules.
@@ -192,9 +219,9 @@ bool IsComponentRefAlive(const luabridge::LuaRef &component_ref,
 
 std::string GetActorNameByUID(Actor::UID actor_uid);
 void ReportError(const std::string &actor_name,
-                 const luabridge::LuaException &e);
+                 const LuaBoundary::Error &e);
 void ReportEventBusError(Actor::UID actor_uid,
-                         const luabridge::LuaException &e);
+                         const LuaBoundary::Error &e);
 void RunComponentOnDestroyIfNeeded(ComponentRecord &component,
                                    Actor::UID actor_uid);
 

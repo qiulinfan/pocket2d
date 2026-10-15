@@ -1,3 +1,4 @@
+#include <stdexcept>
 #include "scene/Scene.h"
 #include "scene/Actor.h"
 #include "shared/scene_format/SceneFormat.h"
@@ -24,37 +25,10 @@ const std::filesystem::path &Scene::GetActiveSceneSubdirectory() {
 
 // load actors from <project-root>/scenes/<scene_name>.scene
 std::vector<Actor> Scene::LoadScene(const std::string &scene_name) {
-    std::vector<Actor> actors;
-
-    const SceneFormat::SceneAsset scene_asset =
-        SceneFormat::LoadSceneAsset(scene_name, Scene::GetActiveSceneSubdirectory());
-    if (scene_asset.scene_path.empty()) {
-        std::cout << "error: scene " << scene_name << " is missing";
-        exit(0);
-    }
-
-    // Runtime keeps the active scene subdirectory in sync so later resource
-    // lookups prefer files that live next to the active scene.
-    SetActiveSceneSubdirectory(scene_asset.scene_subdirectory);
-    ComponentManager::ReloadComponentTypes();
-
-    actors.reserve(scene_asset.actors.size());
-    for (const SceneFormat::ActorRecord &actor_record : scene_asset.actors) {
-        Actor actor;
-        if (!actor_record.template_name.empty()) {
-            actor = Actor::LoadTemplate(actor_record.template_name);
-        }
-        actor = SceneFormat::ApplyActorRecordToActor(std::move(actor), actor_record);
-
-        if (!actor.component_specs.empty()) {
-            // Lifecycle requirement: process components by key lexical order.
-            for (const Actor::ComponentSpec &component_spec : actor.component_specs) {
-                ComponentManager::InstantiateComponentForActor(actor.uid,
-                                                               component_spec);
-            }
-        }
-
-        actors.emplace_back(std::move(actor));
-    }
-    return actors;
+    const auto asset = SceneFormat::LoadSceneAsset(scene_name,GetActiveSceneSubdirectory());
+    std::string error;
+    if (!SceneFormat::ValidateSceneAssetForRuntime(asset,&error)) throw std::runtime_error(error);
+    // Data-only loading cannot execute component scripts, bind instances, or
+    // change the current world's resource preference. Engine owns transitions.
+    return SceneFormat::BuildRuntimeActors(asset);
 }

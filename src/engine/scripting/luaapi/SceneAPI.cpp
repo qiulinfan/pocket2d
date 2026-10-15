@@ -1,6 +1,6 @@
 #include "RegistrationDetail.h"
 #include "core/Engine.h"
-#include "scene/Actor.h"
+#include "scene/ActorHandle.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include <string>
@@ -20,9 +20,9 @@ std::string CppSceneGetCurrent() {
     return g_engine->GetCurrentSceneName();
 }
 
-void CppSceneDontDestroy(Actor *actor) {
-    if (g_engine == nullptr) return;
-    g_engine->MarkActorDontDestroy(actor);
+void CppSceneDontDestroy(const ActorHandle *actor) {
+    if (g_engine == nullptr || actor == nullptr) return;
+    g_engine->MarkActorDontDestroy(actor->Resolve());
 }
 
 void InjectSceneAPI() {

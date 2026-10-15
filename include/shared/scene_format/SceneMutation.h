@@ -73,6 +73,10 @@ struct SceneMutation {
 
 struct SceneEditCommand {
     std::vector<SceneMutation> mutations;
+    // Transient acknowledgment for a coordinator-handled document command.
+    // Not serialized or trusted by Engine; delivered payloads are immutable.
+    // ApplyEditCommand clears it when explicitly applying/replaying a command.
+    mutable std::uint64_t coordinator_receipt = 0;
 
     bool empty() const { return mutations.empty(); }
 

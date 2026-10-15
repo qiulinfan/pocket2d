@@ -11,16 +11,17 @@ RELEASE_PRESET ?= unix-makefiles-release
 SITE_BUILD_DIR := .site
 
 DEBUG_BUILD_DIR := build/$(DEBUG_PRESET)
-RUNTIME_BIN := $(DEBUG_BUILD_DIR)/game_engine_linux
-EDITOR_BIN := $(DEBUG_BUILD_DIR)/game_editor_linux
-ROOT_RUNTIME_BIN := game_engine_linux
-ROOT_EDITOR_BIN := game_editor_linux
+RUNTIME_BIN := $(DEBUG_BUILD_DIR)/game
+EDITOR_BIN := $(DEBUG_BUILD_DIR)/pocket
+ROOT_RUNTIME_BIN := game
+ROOT_EDITOR_BIN := pocket
 
 .DEFAULT_GOAL := engine
 
 .PHONY: help configure build configure-release build-release
 .PHONY: stage-runtime stage-editor
 .PHONY: engine editor run run-editor compile-commands
+.PHONY: test
 .PHONY: docs-build docs-serve site-build docs
 .PHONY: clean clean-all
 
@@ -51,6 +52,9 @@ run: engine
 
 run-editor: editor
 	./$(ROOT_EDITOR_BIN)
+
+test: build
+	ctest --test-dir $(DEBUG_BUILD_DIR) --output-on-failure
 
 compile-commands: configure
 	cp $(DEBUG_BUILD_DIR)/compile_commands.json ./compile_commands.json

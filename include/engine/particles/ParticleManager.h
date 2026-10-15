@@ -2,12 +2,14 @@
 #define PARTICLEMANAGER_H
 
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 struct SDL_Renderer;
+class TaskExecutor;
 
 struct ParticleEmitterConfig;
 
@@ -62,6 +64,13 @@ struct ParticleSpawnRequest {
 
 class ParticleManager {
 public:
+    static constexpr size_t kMaxParticlesPerEmitter = 1000000;
+    static void ValidateEmitterConfig(const ParticleEmitterConfig &config);
+    static void ValidateParticle(const ParticleEmitterConfig &config, const ParticleSpawnRequest &request);
+    static void ValidateSpawnRequest(int emitter_id, const ParticleSpawnRequest &request);
+    static void RequireSpawnCapacity(int emitter_id, size_t count);
+    static void ReserveSpawnCapacity(int emitter_id, size_t count);
+
     // emitter lifecycle
     // emitter 生命周期
     static int CreateEmitter();
@@ -76,6 +85,12 @@ public:
     // 生成, 更新, 排队, 渲染
     static void SpawnParticle(int emitter_id, const ParticleSpawnRequest &request);
     static void Update(float dt);
+    // An explicit executor allows hosts/tests to choose serial or worker execution.
+    static void Update(float dt, TaskExecutor *executor);
+    static size_t GetActiveParticleCount(int emitter_id);
+    // Read-only diagnostic state; returns false for an inactive/missing slot.
+    static bool GetParticleState(int emitter_id, size_t index,
+                                 ParticleSpawnRequest &state);
     static void QueueRenderBatches();
     static void RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
                                    float camera_x, float camera_y,
@@ -90,7 +105,6 @@ private:
         bool active = false;
         bool runtime_enabled = true;
         ParticleEmitterConfig config;
-        int frame_number = 0;
 
         // particle SoA storage for transform and motion
         // 粒子的 SoA 形式位置, 速度, 缩放, 旋转存储
@@ -124,7 +138,7 @@ private:
 
         // per-particle lifetime bookkeeping and free-list reuse
         // 粒子生命周期记录和空闲索引复用
-        std::vector<int> start_frame;
+        std::vector<std::uint32_t> ages;
         std::vector<int> is_active;
         std::deque<int> free_list;
         size_t active_count = 0;

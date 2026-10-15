@@ -21,8 +21,9 @@ class EditorSceneSession {
 public:
     // Load the scene declared by game.config into the editor-owned cache.
     // 从 game.config 指定的场景加载 editor 持有的缓存.
-    void LoadInitialScene(const Engine &engine);
-    // Switch to another scene by .scene file path from the Project panel.
+    void LoadInitialScene(Engine &engine);
+    // Stage the selected document/runtime before replacing authoring/play state.
+    // Rejected targets preserve the prior document, dirty draft and pause state.
     bool OpenSceneFromPath(const std::filesystem::path &scene_path,
                            Engine &engine);
     // Report whether the editor currently has a scene document open.
@@ -44,15 +45,19 @@ public:
     // Rebuild runtime from the editor cache when the mirror is stale.
     // 当运行时镜像过期时, 用 editor 缓存重建 runtime.
     void SyncRuntimeMirrorIfDirty(Engine &engine);
+    bool IsRuntimeMirrorPending() const { return runtime_scene_dirty_; }
+    const std::string &GetLastEditError() const { return last_edit_error_; }
+    void RetryRuntimeMirror();
+    void ClearEditError() { if (!runtime_scene_dirty_) last_edit_error_.clear(); }
     // Start/stop play mode. Play mode runs runtime from a snapshot copy so
     // editor-side scene cache remains stable for later restoration.
     // 启动/停止 Play 模式: 运行时使用快照副本, editor 侧缓存保持稳定.
     bool EnterPlayMode(Engine &engine);
     bool ExitPlayMode(Engine &engine);
     bool TogglePlayPause();
-    void HandleSceneEditCommand(const SceneFormat::SceneEditCommand &command,
+    bool HandleSceneEditCommand(const SceneFormat::SceneEditCommand &command,
                                 Engine &engine);
-    void HandleSceneEditCommands(
+    bool HandleSceneEditCommands(
         const std::vector<SceneFormat::SceneEditCommand> &commands,
         Engine &engine);
     // Called when the editor is closing: persist only editor document cache.
@@ -67,6 +72,9 @@ public:
     bool IsSceneSaveEnabled() const;
 
 private:
+    void BindDocumentHooks(Engine &engine, bool new_epoch = false);
+    bool CommitDocumentCandidate(bool authoring, const SceneDocument &candidate,
+                                 const SceneFormat::SceneEditCommand &command);
     SceneDocument &GetActiveSceneDocument();
     const SceneDocument &GetActiveSceneDocument() const;
 
@@ -81,6 +89,11 @@ private:
     bool play_mode_active_ = false;
     bool play_mode_paused_ = false;
     bool edit_mode_live_preview_enabled_ = false;
+    Engine *bound_engine_ = nullptr;
+    std::uint64_t coordinator_epoch_ = 0;
+    std::uint64_t mirror_revision_ = 0;
+    std::uint64_t attempted_revision_ = ~std::uint64_t{0};
+    std::string last_edit_error_;
 };
 
 #endif

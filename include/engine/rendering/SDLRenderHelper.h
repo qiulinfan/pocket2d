@@ -4,7 +4,7 @@
 #include "core/FrameClock.h"
 #include "input/SDLEventHelper.h"
 #include "scene/Actor.h"
-#include "SDL2/SDL.h"
+#include "SDL3/SDL.h"
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -24,14 +24,13 @@ public:
 
     inline static std::string frame_directory_relative_path = "frames";
 
-    static SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w,
-                                        int h, Uint32 flags) {
-        return ::SDL_CreateWindow(title, x, y, w, h, flags);
+    static SDL_Window *SDL_CreateWindow(const char *title, int w, int h,
+                                        SDL_WindowFlags flags) {
+        return ::SDL_CreateWindow(title, w, h, flags);
     }
 
-    static SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index,
-                                            Uint32 flags) {
-        SDL_Renderer *renderer = ::SDL_CreateRenderer(window, index, flags);
+    static SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, const char *name) {
+        SDL_Renderer *renderer = ::SDL_CreateRenderer(window, name);
         if (renderer == nullptr) {
             std::cerr << "Failed to create renderer : " << SDL_GetError()
                       << std::endl;
@@ -39,83 +38,40 @@ public:
         return renderer;
     }
 
-    // Present wrapper that maintains frame pacing, and optionally advances the
-    // gameplay frame counter for simulation frames.
+    // Presentation maintains host pacing. Engine simulation owns frame advance.
     static void SDL_RenderPresent(SDL_Renderer *renderer,
                                   bool advance_gameplay_frame = true) {
+        (void)advance_gameplay_frame;
         if (renderer == nullptr) {
             std::cout << "ERROR : renderer passed to SDL_RenderPresent is null."
                       << std::endl;
-            std::exit(0);
-        }
-
-        if (!SDLEventHelper::HasInitializedPolling()) {
-            std::cout << "ERROR : call SDL_PollEvent before SDL_RenderPresent."
-                      << std::endl;
-            std::exit(0);
+            return;
         }
 
         CaptureFrameIfRecordingEnabled(renderer);
         ::SDL_RenderPresent(renderer);
-        // VSync-backed renderers already block to the monitor refresh cadence.
-        // Applying an extra SDL_Delay on top of that can create uneven frame
-        // pacing that looks like visible hitching despite a healthy average FPS.
-        if (!RendererUsesPresentVSync(renderer)) {
-            FrameClock::DelayToMaintain60FPS();
-        } else {
-            FrameClock::EnsureInitialized();
-            FrameClock::current_frame_start_timestamp = SDL_GetTicks();
-        }
-        if (advance_gameplay_frame) {
-            FrameClock::AdvanceFrame();
-        }
+        // Count time already spent presenting toward the deadline. VSync alone
+        // is insufficient on high-refresh displays: one 1/60 simulation tick
+        // per 120 Hz present would otherwise run gameplay twice as fast.
+        FrameClock::DelayToMaintain60FPS();
     }
 
-    static void SDL_RenderCopyEx(Actor::UID actor_uid,
+    static void SDL_RenderTextureRotated(Actor::UID actor_uid,
                                  const std::string &actor_name,
                                  SDL_Renderer *renderer, SDL_Texture *texture,
                                  const SDL_FRect *srcrect,
                                  const SDL_FRect *dstrect, float angle,
                                  const SDL_FPoint *center,
-                                 SDL_RendererFlip flip) {
-        SDL_Rect *srcrect_i_ptr = nullptr;
-        SDL_Rect *dstrect_i_ptr = nullptr;
-        SDL_Point *center_i_ptr = nullptr;
-
-        SDL_Rect srcrect_i;
-        SDL_Rect dstrect_i;
-        SDL_Point center_i;
-
-        if (srcrect != nullptr) {
-            srcrect_i = {static_cast<int>(srcrect->x),
-                         static_cast<int>(srcrect->y),
-                         static_cast<int>(srcrect->w),
-                         static_cast<int>(srcrect->h)};
-            srcrect_i_ptr = &srcrect_i;
-        }
-
-        if (dstrect != nullptr) {
-            dstrect_i = {static_cast<int>(dstrect->x),
-                         static_cast<int>(dstrect->y),
-                         static_cast<int>(dstrect->w),
-                         static_cast<int>(dstrect->h)};
-            dstrect_i_ptr = &dstrect_i;
-        }
-
-        if (center != nullptr) {
-            center_i = {static_cast<int>(center->x), static_cast<int>(center->y)};
-            center_i_ptr = &center_i;
-        }
-
-        ::SDL_RenderCopyEx(renderer, texture, srcrect_i_ptr, dstrect_i_ptr, angle,
-                           center_i_ptr, flip);
+                                 SDL_FlipMode flip) {
+        ::SDL_RenderTextureRotated(renderer, texture, srcrect, dstrect, angle,
+                                   center, flip);
 
         CheckForRenderLoggerInit();
         if (render_logger_mode_ != RenderLoggerStatus::Enabled) return;
 
         float x_scale = 1.0f;
         float y_scale = 1.0f;
-        SDL_RenderGetScale(renderer, &x_scale, &y_scale);
+        SDL_GetRenderScale(renderer, &x_scale, &y_scale);
 
         render_logging_file_ << FrameClock::GetFrameNumber() << ":" << actor_uid
                              << ":" << actor_name;
@@ -131,59 +87,25 @@ public:
                              << " " << y_scale << std::endl;
     }
 
-    static void SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
+    static void SDL_RenderTexture(SDL_Renderer *renderer, SDL_Texture *texture,
                                const SDL_FRect *srcrect,
                                const SDL_FRect *dstrect) {
-        SDL_Rect *srcrect_i_ptr = nullptr;
-        SDL_Rect *dstrect_i_ptr = nullptr;
-        SDL_Rect srcrect_i;
-        SDL_Rect dstrect_i;
-
-        if (srcrect != nullptr) {
-            srcrect_i = {static_cast<int>(srcrect->x),
-                         static_cast<int>(srcrect->y),
-                         static_cast<int>(srcrect->w),
-                         static_cast<int>(srcrect->h)};
-            srcrect_i_ptr = &srcrect_i;
-        }
-
-        if (dstrect != nullptr) {
-            dstrect_i = {static_cast<int>(dstrect->x),
-                         static_cast<int>(dstrect->y),
-                         static_cast<int>(dstrect->w),
-                         static_cast<int>(dstrect->h)};
-            dstrect_i_ptr = &dstrect_i;
-        }
-
-        ::SDL_RenderCopy(renderer, texture, srcrect_i_ptr, dstrect_i_ptr);
+        ::SDL_RenderTexture(renderer, texture, srcrect, dstrect);
     }
 
-    static void SDL_QueryTexture(SDL_Texture *texture, float *w, float *h) {
-        if (texture == nullptr) return;
+    static void SDL_GetTextureSize(SDL_Texture *texture, float *w, float *h) {
+        if (texture != nullptr) ::SDL_GetTextureSize(texture, w, h);
+    }
 
-        int w_i = 0;
-        int h_i = 0;
-        ::SDL_QueryTexture(texture, nullptr, nullptr, &w_i, &h_i);
-
-        if (w != nullptr) *w = static_cast<float>(w_i);
-        if (h != nullptr) *h = static_cast<float>(h_i);
+    static void Reset() {
+        render_logging_file_.close();
+        render_logging_file_.clear();
+        render_logger_mode_ = RenderLoggerStatus::NotInitialized;
     }
 
 private:
 inline static RenderLoggerStatus render_logger_mode_ = RenderLoggerStatus::NotInitialized;
     inline static std::ofstream render_logging_file_;
-    inline static bool frame_capture_initialized_ = false;
-    inline static SDL_Surface *frame_capture_surface_ = nullptr;
-
-    static bool RendererUsesPresentVSync(SDL_Renderer *renderer) {
-        if (renderer == nullptr) return false;
-
-        SDL_RendererInfo info;
-        if (SDL_GetRendererInfo(renderer, &info) != 0) {
-            return false;
-        }
-        return (info.flags & SDL_RENDERER_PRESENTVSYNC) != 0;
-    }
 
     static bool IsEnvVariableSet(const char *name) {
         const char *value = std::getenv(name);
@@ -209,7 +131,7 @@ inline static RenderLoggerStatus render_logger_mode_ = RenderLoggerStatus::NotIn
 
         render_logging_file_ << "== RENDER LOGGER ==" << std::endl;
         render_logging_file_
-            << "Study SDL_RenderCopyEx() calls for render debugging."
+            << "Study SDL_RenderTextureRotated() calls for render debugging."
             << std::endl;
         render_logging_file_ << "Enable with RENDERLOGGER env var." << std::endl;
         render_logging_file_ << "frame:actor_uid:actor_name" << std::endl
@@ -219,34 +141,21 @@ inline static RenderLoggerStatus render_logger_mode_ = RenderLoggerStatus::NotIn
     static void CaptureFrameIfRecordingEnabled(SDL_Renderer *renderer) {
         if (!SDLEventHelper::RECORDING_MODE) return;
 
-        if (!frame_capture_initialized_) {
-            if (!std::filesystem::exists(frame_directory_relative_path)) {
-                std::filesystem::create_directory(frame_directory_relative_path);
-            }
-
-            int width = 0;
-            int height = 0;
-            SDL_GetRendererOutputSize(renderer, &width, &height);
-            frame_capture_surface_ = SDL_CreateRGBSurfaceWithFormat( 0, width, height, 24, SDL_PIXELFORMAT_RGB24);
-            FrameClock::Reset();
-            frame_capture_initialized_ = true;
-        }
-
-        if (frame_capture_surface_ == nullptr) return;
-        if (SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_RGB24,
-                                 frame_capture_surface_->pixels,
-                                 frame_capture_surface_->pitch) != 0) {
+        std::filesystem::create_directories(frame_directory_relative_path);
+        SDL_Surface *surface = SDL_RenderReadPixels(renderer, nullptr);
+        if (surface == nullptr) {
             SDL_Log("SDL_RenderReadPixels() failed: %s", SDL_GetError());
             return;
         }
-
         std::stringstream filename_stream;
         filename_stream << "frame_" << std::setw(5) << std::setfill('0')
                         << FrameClock::GetFrameNumber() << ".bmp";
-                        const std::string output_file_path = frame_directory_relative_path + "/" + filename_stream.str();
-        if (SDL_SaveBMP(frame_capture_surface_, output_file_path.c_str()) != 0) {
+        const std::string output_file_path =
+            frame_directory_relative_path + "/" + filename_stream.str();
+        if (!SDL_SaveBMP(surface, output_file_path.c_str())) {
             SDL_Log("SDL_SaveBMP() failed: %s", SDL_GetError());
         }
+        SDL_DestroySurface(surface);
     }
 };
 

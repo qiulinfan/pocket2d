@@ -500,6 +500,8 @@ bool RenderHierarchyPanel(Engine &engine, SceneDocument &scene_document,
         ImGui::End();
         return false;
     }
+    if (!engine.GetLastRuntimeActorError().empty())
+        ImGui::TextWrapped("Actor operation: %s", engine.GetLastRuntimeActorError().c_str());
     EnsureValidSceneSelection(scene_document, selected_actor_index);
     EnsureValidRuntimeSelection(engine, selected_runtime_actor_uid);
 

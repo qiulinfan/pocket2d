@@ -26,8 +26,6 @@ struct SceneViewPanelResult {
     float transport_bar_min_y = 0.0f;
     float transport_bar_max_x = 0.0f;
     float transport_bar_max_y = 0.0f;
-    std::size_t immediate_apply_begin_index = 0;
-    std::size_t immediate_apply_end_index = 0;
 };
 
 // Render the editor-facing scene view panel on top of the latest runtime texture.

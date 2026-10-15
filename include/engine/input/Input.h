@@ -1,7 +1,7 @@
 #ifndef INPUT_H
 #define INPUT_H
 
-#include "SDL2/SDL.h"
+#include "SDL3/SDL.h"
 #include "glm/glm.hpp"
 #include <array>
 #include <string>
@@ -13,6 +13,12 @@ public:
     // initialize input state caches
     // 初始化输入状态缓存
     static void Init();
+
+    // External sessions receive only explicitly injected events, never hardware.
+    static void SetExternalInputEnabled(bool enabled);
+    // Scene replacement preserves externally held controls until the host
+    // changes them, while discarding one-tick edges and wheel impulses.
+    static void ResetForSceneChange();
 
     // feed one SDL event into the input state machine
     // 将一个 SDL 事件写入输入状态机
@@ -93,9 +99,10 @@ private:
     static std::unordered_map<SDL_Keycode, INPUT_STATE, SDLKeycodeHash> keycode_states_;
     static std::vector<SDL_Keycode> just_became_down_keycodes_;
     static std::vector<SDL_Keycode> just_became_up_keycodes_;
-    static std::array<bool, SDL_NUM_SCANCODES> keyboard_held_snapshot_;
+    static std::array<bool, SDL_SCANCODE_COUNT> keyboard_held_snapshot_;
     static bool keyboard_held_snapshot_valid_;
     static int keyboard_held_snapshot_frame_;
+    static bool external_input_enabled_;
 
     // mouse button held / down / up caches
     // 鼠标按住 / 本帧按下 / 本帧松开缓存

@@ -52,8 +52,8 @@ void CppInputShowCursor() {
 void InjectInputAPI() {
     luabridge::getGlobalNamespace(g_lua_state)
         .beginClass<glm::vec2>("vec2")
-        .addProperty("x", &glm::vec2::x)
-        .addProperty("y", &glm::vec2::y)
+        .addPropertyReadWrite("x", &glm::vec2::x)
+        .addPropertyReadWrite("y", &glm::vec2::y)
         .endClass();
 
     luabridge::getGlobalNamespace(g_lua_state)

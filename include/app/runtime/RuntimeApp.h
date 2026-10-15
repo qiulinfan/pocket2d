@@ -5,7 +5,7 @@ class RuntimeApp {
 public:
     // Boot the standalone runtime executable and stay in the traditional game
     // loop until the engine requests quit.
-    int Run();
+    int Run(int argc, char **argv);
 };
 
 #endif

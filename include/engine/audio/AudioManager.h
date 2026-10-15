@@ -1,7 +1,8 @@
 #ifndef AUDIOMANAGER_H
 #define AUDIOMANAGER_H
 
-#include "SDL2_mixer/SDL_mixer.h"
+#include <SDL3_mixer/SDL_mixer.h>
+#include <array>
 #include <string>
 #include <unordered_map>
 
@@ -15,8 +16,8 @@ public:
 
     // load audio by name and cache it
     // 按名称加载音频并缓存
-    static Mix_Chunk *LoadAudioClip(const std::string &audio_name);
-    static Mix_Music *LoadMusicTrack(const std::string &audio_name);
+    static MIX_Audio *LoadAudioClip(const std::string &audio_name);
+    static MIX_Audio *LoadMusicTrack(const std::string &audio_name);
     static bool HasAudioClip(const std::string &audio_name);
     static bool HasMusicTrack(const std::string &audio_name);
     static bool PreloadAudioClip(const std::string &audio_name);
@@ -56,17 +57,22 @@ private:
     // 音频设备不可用时只打印一次警告
     static inline bool init_failure_logged = false;
 
+    static inline bool mixer_library_initialized = false;
+    static inline MIX_Mixer *mixer = nullptr;
+    static inline std::array<MIX_Track *, 64> channels{};
+    static inline MIX_Track *music_track = nullptr;
+
     // loaded audio cache
     // 已加载音频缓存
-    static inline std::unordered_map<std::string, Mix_Chunk *> audio_cache;
-    static inline std::unordered_map<std::string, Mix_Music *> music_cache;
+    static inline std::unordered_map<std::string, MIX_Audio *> audio_cache;
+    static inline std::unordered_map<std::string, MIX_Audio *> music_cache;
     static inline bool playback_enabled = true;
     static inline std::string current_music_name;
     static inline int current_music_loops = 0;
     static inline int audio_play_failure_count = 0;
     static inline int music_play_failure_count = 0;
     static inline int actual_output_frequency = 0;
-    static inline Uint16 actual_output_format = 0;
+    static inline SDL_AudioFormat actual_output_format = SDL_AUDIO_UNKNOWN;
     static inline int actual_output_channels = 0;
 };
 

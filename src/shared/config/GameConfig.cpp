@@ -1,14 +1,20 @@
 #include "shared/config/GameConfig.h"
 #include "shared/resources/ResourcePath.h"
+#include "shared/persistence/SaveStore.h"
 #include "rapidjson/document.h"
 #include "rapidjson/filereadstream.h"
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/stringbuffer.h"
+#include <algorithm>
 #include <cstdio>
+#include <cmath>
+#include <limits>
+#include <unordered_set>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 
 namespace {
 
@@ -28,17 +34,46 @@ void ReadJsonFile(const std::string &path, rapidjson::Document &out_document) {
     file_pointer = fopen(path.c_str(), "rb");
 #endif
     if (file_pointer == nullptr) {
-        out_document.SetObject();
-        return;
+        throw std::runtime_error("unable to open [" + path + "]");
     }
     char buffer[65536];
     rapidjson::FileReadStream stream(file_pointer, buffer, sizeof(buffer));
     out_document.ParseStream(stream);
     std::fclose(file_pointer);
 
-    if (out_document.HasParseError()) {
-        std::cout << "error parsing json at [" << path << "]" << std::endl;
-        std::exit(0);
+    if (out_document.HasParseError() || !out_document.IsObject())
+        throw std::runtime_error("invalid JSON object at [" + path + "]");
+}
+
+void ValidateUniqueMembers(const rapidjson::Document &document, const std::filesystem::path &path) {
+    std::unordered_set<std::string> names;
+    for (auto member = document.MemberBegin(); member != document.MemberEnd(); ++member) {
+        const std::string name(member->name.GetString(), member->name.GetStringLength());
+        if (!names.insert(name).second) {
+            throw std::runtime_error(path.string() + ": duplicate field " + name);
+        }
+    }
+}
+
+void ValidateRenderingConfig(const rapidjson::Document &document, const std::filesystem::path &path) {
+    ValidateUniqueMembers(document, path);
+    for (const char *name : {"x_resolution", "y_resolution", "clear_color_r", "clear_color_g", "clear_color_b"}) {
+        if (!document.HasMember(name)) continue;
+        const auto &value = document[name];
+        if (!value.IsInt()) throw std::runtime_error(path.string() + ": " + name + " must be an integer");
+        const bool resolution = std::string(name).find("resolution") != std::string::npos;
+        if ((resolution && value.GetInt() <= 0) ||
+            (!resolution && (value.GetInt() < 0 || value.GetInt() > 255))) {
+            throw std::runtime_error(path.string() + ": " + name +
+                                     (resolution ? " must be positive" : " must be in [0, 255]"));
+        }
+    }
+    if (document.HasMember("zoom_factor")) {
+        const auto &value = document["zoom_factor"];
+        if (!value.IsNumber() || !std::isfinite(value.GetDouble()) ||
+            value.GetDouble() <= 0.0 || value.GetDouble() > std::numeric_limits<float>::max()) {
+            throw std::runtime_error(path.string() + ": zoom_factor must be a finite positive float");
+        }
     }
 }
 
@@ -122,7 +157,7 @@ bool WriteJsonFile(const std::filesystem::path &path,
         return false;
     }
     output_file << buffer.GetString() << std::endl;
-    return true;
+    return output_file.good();
 }
 
 } // namespace
@@ -156,6 +191,19 @@ GameConfigData GameConfig::Read() {
 
     rapidjson::Document game_config;
     ReadJsonFile(game_config_path.string(), game_config);
+    ValidateUniqueMembers(game_config, game_config_path);
+    for (const char *field : {"game_title", "initial_scene", "save_namespace"}) {
+        if (game_config.HasMember(field) && !game_config[field].IsString()) {
+            throw std::runtime_error(game_config_path.string() + ": " + field + " must be a string");
+        }
+    }
+
+    if (game_config.HasMember("save_namespace")) {
+        const auto &value = game_config["save_namespace"];
+        config.save_namespace.assign(value.GetString(), value.GetStringLength());
+        if (!config.save_namespace.empty() && !SaveStore::IsValidIdentifier(config.save_namespace))
+            throw std::runtime_error("game.config: invalid save_namespace");
+    }
 
     if (game_config.HasMember("game_title") &&
         game_config["game_title"].IsString()) {
@@ -170,6 +218,7 @@ GameConfigData GameConfig::Read() {
     if (std::filesystem::exists(rendering_config_path)) {
         rapidjson::Document rendering_config;
         ReadJsonFile(rendering_config_path.string(), rendering_config);
+        ValidateRenderingConfig(rendering_config, rendering_config_path);
 
         if (rendering_config.HasMember("x_resolution") &&
             rendering_config["x_resolution"].IsInt()) {
@@ -205,6 +254,8 @@ GameConfigData GameConfig::Read() {
 }
 
 bool GameConfig::Write(const GameConfigData &config) {
+    if (!std::isfinite(config.zoom_factor) ||
+        (!config.save_namespace.empty() && !SaveStore::IsValidIdentifier(config.save_namespace))) return false;
     const std::filesystem::path game_config_path = GameConfigPath();
     const std::filesystem::path rendering_config_path = RenderingConfigPath();
 
@@ -230,6 +281,7 @@ bool GameConfig::Write(const GameConfigData &config) {
 
     UpsertStringMember(game_config, "game_title", config.game_title);
     UpsertStringMember(game_config, "initial_scene", config.initial_scene_name);
+    UpsertStringMember(game_config, "save_namespace", config.save_namespace);
 
     UpsertIntMember(rendering_config, "x_resolution",
                     std::max(1, config.window_width));

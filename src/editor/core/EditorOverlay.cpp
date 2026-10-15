@@ -5,6 +5,8 @@
 #endif
 
 #include "editor/core/EditorOverlay.h"
+#include "scene/Tilemap.h"
+#include "scripting/ComponentManager.h"
 #include "editor/core/EditorConfig.h"
 #include "editor/documents/SceneDocument.h"
 #include "editor/panels/HierarchyPanel.h"
@@ -16,9 +18,9 @@
 #include "engine/core/Engine.h"
 #include "shared/resources/ResourcePath.h"
 #include "imgui.h"
-#include "backends/imgui_impl_sdl2.h"
-#include "backends/imgui_impl_sdlrenderer2.h"
-#include "SDL2/SDL.h"
+#include "backends/imgui_impl_sdl3.h"
+#include "backends/imgui_impl_sdlrenderer3.h"
+#include "SDL3/SDL.h"
 #if defined(_WIN32)
 #include <objbase.h>
 #include <shobjidl.h>
@@ -46,10 +48,10 @@ or should be forwarded into runtime input processing.
 */ 
 bool ShouldCaptureMouseEvent(Uint32 event_type) {
     switch (event_type) {
-    case SDL_MOUSEMOTION:
-    case SDL_MOUSEBUTTONDOWN:
-    case SDL_MOUSEBUTTONUP:
-    case SDL_MOUSEWHEEL:
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+    case SDL_EVENT_MOUSE_WHEEL:
         return true;
     default:
         return false;
@@ -57,10 +59,10 @@ bool ShouldCaptureMouseEvent(Uint32 event_type) {
 }
 bool ShouldCaptureKeyboardEvent(Uint32 event_type) {
     switch (event_type) {
-    case SDL_KEYDOWN:
-    case SDL_KEYUP:
-    case SDL_TEXTEDITING:
-    case SDL_TEXTINPUT:
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP:
+    case SDL_EVENT_TEXT_EDITING:
+    case SDL_EVENT_TEXT_INPUT:
         return true;
     default:
         return false;
@@ -68,32 +70,32 @@ bool ShouldCaptureKeyboardEvent(Uint32 event_type) {
 }
 
 bool IsEditorPlaybackHotkeyEvent(const SDL_Event &event) {
-    if (event.type != SDL_KEYDOWN && event.type != SDL_KEYUP) {
+    if (event.type != SDL_EVENT_KEY_DOWN && event.type != SDL_EVENT_KEY_UP) {
         return false;
     }
-    const SDL_Scancode scancode = event.key.keysym.scancode;
+    const SDL_Scancode scancode = event.key.scancode;
     return scancode == SDL_SCANCODE_F5 || scancode == SDL_SCANCODE_F6;
 }
 
-bool IsPointInsideRect(int x, int y, float min_x, float min_y, float max_x,
+bool IsPointInsideRect(float x, float y, float min_x, float min_y, float max_x,
                        float max_y) {
     const float fx = static_cast<float>(x);
     const float fy = static_cast<float>(y);
     return fx >= min_x && fx <= max_x && fy >= min_y && fy <= max_y;
 }
 
-bool TryGetMousePositionFromEvent(const SDL_Event &event, int &x, int &y) {
+bool TryGetMousePositionFromEvent(const SDL_Event &event, float &x, float &y) {
     switch (event.type) {
-    case SDL_MOUSEMOTION:
+    case SDL_EVENT_MOUSE_MOTION:
         x = event.motion.x;
         y = event.motion.y;
         return true;
-    case SDL_MOUSEBUTTONDOWN:
-    case SDL_MOUSEBUTTONUP:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
         x = event.button.x;
         y = event.button.y;
         return true;
-    case SDL_MOUSEWHEEL:
+    case SDL_EVENT_MOUSE_WHEEL:
         SDL_GetMouseState(&x, &y);
         return true;
     default:
@@ -103,9 +105,8 @@ bool TryGetMousePositionFromEvent(const SDL_Event &event, int &x, int &y) {
 
 bool IsWindowFullscreen(SDL_Window *window) {
     if (window == nullptr) return false;
-    const Uint32 window_flags = SDL_GetWindowFlags(window);
-    return (window_flags & SDL_WINDOW_FULLSCREEN) != 0 ||
-           (window_flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+    const SDL_WindowFlags window_flags = SDL_GetWindowFlags(window);
+    return (window_flags & SDL_WINDOW_FULLSCREEN) != 0;
 }
 
 #if defined(__APPLE__)
@@ -370,6 +371,7 @@ void BuildMainMenuBar(bool &show_metrics_window,
                       bool &show_game_config_window,
                       bool &show_rendering_config_window,
                       bool &show_external_editors_window,
+                      bool &show_script_reload_window,
                       bool &show_new_project_window,
                       bool &show_open_project_window,
                       std::string &new_project_path,
@@ -481,10 +483,11 @@ void BuildMainMenuBar(bool &show_metrics_window,
         ImGui::EndMenu();
     }
 
-    // tools: currrently only external editor path configuration for files (lua, etc)
+    // Explicit authoring tools do not alter the Project browser Refresh action.
     if (ImGui::BeginMenu("Tools")) {
         ImGui::MenuItem("External Editors", nullptr,
                         &show_external_editors_window);
+        ImGui::MenuItem("Reload Lua Scripts", nullptr, &show_script_reload_window);
         ImGui::EndMenu();
     }
 
@@ -729,12 +732,12 @@ bool EditorOverlay::Initialize(SDL_Window *window, SDL_Renderer *renderer) {
     ImGuiStyle &style = ImGui::GetStyle();
     ApplyUnityLikeGrayTheme(style, 1.0f);
 
-    if (!ImGui_ImplSDL2_InitForSDLRenderer(window, renderer)) {
+    if (!ImGui_ImplSDL3_InitForSDLRenderer(window, renderer)) {
         ImGui::DestroyContext();
         return false;
     }
-    if (!ImGui_ImplSDLRenderer2_Init(renderer)) {
-        ImGui_ImplSDL2_Shutdown();
+    if (!ImGui_ImplSDLRenderer3_Init(renderer)) {
+        ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
         return false;
     }
@@ -787,6 +790,84 @@ void EditorOverlay::SetRuntimeInputRoutingState(bool play_mode_active,
     }
 }
 
+const ScriptReloadResult &EditorOverlay::ExecuteScriptReload(const std::vector<std::string> &types) {
+    // Render runs on the editor owner thread after engine callbacks complete.
+    // No scene document, runtime mirror, play-state or map draft is rebuilt here.
+    script_reload_selection_ = types;
+    has_script_reload_result_ = true;
+    try {
+        script_reload_result_ = ComponentManager::ReloadScripts(types);
+    } catch (const std::exception &) {
+        script_reload_result_ = {};
+        script_reload_result_.types = types;
+        script_reload_result_.diagnostics.push_back({"", "", "host_reset_required",
+            "Unexpected host failure; runtime reset/reopen required; rollback not guaranteed", 0});
+    }
+    return script_reload_result_;
+}
+
+void EditorOverlay::RenderScriptReloadWindow() {
+    if (!show_script_reload_window_) return;
+    ImGui::SetNextWindowPos(ImVec2(80, 80), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Reload Lua Scripts", &show_script_reload_window_)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::BeginDisabled(script_reload_selection_.empty());
+    if (ImGui::Button("Reload Selected Scripts", ImVec2(220, 0))) {
+        const auto selected = script_reload_selection_;
+        ExecuteScriptReload(selected);
+    }
+    ImGui::EndDisabled();
+    ImGui::TextWrapped("Reload reads saved Lua files. Existing instances and data stay live; this action does not restart play or save scene/map drafts.");
+    ImGui::Separator();
+    auto types = ComponentManager::GetRegisteredComponentTypes();
+    std::sort(types.begin(), types.end());
+    if (ImGui::BeginChild("ReloadScriptSources", ImVec2(0, 180), ImGuiChildFlags_Borders)) {
+        bool any = false;
+        for (const auto &type : types) {
+            const auto source = ComponentManager::GetComponentScriptSource(type);
+            if (source.empty()) continue;
+            any = true;
+            auto found = std::find(script_reload_selection_.begin(), script_reload_selection_.end(), type);
+            bool selected = found != script_reload_selection_.end();
+            ImGui::PushID(type.c_str());
+            if (ImGui::Checkbox(type.c_str(), &selected)) {
+                if (selected) script_reload_selection_.push_back(type);
+                else script_reload_selection_.erase(found);
+            }
+            ImGui::TextWrapped("%s", source.c_str());
+            ImGui::PopID();
+        }
+        if (!any) ImGui::TextDisabled("No registered Lua component sources in this project.");
+    }
+    ImGui::EndChild();
+    ImGui::SeparatorText("Last Reload Result");
+    if (!has_script_reload_result_) ImGui::TextDisabled("No reload requested in this project.");
+    else if (script_reload_result_.ok)
+        ImGui::Text("Reloaded %zu type(s), updated %d live instance(s).", script_reload_result_.types.size(), script_reload_result_.instances_updated);
+    else if (std::any_of(script_reload_result_.diagnostics.begin(), script_reload_result_.diagnostics.end(),
+                        [](const auto &diagnostic) { return diagnostic.stage == "host_reset_required"; }))
+        ImGui::TextWrapped("Unexpected host failure; runtime reset/reopen required; rollback not guaranteed.");
+    else ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.45f, 1.0f), "Reload rejected; inspect the diagnostics below.");
+    if (ImGui::BeginChild("ScriptReloadDiagnostics", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
+        for (const auto &diagnostic : script_reload_result_.diagnostics) {
+            ImGui::TextWrapped("%s | %s | line %d", diagnostic.type.c_str(), diagnostic.stage.c_str(), diagnostic.line);
+            ImGui::TextWrapped("%s", diagnostic.resource.c_str());
+            ImGui::TextWrapped("%s", diagnostic.message.c_str());
+            ImGui::Separator();
+        }
+    }
+    ImGui::EndChild();
+    ImGui::End();
+}
+
+void EditorOverlay::NotifySceneOpened() {
+    selected_actor_index_ = -1;
+    selected_runtime_actor_uid_ = Actor::kInvalidUID;
+}
+
 void EditorOverlay::NotifyProjectChanged() {
     EditorPanels::InvalidateProjectPanelCache();
     project_config_loaded_ = false;
@@ -800,6 +881,10 @@ void EditorOverlay::NotifyProjectChanged() {
     applied_ui_scale_ = 0.0f;
     show_open_project_window_ = false;
     open_project_error_.clear();
+    show_script_reload_window_ = false;
+    has_script_reload_result_ = false;
+    script_reload_selection_.clear();
+    script_reload_result_ = {};
 }
 
 // Forward one SDL event to ImGui and report whether the editor/runtime capture it
@@ -823,7 +908,7 @@ bool EditorOverlay::ProcessEvent(const SDL_Event &event) {
     }
 
     // give SDL input event to ImGui for processing
-    ImGui_ImplSDL2_ProcessEvent(&event);
+    ImGui_ImplSDL3_ProcessEvent(&event);
     const ImGuiIO &io = ImGui::GetIO();
     if (IsEditorPlaybackHotkeyEvent(event)) return true;
     if (!play_mode_active_for_input_) runtime_input_focus_ = false;
@@ -838,8 +923,8 @@ bool EditorOverlay::ProcessEvent(const SDL_Event &event) {
     }
 
     // check if the the event's position is inside the runtime viewport
-    int mouse_x = 0;
-    int mouse_y = 0;
+    float mouse_x = 0;
+    float mouse_y = 0;
     const bool has_mouse_pos = TryGetMousePositionFromEvent(event, mouse_x, mouse_y);
     const bool mouse_in_runtime_view =
         has_mouse_pos && viewport_runtime_image_valid_ &&
@@ -858,7 +943,7 @@ bool EditorOverlay::ProcessEvent(const SDL_Event &event) {
     Clicking the runtime viewport grants runtime focus for subsequent input.
     Clicking outside returns focus to editor.
     */
-    if (event.type == SDL_MOUSEBUTTONDOWN) {
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         runtime_input_focus_ = play_mode_active_for_input_ && mouse_in_runtime_view && !mouse_in_transport_bar;
     }
 
@@ -899,8 +984,8 @@ SDL_Event EditorOverlay::BuildRuntimeEvent(const SDL_Event &event,
         return runtime_event;
     }
 
-    int mouse_x = 0;
-    int mouse_y = 0;
+    float mouse_x = 0;
+    float mouse_y = 0;
     if (!TryGetMousePositionFromEvent(event, mouse_x, mouse_y)) {
         return runtime_event;
     }
@@ -932,11 +1017,11 @@ SDL_Event EditorOverlay::BuildRuntimeEvent(const SDL_Event &event,
             viewport_height * static_cast<float>(runtime_height))),
         0, runtime_height - 1);
 
-    if (runtime_event.type == SDL_MOUSEMOTION) {
+    if (runtime_event.type == SDL_EVENT_MOUSE_MOTION) {
         runtime_event.motion.x = runtime_x;
         runtime_event.motion.y = runtime_y;
-    } else if (runtime_event.type == SDL_MOUSEBUTTONDOWN ||
-               runtime_event.type == SDL_MOUSEBUTTONUP) {
+    } else if (runtime_event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+               runtime_event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         runtime_event.button.x = runtime_x;
         runtime_event.button.y = runtime_y;
     }
@@ -961,8 +1046,8 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
     if (renderer == nullptr) return result;
 
     // standard new frame setup for imgui with SDL_Renderer backend
-    ImGui_ImplSDLRenderer2_NewFrame();
-    ImGui_ImplSDL2_NewFrame();
+    ImGui_ImplSDLRenderer3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
     // Global save should stay out of the way while the user is typing into
@@ -1001,7 +1086,8 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
     BuildMainMenuBar(show_metrics_window_,
                      show_editor_settings_window_, show_game_config_window_,
                      show_rendering_config_window_,
-                     show_external_editors_window_, show_new_project_window_,
+                     show_external_editors_window_, show_script_reload_window_,
+                     show_new_project_window_,
                      show_open_project_window_, new_project_path_,
                      new_project_error_, open_project_path_, editor_config,
                      scene_document, play_mode_active, play_mode_paused,
@@ -1010,6 +1096,7 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
 
     ImGuiViewport *main_viewport = ImGui::GetMainViewport();
     ImGui::DockSpaceOverViewport(0, main_viewport, ImGuiDockNodeFlags_None);
+    RenderMapDraftTools(play_mode_active);
 
     EditorPanels::RenderStatusPanel(engine, scene_document,
                                     selected_actor_index_,
@@ -1024,8 +1111,6 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
     if (project_panel_result.open_scene_requested) {
         result.open_scene_requested = true;
         result.requested_scene_path = project_panel_result.requested_scene_path;
-        selected_actor_index_ = -1;
-        selected_runtime_actor_uid_ = Actor::kInvalidUID;
     }
     if (project_panel_result.open_external_editor_requested) {
         const EditorExternalFileType file_type = project_panel_result.requested_external_file_type;
@@ -1067,7 +1152,9 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
     result.scene_changed |= EditorPanels::RenderInspectorPanel(
         engine, scene_document, selected_actor_index_,
         selected_runtime_actor_uid_,
-        play_mode_active, scene_editing_enabled, &result.scene_edit_commands);
+        play_mode_active, scene_editing_enabled, &result.scene_edit_commands,
+        &tilemap_document_);
+    if (!play_mode_active) SyncTilemapPreview(engine);
 
     const EditorPanels::SceneViewPanelResult scene_view_panel_result =
         EditorPanels::RenderSceneViewPanel(
@@ -1077,10 +1164,6 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
             play_mode_paused, scene_editing_enabled,
             &result.scene_edit_commands);
     result.scene_changed |= scene_view_panel_result.scene_changed;
-    result.scene_edit_commands_runtime_synced_begin_index =
-        scene_view_panel_result.immediate_apply_begin_index;
-    result.scene_edit_commands_runtime_synced_end_index =
-        scene_view_panel_result.immediate_apply_end_index;
 
     const EditorPanels::ViewportControlsResult viewport_controls =
         EditorPanels::RenderViewportPanel(engine, play_mode_active,
@@ -1118,14 +1201,27 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
                                          result);
     RenderExternalEditorsWindow(editor_config, show_external_editors_window_,
                                 result);
+    RenderScriptReloadWindow();
     RenderTransientNotifications();
+    if (scene_mirror_pending_ || !scene_edit_error_.empty()) {
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Scene edit status", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted(scene_mirror_pending_ ? "Preview is out of date. Your draft is retained." : "The edit was not applied.");
+            ImGui::BeginChild("edit_error", ImVec2(400.0f, 90.0f), true);
+            ImGui::TextWrapped("%s", scene_edit_error_.c_str());
+            ImGui::EndChild();
+            if (scene_mirror_pending_ && ImGui::Button("Retry preview")) result.retry_scene_mirror_requested = true;
+            if (!scene_mirror_pending_ && ImGui::Button("Dismiss")) result.dismiss_scene_edit_error_requested = true;
+        }
+        ImGui::End();
+    }
 
     ImGui::Render();
-    SDL_RenderSetScale(renderer,
+    SDL_SetRenderScale(renderer,
                        std::max(0.01f, io.DisplayFramebufferScale.x),
                        std::max(0.01f, io.DisplayFramebufferScale.y));
-    ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
-    SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
     return result;
 }
 
@@ -1559,9 +1655,75 @@ void EditorOverlay::RenderTransientNotifications() {
 void EditorOverlay::Shutdown() {
     if (!initialized_) return;
 
-    ImGui_ImplSDLRenderer2_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
+    ImGui_ImplSDLRenderer3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     initialized_ = false;
     NotifyProjectChanged();
+    tilemap_document_.Clear();
+    applied_map_previews_.clear();
+}
+
+void EditorOverlay::SyncTilemapPreview(Engine &engine) {
+    std::unordered_map<std::string, AppliedMapPreview> next;
+    bool refreshed_clean_document = false;
+    if (tilemap_document_.HasAsset()) {
+        for (const auto &actor : engine.GetRuntimeActors()) {
+            if (actor.runtime_destroyed) continue;
+            for (const auto &spec : ComponentManager::GetRuntimeComponentSpecs(actor.uid)) {
+                if (spec.type != "Tilemap") continue;
+                auto *map = ComponentManager::GetTilemap(actor.uid, spec.key);
+                if (!map || map->map_resource.empty()) continue;
+                const auto path = std::filesystem::weakly_canonical(std::filesystem::absolute(ResourcePath::ResourcesRootPath() / "maps" / map->map_resource));
+                if (path != std::filesystem::weakly_canonical(tilemap_document_.GetPath())) continue;
+                const auto identity = std::to_string(actor.uid) + ":" + spec.key;
+                const auto previous = applied_map_previews_.find(identity);
+                const bool same_instance = previous != applied_map_previews_.end() &&
+                    previous->second.actor_generation == actor.runtime_generation && previous->second.instance == map;
+                if (!same_instance && !tilemap_document_.HasUnsavedChanges() && !refreshed_clean_document) {
+                    // A scene reload has already loaded the disk asset. A clean
+                    // old editor cache must never overwrite that newer runtime.
+                    if (!tilemap_document_.Revert()) ShowNotice(tilemap_document_.GetLastError());
+                    refreshed_clean_document = true;
+                }
+                const AppliedMapPreview desired{actor.runtime_generation, tilemap_document_.GetRevision(), map};
+                const bool changed_document = previous != applied_map_previews_.end() &&
+                    previous->second.document_revision != desired.document_revision;
+                if ((tilemap_document_.HasUnsavedChanges() &&
+                     (!same_instance || changed_document || map->GetRevision() == 0)) ||
+                    (same_instance && changed_document)) {
+                    map->ReplaceAsset(tilemap_document_.GetAsset());
+                }
+                next.emplace(identity, desired);
+            }
+        }
+        ComponentManager::CommitTilemaps();
+    }
+    applied_map_previews_ = std::move(next);
+}
+
+void EditorOverlay::RenderMapDraftTools(bool play_mode_active) {
+    if (!tilemap_document_.HasAsset()) return;
+    ImGui::SetNextWindowSize(ImVec2(420, 160), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Map Asset Draft")) {
+        ImGui::TextWrapped("%s", tilemap_document_.GetPath().string().c_str());
+        ImGui::TextUnformatted(tilemap_document_.HasUnsavedChanges() ? "Unsaved authoring changes" : "Saved authoring copy");
+        if (play_mode_active) ImGui::TextDisabled("Stop playback to edit map assets.");
+        ImGui::BeginDisabled(play_mode_active);
+        if (ImGui::Button("Save Map")) {
+            if (!tilemap_document_.Save()) ShowNotice(tilemap_document_.GetLastError());
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard Changes")) tilemap_document_.DiscardChanges();
+        ImGui::BeginDisabled(!tilemap_document_.CanUndo());
+        if (ImGui::Button("Undo Map")) tilemap_document_.Undo();
+        ImGui::EndDisabled(); ImGui::SameLine();
+        ImGui::BeginDisabled(!tilemap_document_.CanRedo());
+        if (ImGui::Button("Redo Map")) tilemap_document_.Redo();
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+        if (!tilemap_document_.GetLastError().empty())
+            ImGui::TextWrapped("%s", tilemap_document_.GetLastError().c_str());
+    }
+    ImGui::End();
 }

@@ -2,13 +2,16 @@
 #define EDITOR_CORE_EDITOR_OVERLAY_H
 
 #include "editor/core/EditorConfig.h"
+#include "editor/documents/TilemapDocument.h"
 #include "scene/Actor.h"
+#include "scripting/ComponentManager.h"
 #include "shared/config/GameConfig.h"
 #include "shared/scene_format/SceneMutation.h"
 #include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 union SDL_Event;
 struct SDL_Window;
@@ -16,6 +19,7 @@ struct SDL_Renderer;
 
 class Engine;
 class SceneDocument;
+class Tilemap;
 struct EditorConfigData;
 
 struct EditorOverlayResult {
@@ -40,8 +44,8 @@ struct EditorOverlayResult {
     bool edit_mode_live_preview_toggle_requested = false;
     bool toggle_fullscreen_requested = false;
     bool runtime_view_visible = false;
-    std::size_t scene_edit_commands_runtime_synced_begin_index = 0;
-    std::size_t scene_edit_commands_runtime_synced_end_index = 0;
+    bool retry_scene_mirror_requested = false;
+    bool dismiss_scene_edit_error_requested = false;
 };
 
 class EditorOverlay {
@@ -56,12 +60,15 @@ public:
                      int window_height);
     // Queue a short-lived top-right notice for host-level actions.
     void ShowNotice(const std::string &text, double duration_seconds = 4.0);
+    void SetSceneEditStatus(const std::string &error, bool pending) { scene_edit_error_ = error; scene_mirror_pending_ = pending; }
     // Update routing context used to decide whether input goes to editor or
     // runtime while the viewport is embedded.
     void SetRuntimeInputRoutingState(bool play_mode_active,
                                      bool play_mode_paused);
     // Reset project-specific UI caches after the logical resources root changes.
     void NotifyProjectChanged();
+    // Only after a scene open commits; retain independent editor/map draft state.
+    void NotifySceneOpened();
     // Forward one SDL event to ImGui and report whether the editor captured it.
     // 将一个 SDL 事件转发给 ImGui, 并报告编辑器是否捕获了它.
     bool ProcessEvent(const SDL_Event &event);
@@ -80,8 +87,31 @@ public:
     // Release ImGui backend resources and destroy the ImGui context.
     // 释放 ImGui 后端资源并销毁 ImGui 上下文.
     void Shutdown();
+    bool HasUnsavedMapChanges() const { return tilemap_document_.HasUnsavedChanges(); }
+    TilemapDocument &GetTilemapDocument() { return tilemap_document_; }
+    // Explicit owner-thread action shared by the tool button and integration tests.
+    const ScriptReloadResult &ExecuteScriptReload(const std::vector<std::string> &types);
+    const ScriptReloadResult &GetLastScriptReloadResult() const { return script_reload_result_; }
+    bool HasScriptReloadResult() const { return has_script_reload_result_; }
+    void ShowScriptReloadWindow(bool visible = true) { show_script_reload_window_ = visible; }
+    void SetScriptReloadSelection(const std::vector<std::string> &types) { script_reload_selection_ = types; }
+
 
 private:
+    void RenderScriptReloadWindow();
+    bool show_script_reload_window_ = false;
+    bool has_script_reload_result_ = false;
+    std::vector<std::string> script_reload_selection_;
+    ScriptReloadResult script_reload_result_;
+    void SyncTilemapPreview(Engine &engine);
+    void RenderMapDraftTools(bool play_mode_active);
+    TilemapDocument tilemap_document_;
+    struct AppliedMapPreview {
+        std::uint64_t actor_generation = 0;
+        std::uint64_t document_revision = 0;
+        Tilemap *instance = nullptr;
+    };
+    std::unordered_map<std::string, AppliedMapPreview> applied_map_previews_;
     // Lazily load the project-visible game/rendering config cache from disk.
     void EnsureProjectConfigLoaded();
     // Queue a short-lived top-right notice for editor actions and failures.
@@ -132,6 +162,8 @@ private:
     float viewport_transport_bar_min_y_ = 0.0f;
     float viewport_transport_bar_max_x_ = 0.0f;
     float viewport_transport_bar_max_y_ = 0.0f;
+    std::string scene_edit_error_;
+    bool scene_mirror_pending_ = false;
     bool show_transient_notice_ = false;
     double transient_notice_expire_time_ = 0.0;
     std::string transient_notice_text_;

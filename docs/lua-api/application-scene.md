@@ -4,13 +4,15 @@
 
 ### `Debug.Log(message)`
 
-Logs a string to the runtime console/stdout.
+Logs a string to the runtime console. In agent mode diagnostics go to stderr.
 
 ## `Application`
 
 ### `Application.Quit()`
 
-Immediately exits the process.
+Requests the runtime to stop after the current simulation frame. The host can
+finish its response and release resources; it does not terminate the process
+from inside the Lua callback.
 
 ### `Application.Sleep(milliseconds)`
 
@@ -18,7 +20,13 @@ Sleeps the current thread. Negative values are clamped to `0`.
 
 ### `Application.GetFrame() -> int`
 
-Returns the current frame number from the engine frame clock.
+Returns the simulation frame number. Each completed simulation tick advances
+it once; frozen previews and additional presentations do not advance it.
+
+### `Application.GetDeltaTime() -> float`
+
+Returns the fixed simulation step, currently `1/60` second. Headless stepping
+uses the same lifecycle and physics step as interactive gameplay.
 
 ### `Application.OpenURL(url)`
 
@@ -28,7 +36,11 @@ Asks the host OS to open a URL with the default browser/app.
 
 ### `Scene.Load(scene_name)`
 
-Requests loading a scene by name.
+Queues loading a scene by name at the next frame boundary. Invalid scene
+preparation preserves the old world, which can still run its ordinary tick.
+Known component source paths are reused; editing a file requires explicit script
+reload or a fresh-VM reset. New source variants must satisfy the isolated
+declaration contract. See [scene transitions](../development/scene-transitions.md).
 
 ### `Scene.GetCurrent() -> string`
 
@@ -36,7 +48,11 @@ Returns the current scene name.
 
 ### `Scene.DontDestroy(actor)`
 
-Marks an actor so it survives scene transitions.
+Marks this actor so it survives queued scene transitions. It does not implicitly
+mark descendants. A transition rejects incoming UID collisions, loss of a retained
+actor's parent, or changing the source variant of a retained component type.
+Incoming authored parent links must stay within the incoming scene. Full editor
+scene replacement/reset does not preserve these actors.
 
 ## `Camera`
 

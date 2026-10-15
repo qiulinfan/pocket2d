@@ -7,6 +7,7 @@
 
 class SceneDocument;
 class Engine;
+class TilemapDocument;
 
 namespace EditorPanels {
 
@@ -19,7 +20,8 @@ bool RenderInspectorPanel(const Engine &engine,
                           bool play_mode_active,
                           bool scene_editing_enabled,
                           std::vector<SceneFormat::SceneEditCommand>
-                              *out_edit_commands = nullptr);
+                              *out_edit_commands = nullptr,
+                          TilemapDocument *tilemap_document = nullptr);
 
 } // namespace EditorPanels
 

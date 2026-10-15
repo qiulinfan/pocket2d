@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.30)
 
 project(pocket2d VERSION 0.1.0 LANGUAGES C CXX)
 
@@ -6,12 +6,13 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+find_package(Threads REQUIRED)
 
 option(
     GAME_ENGINE_STAGE_RESOURCES
@@ -34,6 +35,8 @@ include(GameEngineSDL)
 game_engine_ensure_sdl()
 
 add_library(game_engine_vendor_headers INTERFACE)
+target_compile_definitions(game_engine_vendor_headers INTERFACE
+    LUABRIDGE_SAFE_LUA_C_EXCEPTION_HANDLING=1)
 target_include_directories(
     game_engine_vendor_headers
     SYSTEM
@@ -91,6 +94,7 @@ target_link_libraries(
         box2d_runtime
         game_engine_sdl_headers
         game_engine_vendor_headers
+        Threads::Threads
     PRIVATE
         lua_runtime
 )
@@ -120,6 +124,11 @@ add_subdirectory(src/engine)
 add_subdirectory(src/editor)
 add_subdirectory(src/app/runtime)
 add_subdirectory(src/app/editor)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 if(MSVC)
     set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT game_engine)

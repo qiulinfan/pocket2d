@@ -1,0 +1,12 @@
+{"actors":[
+ {"uid":1,"name":"player","components":{
+  "a_observer":{"type":"AnimationObserver","label":"A"},
+  "anim":{"type":"SpriteAnimation","animation_resource":"hero.animation.json","renderer_key":"sprite","clip":"idle"},
+  "body":{"type":"Rigidbody","x":0,"y":0,"gravity_scale":0,"collider_type":"circle","radius":0.3,"has_trigger":false},
+  "controller":{"type":"AnimationController"},
+  "sprite":{"type":"SpriteRenderer","sprite":"base.png","scale_x":5,"scale_y":5,"sorting_order":10},
+  "transform":{"type":"Transform"},
+  "z_observer":{"type":"AnimationObserver","label":"Z"}
+ }},
+ {"uid":2,"name":"view","components":{"view":{"type":"AnimationView"}}}
+]}

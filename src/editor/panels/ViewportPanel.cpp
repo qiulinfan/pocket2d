@@ -1,7 +1,7 @@
 #include "editor/panels/ViewportPanel.h"
 #include "engine/core/Engine.h"
 #include "imgui.h"
-#include "SDL2/SDL.h"
+#include "SDL3/SDL.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

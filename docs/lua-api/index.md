@@ -16,8 +16,10 @@ classes.
 | Audio | `Audio.*`, `Music.*` |
 | Input | `Input.*`, `vec2` |
 | Events | `Event.*` |
+| Inventory | [`Inventory.Open`, native containers](inventory.md) |
+| Gameplay saves | [`Save.Write`, `Save.Read`](savegame.md) |
 | Physics | `Physics.*`, `Vector2`, `Collision`, `HitResult` |
-| Built-in components | `Transform`, `SpriteRenderer`, `Rigidbody`, `ParticleSystem` |
+| Built-in components | `Transform`, `SpriteRenderer`, `Rigidbody`, `ParticleSystem`, [Tilemap](tilemap.md), [SpriteAnimation](sprite-animation.md) |
 
 ## Important conventions
 
@@ -77,3 +79,12 @@ still uses:
 - `sprite_column`
 
 as separate properties.
+
+## Typed authoring
+
+The [curated script contract](../development/script-api-contract.md) generates
+LuaLS metadata and TypeScript declarations from one source. See the
+[optional TypeScript frontend](../development/typescript-authoring.md) for pinned
+compiler setup, one-component bundling, real replay evidence and limitations.
+Do not put `types/pocket2d.lua` into a runtime component directory; it is editor
+metadata, not an executable replacement for the native API.

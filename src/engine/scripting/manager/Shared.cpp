@@ -1,13 +1,19 @@
+#include "scripting/LuaBoundary.h"
 #include "Internal.h"
 #include "rendering/SpriteRenderer.h"
 #include "particles/ParticleSystem.h"
 #include "scripting/ComponentManager.h"
 #include "scripting/EventBus.h"
 #include "scene/Transform.h"
+#include "scene/ActorHandle.h"
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <iostream>
+
+namespace {
+int runtime_error_count = 0;
+std::string last_runtime_error;
+} // namespace
 
 namespace ManagerDetail {
 
@@ -15,7 +21,7 @@ RuntimeState g_runtime;
 
 bool IsBuiltinComponentType(const std::string &type_name) {
     return type_name == "Rigidbody" || type_name == "ParticleSystem" ||
-           type_name == "Transform" || type_name == "SpriteRenderer";
+           type_name == "Transform" || type_name == "SpriteRenderer" || type_name == "Tilemap" || type_name == "SpriteAnimation";
 }
 
 ComponentRecord *FindComponentRecord(Actor::UID actor_uid,
@@ -168,19 +174,68 @@ void RebuildLifecycleListsForDirtyActors(
               CompareLifecycleComponentRef);
 }
 
+namespace {
+struct LuaStackScope {
+    lua_State *state;
+    int top;
+    ~LuaStackScope() { lua_settop(state, top); }
+};
+int ReadField(lua_State *state) { lua_settop(state, 2); lua_gettable(state, 1); return 1; }
+int WriteField(lua_State *state) { lua_settop(state, 3); lua_settable(state, 1); return 0; }
+}
+luabridge::LuaRef ProtectedField(const luabridge::LuaRef &object, const char *name) {
+    auto *state = g_runtime.lua_state;
+    const LuaStackScope stack{state, lua_gettop(state)};
+    // Ordinary prototype inheritance is a chain of raw table reads, not user
+    // code. Resolve that common case without a protected Lua call. Keep one
+    // table on the stack and bound traversal; functions, userdata, unusual
+    // metamethod values and cycles still use Lua's own protected semantics.
+    if (object.isTable()) {
+        object.push(state);
+        constexpr int max_raw_depth = 64;
+        for (int depth = 0; depth < max_raw_depth; ++depth) {
+            lua_pushstring(state, name);
+            lua_rawget(state, -2);
+            if (!lua_isnil(state, -1)) return luabridge::LuaRef::fromStack(state);
+            lua_pop(state, 1);
+            if (!lua_getmetatable(state, -1)) return luabridge::LuaRef(state);
+            lua_pushliteral(state, "__index");
+            lua_rawget(state, -2);
+            lua_remove(state, -2); // metatable; leave current table + __index
+            if (lua_isnil(state, -1)) return luabridge::LuaRef(state);
+            if (!lua_istable(state, -1)) break;
+            lua_replace(state, stack.top + 1); // next table replaces the current one
+        }
+        lua_settop(state, stack.top);
+    }
+    lua_pushcfunction(state, ReadField); object.push(state); lua_pushstring(state, name);
+    LuaBoundary::ProtectedCall(state, 2, 1);
+    return luabridge::LuaRef::fromStack(state);
+}
+void ProtectedSetField(const luabridge::LuaRef &object, const char *name, const luabridge::LuaRef &value) {
+    auto *state = g_runtime.lua_state;
+    const LuaStackScope stack{state, lua_gettop(state)};
+    lua_pushcfunction(state, WriteField); object.push(state); lua_pushstring(state, name); value.push(state);
+    LuaBoundary::ProtectedCall(state, 3, 0);
+}
+void SetSystemField(const luabridge::LuaRef &object, const char *name, const luabridge::LuaRef &value) {
+    if (!object.isTable()) { ProtectedSetField(object, name, value); return; }
+    auto *state = g_runtime.lua_state;
+    const LuaStackScope stack{state, lua_gettop(state)};
+    // Engine identity/disable writes must not call script __newindex during
+    // container maintenance. User-facing property edits retain setter behavior.
+    object.push(state); lua_pushstring(state, name); value.push(state); lua_rawset(state, -3);
+}
 bool IsComponentEnabled(const ComponentRecord &component) {
-    // removed 组件一律不可执行生命周期
     if (component.removed) return false;
-    luabridge::LuaRef enabled_ref = component.instance_table["enabled"];
-    if (enabled_ref.isNil()) return true;
-    if (enabled_ref.isBool()) return enabled_ref.cast<bool>();
-    // Lua truthiness: only false/nil are false
-    return true;
+    const auto reference = component.instance_table;
+    const auto enabled = ProtectedField(reference, "enabled");
+    return LuaBoundary::IsEnabled(enabled);
 }
 
 void SyncBuiltinParticleSystemState(ComponentRecord &component) {
     if (component.type != "ParticleSystem") return;
-    ParticleSystem *system = component.instance_table.cast<ParticleSystem *>();
+    ParticleSystem *system = LuaBoundary::Cast<ParticleSystem *>(component.instance_table);
     if (system == nullptr) return;
     system->SyncRuntimeState();
 }
@@ -206,8 +261,13 @@ void RotateClockwise(float x, float y, float rotation_degrees, float &out_x,
 void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
     // Built-in render components draw during the render phase itself so they
     // still appear in editor frozen frames where gameplay updates are paused.
-    for (auto &actor_components_entry : g_runtime.actor_components) {
-        auto actor_it = g_runtime.actor_by_uid.find(actor_components_entry.first);
+    // Sorting-order ties must preserve authored scene order, not hash-table
+    // iteration order. This also makes overlapping fractional pixel edges
+    // deterministic across the SpriteRenderer and Tilemap submission paths.
+    for (Actor::UID uid : g_runtime.actor_uids_sorted) {
+        auto components_it = g_runtime.actor_components.find(uid);
+        if (components_it == g_runtime.actor_components.end()) continue;
+        auto actor_it = g_runtime.actor_by_uid.find(uid);
         Actor *actor = (actor_it != g_runtime.actor_by_uid.end())
                            ? actor_it->second
                            : nullptr;
@@ -217,13 +277,12 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
         }
 
         for (std::unique_ptr<ComponentRecord> &component_ptr :
-             actor_components_entry.second) {
+             components_it->second) {
             ComponentRecord &component = *component_ptr;
             if (component.removed) continue;
-            if (!IsComponentEnabled(component)) continue;
             if (component.type != "SpriteRenderer") continue;
 
-            SpriteRenderer *sprite_renderer = component.instance_table.cast<SpriteRenderer *>();
+            SpriteRenderer *sprite_renderer = LuaBoundary::Cast<SpriteRenderer *>(component.instance_table);
             if (sprite_renderer == nullptr) continue;
             sprite_renderer->QueueDraw();
         }
@@ -279,21 +338,14 @@ bool TryExtractComponentIdentity(const luabridge::LuaRef &component_ref,
                                  Actor::UID &actor_uid,
                                  std::string &component_key) {
     if (component_ref.isNil()) return false;
-
-    luabridge::LuaRef key_ref = component_ref["key"];
-    luabridge::LuaRef actor_ref = component_ref["actor"];
-    if (!key_ref.isString() || actor_ref.isNil()) return false;
-
-    try {
-        Actor *actor = actor_ref.cast<Actor *>();
-        if (actor == nullptr) return false;
-        actor_uid = actor->uid;
-        component_key = key_ref.cast<std::string>();
-        return true;
-    } catch (const luabridge::LuaException &) {
-        lua_settop(g_runtime.lua_state, 0);
-        return false;
-    }
+    const auto key_ref = ProtectedField(component_ref, "key");
+    const auto actor_ref = ProtectedField(component_ref, "actor");
+    if (!key_ref.isString() || !actor_ref.isInstance<ActorHandle>()) return false;
+    auto *actor = LuaBoundary::Cast<ActorHandle>(actor_ref).Resolve();
+    if (actor == nullptr) return false;
+    actor_uid = actor->uid;
+    component_key = LuaBoundary::Cast<std::string>(key_ref);
+    return IsComponentRefAlive(component_ref, actor_uid, component_key);
 }
 
 bool IsComponentRefAlive(const luabridge::LuaRef &component_ref,
@@ -314,112 +366,152 @@ std::string GetActorNameByUID(Actor::UID actor_uid) {
 }
 
 void ReportError(const std::string &actor_name,
-                 const luabridge::LuaException &e) {
+                 const LuaBoundary::Error &e) {
     std::string error_message = e.what();
     std::replace(error_message.begin(), error_message.end(), '\\', '/');
-    std::cout << "\033[31m" << actor_name << " : " << error_message
-              << "\033[0m" << std::endl;
+    const LuaBoundary::Error bounded(actor_name + " : " + error_message);
+    ++runtime_error_count;
+    last_runtime_error = bounded.what();
+    std::cout << "\033[31m" << last_runtime_error << "\033[0m" << std::endl;
 }
 
 void ReportEventBusError(Actor::UID actor_uid,
-                         const luabridge::LuaException &e) {
+                         const LuaBoundary::Error &e) {
     ReportError(GetActorNameByUID(actor_uid), e);
 }
 
-void RunComponentOnDestroyIfNeeded(ComponentRecord &component,
-                                   Actor::UID actor_uid) {
+void RunComponentOnDestroyIfNeeded(ComponentRecord &component, Actor::UID actor_uid) {
     if (component.on_destroy_called) return;
-    if (!component.has_on_destroy) {
-        component.on_destroy_called = true;
-        EventBus::RemoveSubscriptionsForComponent(component.instance_table,
-                                                  actor_uid, component.key);
-        return;
-    }
-
-    try {
-        component.instance_table["OnDestroy"](component.instance_table);
-    } catch (const luabridge::LuaException &e) {
-        ReportError(GetActorNameByUID(actor_uid), e);
-        lua_settop(g_runtime.lua_state, 0);
-    }
-
+    // Mark before either getter or callback can reenter teardown. Copy everything
+    // needed afterwards; callbacks can grow/sort the component container.
     component.on_destroy_called = true;
-    EventBus::RemoveSubscriptionsForComponent(component.instance_table,
-                                              actor_uid,
-                                              component.key);
+    const bool has_callback = component.has_on_destroy;
+    const auto reference = component.instance_table;
+    const auto key = component.key;
+    const int top = lua_gettop(g_runtime.lua_state);
+    if (has_callback) {
+        try {
+            const auto callback = ProtectedField(reference, "OnDestroy");
+            if (callback.isFunction()) LuaBoundary::CallDiscard(callback, reference);
+        } catch (const LuaBoundary::Error &error) {
+            ReportError(GetActorNameByUID(actor_uid), error);
+        }
+    }
+    lua_settop(g_runtime.lua_state, top);
+    EventBus::RemoveSubscriptionsForComponent(reference, actor_uid, key);
 }
 
 } // namespace ManagerDetail
 
+int ComponentManager::GetRuntimeErrorCount() { return runtime_error_count; }
+
+const std::string &ComponentManager::GetLastRuntimeError() {
+    return last_runtime_error;
+}
+
+void ComponentManager::ClearRuntimeErrors() {
+    runtime_error_count = 0;
+    last_runtime_error.clear();
+}
+
 void ComponentManager::QueueBuiltinRenderers(bool scene_backed_only) {
+    ApplySpriteAnimationPoses();
     ManagerDetail::QueueBuiltinSpriteRendererDraws(scene_backed_only);
 }
 
-void ComponentManager::ResolveTransformHierarchy() {
-    std::unordered_set<Actor::UID> resolved_actor_uids;
-    std::unordered_set<Actor::UID> resolving_actor_uids;
+namespace {
 
-    std::function<void(Actor::UID)> resolve_actor_world_transform =
-        [&](Actor::UID actor_uid) {
-            if (resolved_actor_uids.find(actor_uid) != resolved_actor_uids.end()) {
-                return;
-            }
-            if (!resolving_actor_uids.insert(actor_uid).second) {
-                return;
-            }
-
+// A resolver lives for one query or one full-scene pass. Local fields are
+// writable from Lua, so retaining results across queries would make them stale.
+class WorldTransformResolver {
+public:
+    void Resolve(Actor::UID actor_uid) {
+        while (resolved_.find(actor_uid) == resolved_.end() &&
+               resolving_.insert(actor_uid).second) {
             auto actor_it = ManagerDetail::g_runtime.actor_by_uid.find(actor_uid);
-            // try to find the actor for this uid, but even if not found we can still resolve a world transform for it (treat as root)
-            Actor *actor = (actor_it != ManagerDetail::g_runtime.actor_by_uid.end()) ? actor_it->second : nullptr;
-            ManagerDetail::ComponentRecord *transform_component =  ManagerDetail::FindPrimaryComponentByType(actor_uid, "Transform");
-            if (transform_component != nullptr) {
-                Transform *transform = transform_component->instance_table.cast<Transform *>();
-                if (transform != nullptr) {
-                    if (actor == nullptr || actor->parent_uid == Actor::kInvalidUID || actor->parent_uid == actor_uid) {
-                        transform->world_x = transform->x;
-                        transform->world_y = transform->y;
-                        transform->world_rotation = transform->rotation;
-                    } else {
-                        resolve_actor_world_transform(actor->parent_uid);
-                        ManagerDetail::ComponentRecord *parent_transform_component = ManagerDetail::FindPrimaryComponentByType( actor->parent_uid, "Transform");
-                        Transform *parent_transform = (parent_transform_component != nullptr) ? parent_transform_component->instance_table.cast<Transform *>()
-                                                                                              : nullptr;
-                        if (parent_transform == nullptr) {
-                            transform->world_x = transform->x;
-                            transform->world_y = transform->y;
-                            transform->world_rotation = transform->rotation;
-                        } else {
-                            float rotated_local_x = 0.0f;
-                            float rotated_local_y = 0.0f;
-                            ManagerDetail::RotateClockwise(transform->x, transform->y,parent_transform->world_rotation,rotated_local_x, rotated_local_y);
-                            transform->world_x = parent_transform->world_x + rotated_local_x;
-                            transform->world_y = parent_transform->world_y + rotated_local_y;
-                            transform->world_rotation = parent_transform->world_rotation + transform->rotation;
-                        }
+            Actor *actor = actor_it == ManagerDetail::g_runtime.actor_by_uid.end()
+                               ? nullptr : actor_it->second;
+            auto *component = ManagerDetail::FindPrimaryComponentByType(actor_uid, "Transform");
+            Transform *transform = component == nullptr
+                                       ? nullptr : LuaBoundary::Cast<Transform *>(component->instance_table);
+            const Actor::UID parent_uid = actor == nullptr
+                                             ? Actor::kInvalidUID : actor->parent_uid;
+            path_.push_back({actor_uid, parent_uid, transform});
+            if (transform == nullptr || parent_uid == Actor::kInvalidUID ||
+                parent_uid == actor_uid) {
+                break;
+            }
+            actor_uid = parent_uid;
+        }
+
+        // Unwind explicitly rather than recursively; imported/deep hierarchies
+        // must not exhaust the native stack. A cycle uses the same already
+        // stored parent world pose as the former recursive guard.
+        while (!path_.empty()) {
+            const Entry entry = path_.back();
+            path_.pop_back();
+            if (entry.transform != nullptr) {
+                Transform *parent = nullptr;
+                if (entry.parent_uid != Actor::kInvalidUID &&
+                    entry.parent_uid != entry.uid) {
+                    auto *component = ManagerDetail::FindPrimaryComponentByType(
+                        entry.parent_uid, "Transform");
+                    if (component != nullptr) {
+                        parent = LuaBoundary::Cast<Transform *>(component->instance_table);
                     }
                 }
+                Transform &transform = *entry.transform;
+                if (parent == nullptr) {
+                    transform.world_x = transform.x;
+                    transform.world_y = transform.y;
+                    transform.world_rotation = transform.rotation;
+                } else {
+                    float rotated_x = 0.0f, rotated_y = 0.0f;
+                    ManagerDetail::RotateClockwise(
+                        transform.x, transform.y, parent->world_rotation,
+                        rotated_x, rotated_y);
+                    transform.world_x = parent->world_x + rotated_x;
+                    transform.world_y = parent->world_y + rotated_y;
+                    transform.world_rotation = parent->world_rotation + transform.rotation;
+                }
             }
+            resolving_.erase(entry.uid);
+            resolved_.insert(entry.uid);
+        }
+    }
 
-            resolving_actor_uids.erase(actor_uid);
-            resolved_actor_uids.insert(actor_uid);
-        };
+private:
+    struct Entry {
+        Actor::UID uid;
+        Actor::UID parent_uid;
+        Transform *transform;
+    };
+    std::unordered_set<Actor::UID> resolved_;
+    std::unordered_set<Actor::UID> resolving_;
+    std::vector<Entry> path_;
+};
 
+} // namespace
+
+void ComponentManager::ResolveTransformHierarchy() {
+    WorldTransformResolver resolver;
     for (const auto &entry : ManagerDetail::g_runtime.actor_by_uid) {
         if (entry.second == nullptr || entry.second->runtime_destroyed) continue;
-        resolve_actor_world_transform(entry.first);
+        resolver.Resolve(entry.first);
     }
 }
 
 bool ComponentManager::TryGetRuntimeTransformWorld(
     Actor::UID actor_uid, float &x, float &y, float &rotation,
     std::string *out_component_key) {
-    ResolveTransformHierarchy();
+    WorldTransformResolver resolver;
+    resolver.Resolve(actor_uid);
 
     ManagerDetail::ComponentRecord *transform_component =
         ManagerDetail::FindPrimaryComponentByType(actor_uid, "Transform");
     if (transform_component == nullptr) return false;
 
-    Transform *transform = transform_component->instance_table.cast<Transform *>();
+    Transform *transform = LuaBoundary::Cast<Transform *>(transform_component->instance_table);
     if (transform == nullptr) return false;
 
     x = transform->world_x;
@@ -445,7 +537,7 @@ bool ComponentManager::SetRuntimeTransformWorldPosition(Actor::UID actor_uid,
         ManagerDetail::FindPrimaryComponentByType(actor_uid, "Transform");
     if (transform_component == nullptr) return false;
 
-    Transform *transform = transform_component->instance_table.cast<Transform *>();
+    Transform *transform = LuaBoundary::Cast<Transform *>(transform_component->instance_table);
     if (transform == nullptr) return false;
 
     if (actor->parent_uid == Actor::kInvalidUID ||

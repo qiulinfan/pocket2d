@@ -1,6 +1,5 @@
 #include "RegistrationDetail.h"
 #include "audio/AudioManager.h"
-#include "core/Engine.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include <algorithm>
@@ -9,11 +8,11 @@
 namespace {
 
 using APIRegistrationDetail::g_lua_state;
-using APIRegistrationDetail::g_engine;
 
 bool CanRouteAudioCommands() {
-    if (g_engine == nullptr) return true;
-    return g_engine->IsAudioPlaybackEnabled();
+    // Top-level component scripts run before an Engine is bound. Respect the
+    // headless host's disabled flag there too, before opening any audio device.
+    return AudioManager::IsPlaybackEnabled();
 }
 
 bool EnsureAudioInitialized() {

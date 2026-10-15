@@ -1,8 +1,10 @@
 #ifndef PARTICLESYSTEM_H
 #define PARTICLESYSTEM_H
 
+#include "scene/ActorHandle.h"
 #include "particles/RandomEngine.h"
 #include <limits>
+#include <cstdint>
 #include <string>
 
 struct Actor;
@@ -13,6 +15,7 @@ public:
     ParticleSystem(const ParticleSystem &) = default;
 
     Actor *actor = nullptr;
+    ActorHandle actor_handle;
     std::string key = "";
     bool enabled = true;
 
@@ -60,6 +63,9 @@ public:
     float angular_drag_factor = 1.0f;
     float end_scale = std::numeric_limits<float>::quiet_NaN();
 
+    // Throws before allocation or emission when authoring/runtime configuration is invalid.
+    void ValidateConfiguration() const;
+
     void OnStart();
     void OnUpdate();
     void OnDestroy();
@@ -78,11 +84,11 @@ public:
     void SyncRuntimeState();
 
 private:
+    bool HasLiveRuntimeBinding() const;
     // lazy setup of distributions and backing emitter
     // 延迟初始化随机分布器和底层 emitter
     void InitializeIfNeeded();
     void EmitBurst(int particle_count);
-    static int ClampMinimumOne(int value);
     static int ClampByte(int value);
 
     RandomEngine emit_angle_distribution;
@@ -95,7 +101,7 @@ private:
     // runtime emitter state owned by ParticleManager
     // ParticleManager 持有的运行时 emitter 状态
     int emitter_id = -1;
-    int local_frame_number = 0;
+    std::uint64_t local_frame_number = 0;
     bool emission_allowed = true;
     bool initialized = false;
 };

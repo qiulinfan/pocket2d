@@ -1,7 +1,7 @@
 #include "app/editor/EditorApp.h"
 #include "input/SDLEventHelper.h"
-#include "SDL2/SDL.h"
-#include "SDL2_image/SDL_image.h"
+#include "SDL3/SDL.h"
+#include "SDL3_image/SDL_image.h"
 #include "shared/resources/ResourcePath.h"
 #include <algorithm>
 #include <cctype>
@@ -121,19 +121,19 @@ int ClampToRange(int value, int minimum, int maximum) {
 
 SDL_Rect QueryUsableDisplayBounds(SDL_Window *window) {
     SDL_Rect bounds{0, 0, 1600, 900};
-    int display_index = 0;
+    SDL_DisplayID display_id = SDL_GetPrimaryDisplay();
     if (window != nullptr) {
-        const int queried_display_index = SDL_GetWindowDisplayIndex(window);
-        if (queried_display_index >= 0) {
-            display_index = queried_display_index;
+        const SDL_DisplayID queried_display_id = SDL_GetDisplayForWindow(window);
+        if (queried_display_id != 0) {
+            display_id = queried_display_id;
         }
     }
 
-    if (SDL_GetDisplayUsableBounds(display_index, &bounds) == 0 &&
+    if (SDL_GetDisplayUsableBounds(display_id, &bounds) &&
         bounds.w > 0 && bounds.h > 0) {
         return bounds;
     }
-    if (SDL_GetDisplayBounds(display_index, &bounds) == 0 && bounds.w > 0 &&
+    if (SDL_GetDisplayBounds(display_id, &bounds) && bounds.w > 0 &&
         bounds.h > 0) {
         return bounds;
     }
@@ -199,12 +199,12 @@ void ApplyEditorWindowIcon(SDL_Window *window) {
     if (icon_surface == nullptr) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "EditorApp: failed to load icon from %s: %s",
-                    icon_path.string().c_str(), IMG_GetError());
+                    icon_path.string().c_str(), SDL_GetError());
         return;
     }
 
     SDL_SetWindowIcon(window, icon_surface);
-    SDL_FreeSurface(icon_surface);
+    SDL_DestroySurface(icon_surface);
 }
 
 bool AreEditorConfigsEqualForConfirmation(const EditorConfigData &lhs,
@@ -260,18 +260,19 @@ void EditorApp::ApplyEditorWindowSettings() {
     const WindowedPlacement placement = BuildWindowedPlacement(editor_config_, runtime_config, window);
 
     // The editor host window is independent from the runtime resolution.
-    SDL_SetWindowResizable(window, SDL_TRUE);
+    SDL_SetWindowResizable(window, true);
     SDL_SetWindowMinimumSize(window, runtime_config.window_width, runtime_config.window_height);
     SDL_RestoreWindow(window);
     if (editor_config_.window_fullscreen) {
-        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        SDL_SetWindowFullscreenMode(window, nullptr);
+        SDL_SetWindowFullscreen(window, true);
     } else {
         editor_config_.window_width = placement.width;
         editor_config_.window_height = placement.height;
         editor_config_.window_x = placement.x;
         editor_config_.window_y = placement.y;
         editor_config_.window_has_position = true;
-        SDL_SetWindowFullscreen(window, 0);
+        SDL_SetWindowFullscreen(window, false);
         SDL_SetWindowSize(window, placement.width, placement.height);
         SDL_SetWindowPosition(window, placement.x, placement.y);
         if (editor_config_.window_maximized) {
@@ -287,9 +288,10 @@ void EditorApp::SetEditorFullscreen(bool enabled) {
     if (window == nullptr) return;
 
     if (enabled) {
-        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        SDL_SetWindowFullscreenMode(window, nullptr);
+        SDL_SetWindowFullscreen(window, true);
     } else {
-        SDL_SetWindowFullscreen(window, 0);
+        SDL_SetWindowFullscreen(window, false);
         const WindowedPlacement placement =
             BuildWindowedPlacement(editor_config_, engine_->GetConfig(), window);
         SDL_RestoreWindow(window);
@@ -309,9 +311,8 @@ bool EditorApp::IsEditorWindowFullscreen() const {
     SDL_Window *window = engine_->GetWindow();
     if (window == nullptr) return false;
 
-    const Uint32 window_flags = SDL_GetWindowFlags(window);
-    return (window_flags & SDL_WINDOW_FULLSCREEN) != 0 ||
-           (window_flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+    const SDL_WindowFlags window_flags = SDL_GetWindowFlags(window);
+    return (window_flags & SDL_WINDOW_FULLSCREEN) != 0;
 }
 
 bool EditorApp::IsEditorWindowMaximized() const {
@@ -319,7 +320,7 @@ bool EditorApp::IsEditorWindowMaximized() const {
     SDL_Window *window = engine_->GetWindow();
     if (window == nullptr) return false;
 
-    const Uint32 window_flags = SDL_GetWindowFlags(window);
+    const SDL_WindowFlags window_flags = SDL_GetWindowFlags(window);
     return (window_flags & SDL_WINDOW_MAXIMIZED) != 0;
 }
 
@@ -368,11 +369,11 @@ void EditorApp::SyncWindowStateFromLiveWindow() {
 }
 
 void EditorApp::HandleWindowEvent(const SDL_WindowEvent &window_event) {
-    switch (window_event.event) {
-    case SDL_WINDOWEVENT_MOVED:
-    case SDL_WINDOWEVENT_SIZE_CHANGED:
-    case SDL_WINDOWEVENT_MAXIMIZED:
-    case SDL_WINDOWEVENT_RESTORED:
+    switch (window_event.type) {
+    case SDL_EVENT_WINDOW_MOVED:
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_MAXIMIZED:
+    case SDL_EVENT_WINDOW_RESTORED:
         SyncWindowStateFromLiveWindow();
         break;
     default:
@@ -481,6 +482,10 @@ bool EditorApp::BootstrapEngineForCurrentProject() {
 }
 
 bool EditorApp::SwitchProject(const std::filesystem::path &project_root) {
+    if (overlay_.HasUnsavedMapChanges()) {
+        overlay_.ShowNotice("Save or discard Map Asset edits in the Inspector before switching projects.");
+        return false;
+    }
     const std::filesystem::path normalized_root =
         ResourcePath::NormalizeProjectRoot(project_root);
     if (!IsExistingDirectory(normalized_root)) {
@@ -532,27 +537,35 @@ void EditorApp::Run() {
     editor_config_dirty_ = false;
     confirmed_editor_config_persist_dirty_ = false;
 
-    while (engine_ && engine_->IsRunning()) {
+    // A script-requested quit must still leave unsaved authoring drafts reachable.
+    while (engine_ && (engine_->IsRunning() || overlay_.HasUnsavedMapChanges())) {
         /*
-        Scene edits are mirrored into runtime at frame boundaries so the UI
-        never mutates live runtime state in the middle of a frame.
+        Retry pending draft recovery before simulation. Normal document edits
+        commit through the session hook at the owner-thread UI boundary.
         */
         engine_->SetAudioPlaybackEnabled(scene_session_.IsPlayModeActive());
         scene_session_.SyncRuntimeMirrorIfDirty(*engine_);
         overlay_.SetRuntimeInputRoutingState(scene_session_.IsPlayModeActive(), scene_session_.IsPlayModePaused());
+        overlay_.SetSceneEditStatus(scene_session_.GetLastEditError(), scene_session_.IsRuntimeMirrorPending());
 
         bool quit_requested_this_frame = false;
         SDL_Event event;
         while (SDLEventHelper::SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT && overlay_.HasUnsavedMapChanges()) {
+                overlay_.ShowNotice("Save or discard Map Asset edits in the Inspector before closing.");
+                continue;
+            }
             const bool captured_by_editor = overlay_.ProcessEvent(event);
-            if (event.type == SDL_WINDOWEVENT) {
+            const bool is_window_event = event.type >= SDL_EVENT_WINDOW_FIRST &&
+                                         event.type <= SDL_EVENT_WINDOW_LAST;
+            if (is_window_event) {
                 HandleWindowEvent(event.window);
             }
             /*
             Window lifecycle events must still reach the runtime 
             even when ImGui is actively capturing keyboard or mouse input.
             */
-            const bool always_forward_to_runtime = event.type == SDL_QUIT || event.type == SDL_WINDOWEVENT;
+            const bool always_forward_to_runtime = event.type == SDL_EVENT_QUIT || is_window_event;
             if (!captured_by_editor || always_forward_to_runtime) {
                 const SDL_Event runtime_event =
                     overlay_.BuildRuntimeEvent(event, *engine_);
@@ -592,21 +605,13 @@ void EditorApp::Run() {
                                 scene_session_.IsEditModeLivePreviewEnabled(),
                                 scene_session_.IsSceneEditingEnabled(),
                                 scene_session_.IsSceneSaveEnabled());
-            for (std::size_t command_index = 0;
-                 command_index < overlay_result.scene_edit_commands.size();
-                 ++command_index) {
-                if (command_index >=
-                        overlay_result
-                            .scene_edit_commands_runtime_synced_begin_index &&
-                    command_index <
-                        overlay_result
-                            .scene_edit_commands_runtime_synced_end_index) {
-                    continue;
-                }
-                scene_session_.HandleSceneEditCommand( overlay_result.scene_edit_commands[command_index], *engine_);
-            }
+            scene_session_.HandleSceneEditCommands(overlay_result.scene_edit_commands, *engine_);
+            if (overlay_result.retry_scene_mirror_requested) scene_session_.RetryRuntimeMirror();
+            if (overlay_result.dismiss_scene_edit_error_requested) scene_session_.ClearEditError();
             if (overlay_result.play_mode_start_requested) {
-                if (!scene_session_.EnterPlayMode(*engine_)) {
+                if (overlay_.HasUnsavedMapChanges()) {
+                    overlay_.ShowNotice("Save or discard Map Asset edits before entering play mode.");
+                } else if (!scene_session_.EnterPlayMode(*engine_)) {
                     const std::string &load_error =
                         engine_->GetLastSceneLoadError();
                     overlay_.ShowNotice(
@@ -663,11 +668,23 @@ void EditorApp::Run() {
                                        overlay_result.requested_scene_path,
                                        ResourcePath::ResourcesRootPath());
                 } else {
-                    /*
-                    scene switch: flush dirty cache first, 
-                    then load the new document and rebuild runtime mirror on the next frame boundary.
-                    */
-                    scene_session_.OpenSceneFromPath(overlay_result.requested_scene_path, *engine_);
+                    const auto previous_attempt = engine_->GetSceneLoadAttemptRevision();
+                    if (scene_session_.OpenSceneFromPath(overlay_result.requested_scene_path, *engine_)) {
+                        overlay_.NotifySceneOpened();
+                    } else if (engine_->RequiresSceneReset()) {
+                        const std::string failure = "Scene transition failed after commit began; restart the editor. Rollback is not guaranteed. " +
+                                                    engine_->GetLastSceneLoadError();
+                        // The stopped runtime may close the loop before another overlay draw.
+                        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", failure.c_str());
+                        overlay_.ShowNotice(failure);
+                    } else if (engine_->GetSceneLoadAttemptRevision() != previous_attempt &&
+                               !engine_->GetLastSceneLoadError().empty()) {
+                        overlay_.ShowNotice("Cannot open scene: " + engine_->GetLastSceneLoadError());
+                    } else {
+                        // A document parse/path rejection may occur before an
+                        // Engine attempt. Do not display a stale previous error.
+                        overlay_.ShowNotice("Cannot read scene: " + overlay_result.requested_scene_path.string());
+                    }
                 }
             }
             if (overlay_result.open_external_editor_requested) {

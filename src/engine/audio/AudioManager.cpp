@@ -1,5 +1,4 @@
 #include "audio/AudioManager.h"
-#include "audio/AudioHelper.h"
 #include "shared/resources/ResourcePath.h"
 #include "scene/Scene.h"
 #include <algorithm>
@@ -13,6 +12,17 @@ std::unordered_set<std::string> g_audio_warning_keys;
 int g_audio_resource_warning_count = 0;
 std::string g_audio_last_resource_warning;
 
+bool StartTrack(MIX_Track *track, MIX_Audio *audio, int loops) {
+    const SDL_PropertiesID options = SDL_CreateProperties();
+    if (options == 0) return false;
+    const bool configured = SDL_SetNumberProperty(
+        options, MIX_PROP_PLAY_LOOPS_NUMBER, loops < 0 ? -1 : loops);
+    const bool started = configured && MIX_SetTrackAudio(track, audio) &&
+                         MIX_PlayTrack(track, options);
+    SDL_DestroyProperties(options);
+    return started;
+}
+
 bool ShouldLogAudioDiagnostics() {
     return std::getenv("ENGINE_LOG_AUDIO") != nullptr;
 }
@@ -22,7 +32,7 @@ void LogPlaybackFailure(const char *kind, const std::string &audio_name,
     if (!ShouldLogAudioDiagnostics()) return;
     if (failure_count > 5 && (failure_count % 25) != 0) return;
     std::cout << "warning: " << kind << " playback failed for ["
-              << audio_name << "]: " << Mix_GetError() << std::endl;
+              << audio_name << "]: " << SDL_GetError() << std::endl;
 }
 
 void LogAudioWarningOnce(const std::string &key, const std::string &message) {
@@ -45,31 +55,42 @@ bool AudioManager::Init() {
     // Try audio backend once. In CI/headless machines ALSA/CoreAudio may be
     // missing; repeated retries would spam stderr every frame.
     init_attempted = true;
-    const int required_codec_flags = MIX_INIT_OGG | MIX_INIT_MP3;
-    const int initialized_codec_flags =
-        AudioHelper::Mix_Init(required_codec_flags);
-    if ((initialized_codec_flags & required_codec_flags) !=
-        required_codec_flags) {
-        if (!init_failure_logged) {
-            std::cout << "warning: SDL_mixer codec support is partial: "
-                      << Mix_GetError() << std::endl;
-        }
+    mixer_library_initialized = MIX_Init();
+    if (mixer_library_initialized) {
+        const SDL_AudioSpec requested{SDL_AUDIO_F32, 2, 48000};
+        mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &requested);
     }
-
-    const int result =
-        AudioHelper::Mix_OpenAudio(48000, MIX_DEFAULT_FORMAT, 2, 4096);
-    if (result != 0) {
+    if (mixer != nullptr) {
+        for (MIX_Track *&channel : channels) {
+            channel = MIX_CreateTrack(mixer);
+            if (channel == nullptr) break;
+        }
+        music_track = MIX_CreateTrack(mixer);
+    }
+    const bool tracks_ready = mixer != nullptr && music_track != nullptr &&
+        std::all_of(channels.begin(), channels.end(),
+                    [](MIX_Track *track) { return track != nullptr; });
+    if (!tracks_ready) {
         if (!init_failure_logged) {
-            std::cout << "warning: audio disabled (failed to open audio device): "
-                      << Mix_GetError() << std::endl;
+            std::cout << "warning: audio disabled (failed to initialize mixer): "
+                      << SDL_GetError() << std::endl;
             init_failure_logged = true;
         }
+        // DestroyMixer owns its tracks, including partial initialization.
+        MIX_DestroyMixer(mixer);
+        mixer = nullptr;
+        channels.fill(nullptr);
+        music_track = nullptr;
+        if (mixer_library_initialized) MIX_Quit();
+        mixer_library_initialized = false;
         return false;
     }
-    AudioHelper::Mix_AllocateChannels(64);
-    AudioHelper::Mix_VolumeMusic(MIX_MAX_VOLUME);
-    AudioHelper::Mix_QuerySpec(&actual_output_frequency, &actual_output_format,
-                               &actual_output_channels);
+    SDL_AudioSpec actual{};
+    if (MIX_GetMixerFormat(mixer, &actual)) {
+        actual_output_frequency = actual.freq;
+        actual_output_format = actual.format;
+        actual_output_channels = actual.channels;
+    }
     if (ShouldLogAudioDiagnostics()) {
         std::cout << "audio: opened device at " << actual_output_frequency
                   << " Hz, format " << actual_output_format << ", channels "
@@ -87,22 +108,24 @@ void AudioManager::Shutdown() {
 
     for (auto &entry : audio_cache) {
         if (entry.second != nullptr) {
-            AudioHelper::Mix_FreeChunk(entry.second);
+            MIX_DestroyAudio(entry.second);
         }
     }
     audio_cache.clear();
 
     for (auto &entry : music_cache) {
         if (entry.second != nullptr) {
-            AudioHelper::Mix_FreeMusic(entry.second);
+            MIX_DestroyAudio(entry.second);
         }
     }
     music_cache.clear();
 
-    if (initialized) {
-        AudioHelper::Mix_CloseAudio();
-    }
-    AudioHelper::Mix_Quit();
+    MIX_DestroyMixer(mixer);
+    mixer = nullptr;
+    channels.fill(nullptr);
+    music_track = nullptr;
+    if (mixer_library_initialized) MIX_Quit();
+    mixer_library_initialized = false;
 
     initialized = false;
     init_attempted = false;
@@ -116,7 +139,7 @@ void AudioManager::Shutdown() {
     g_audio_resource_warning_count = 0;
     g_audio_last_resource_warning.clear();
     actual_output_frequency = 0;
-    actual_output_format = 0;
+    actual_output_format = SDL_AUDIO_UNKNOWN;
     actual_output_channels = 0;
 }
 
@@ -136,7 +159,7 @@ std::string AudioManager::ClipNameSansExtension(const std::string &audio_name) {
 }
 
 // load audio by name and cache it
-Mix_Chunk *AudioManager::LoadAudioClip(const std::string &audio_name) {
+MIX_Audio *AudioManager::LoadAudioClip(const std::string &audio_name) {
     auto it = audio_cache.find(audio_name);
     if (it != audio_cache.end()) return it->second;
 
@@ -149,7 +172,7 @@ Mix_Chunk *AudioManager::LoadAudioClip(const std::string &audio_name) {
         return nullptr;
     }
 
-    Mix_Chunk *chunk = AudioHelper::Mix_LoadWAV(file_path.c_str());
+    MIX_Audio *chunk = MIX_LoadAudio(mixer, file_path.c_str(), true);
     if (chunk == nullptr) {
         LogAudioWarningOnce("clip:load:" + audio_name,
                             "audio clip [" +
@@ -162,7 +185,7 @@ Mix_Chunk *AudioManager::LoadAudioClip(const std::string &audio_name) {
     return chunk;
 }
 
-Mix_Music *AudioManager::LoadMusicTrack(const std::string &audio_name) {
+MIX_Audio *AudioManager::LoadMusicTrack(const std::string &audio_name) {
     auto it = music_cache.find(audio_name);
     if (it != music_cache.end()) return it->second;
 
@@ -175,7 +198,7 @@ Mix_Music *AudioManager::LoadMusicTrack(const std::string &audio_name) {
         return nullptr;
     }
 
-    Mix_Music *music = AudioHelper::Mix_LoadMUS(file_path.c_str());
+    MIX_Audio *music = MIX_LoadAudio(mixer, file_path.c_str(), false);
     if (music == nullptr) {
         LogAudioWarningOnce("music:load:" + audio_name,
                             "music track [" +
@@ -205,7 +228,7 @@ bool AudioManager::PreloadAudioClip(const std::string &audio_name) {
     const std::string file_path = FindAudioFile(audio_name);
     if (file_path.empty()) return false;
 
-    Mix_Chunk *chunk = AudioHelper::Mix_LoadWAV(file_path.c_str());
+    MIX_Audio *chunk = MIX_LoadAudio(mixer, file_path.c_str(), true);
     if (chunk == nullptr) return false;
 
     audio_cache[audio_name] = chunk;
@@ -219,7 +242,7 @@ bool AudioManager::PreloadMusicTrack(const std::string &audio_name) {
     const std::string file_path = FindAudioFile(audio_name);
     if (file_path.empty()) return false;
 
-    Mix_Music *music = AudioHelper::Mix_LoadMUS(file_path.c_str());
+    MIX_Audio *music = MIX_LoadAudio(mixer, file_path.c_str(), false);
     if (music == nullptr) return false;
 
     music_cache[audio_name] = music;
@@ -230,13 +253,21 @@ bool AudioManager::PreloadMusicTrack(const std::string &audio_name) {
 void AudioManager::PlayAudioClip(const std::string &audio_name, int channel,
                                  int loops) {
     if (!initialized || !playback_enabled) return;
-    Mix_Chunk *chunk = LoadAudioClip(audio_name);
+    MIX_Audio *chunk = LoadAudioClip(audio_name);
     if (chunk == nullptr) {
         ++audio_play_failure_count;
         return;
     }
-    const int started_channel = AudioHelper::Mix_PlayChannel(channel, chunk, loops);
-    if (started_channel != -1) return;
+    MIX_Track *track = nullptr;
+    if (channel == -1) {
+        const auto free_channel = std::find_if(channels.begin(), channels.end(),
+            [](MIX_Track *candidate) { return !MIX_TrackPlaying(candidate); });
+        if (free_channel != channels.end()) track = *free_channel;
+    } else if (channel >= 0 && channel < static_cast<int>(channels.size())) {
+        track = channels[static_cast<std::size_t>(channel)];
+    }
+    if (track != nullptr && StartTrack(track, chunk, loops)) return;
+    if (track == nullptr) SDL_SetError("No available audio channel");
     ++audio_play_failure_count;
     LogPlaybackFailure("audio", audio_name, audio_play_failure_count);
 }
@@ -247,12 +278,12 @@ void AudioManager::PlayMusicTrack(const std::string &audio_name, int loops) {
         current_music_loops == loops) {
         return;
     }
-    Mix_Music *music = LoadMusicTrack(audio_name);
+    MIX_Audio *music = LoadMusicTrack(audio_name);
     if (music == nullptr) {
         ++music_play_failure_count;
         return;
     }
-    if (AudioHelper::Mix_PlayMusic(music, loops) == -1) {
+    if (!StartTrack(music_track, music, loops)) {
         ++music_play_failure_count;
         LogPlaybackFailure("music", audio_name, music_play_failure_count);
         return;
@@ -264,41 +295,58 @@ void AudioManager::PlayMusicTrack(const std::string &audio_name, int loops) {
 // Stop playback on one mixer channel, or all channels when channel == -1.
 void AudioManager::HaltChannel(int channel) {
     if (!initialized) return;
-    AudioHelper::Mix_HaltChannel(channel);
+    if (channel == -1) {
+        for (MIX_Track *track : channels) MIX_StopTrack(track, 0);
+    } else if (channel >= 0 && channel < static_cast<int>(channels.size())) {
+        MIX_StopTrack(channels[static_cast<std::size_t>(channel)], 0);
+    }
 }
 
 // Update mixer volume for one channel without touching the cached clip data.
 void AudioManager::SetVolume(int channel, int volume) {
     if (!initialized) return;
-    AudioHelper::Mix_Volume(channel, volume);
+    if (volume < 0) return; // The legacy negative-volume query never changed gain.
+    const float gain = static_cast<float>(std::clamp(volume, 0, 128)) / 128.0f;
+    if (channel == -1) {
+        for (MIX_Track *track : channels) MIX_SetTrackGain(track, gain);
+    } else if (channel >= 0 && channel < static_cast<int>(channels.size())) {
+        MIX_SetTrackGain(channels[static_cast<std::size_t>(channel)], gain);
+    }
 }
 
 bool AudioManager::IsChannelPlaying(int channel) {
     if (!initialized) return false;
-    return AudioHelper::Mix_Playing(channel) != 0;
+    if (channel == -1) {
+        return std::any_of(channels.begin(), channels.end(),
+                          [](MIX_Track *track) { return MIX_TrackPlaying(track); });
+    }
+    return channel >= 0 && channel < static_cast<int>(channels.size()) &&
+        MIX_TrackPlaying(channels[static_cast<std::size_t>(channel)]);
 }
 
 void AudioManager::HaltMusic() {
     if (!initialized) return;
-    AudioHelper::Mix_HaltMusic();
+    MIX_StopTrack(music_track, 0);
     current_music_name.clear();
     current_music_loops = 0;
 }
 
 void AudioManager::SetMusicVolume(int volume) {
     if (!initialized) return;
-    AudioHelper::Mix_VolumeMusic(volume);
+    if (volume < 0) return;
+    MIX_SetTrackGain(music_track,
+                    static_cast<float>(std::clamp(volume, 0, 128)) / 128.0f);
 }
 
 bool AudioManager::IsMusicPlaying() {
     if (!initialized) return false;
-    return AudioHelper::Mix_PlayingMusic() != 0;
+    return MIX_TrackPlaying(music_track);
 }
 
 void AudioManager::StopAllPlayback() {
     if (!initialized) return;
-    AudioHelper::Mix_HaltChannel(-1);
-    AudioHelper::Mix_HaltMusic();
+    HaltChannel(-1);
+    MIX_StopTrack(music_track, 0);
     current_music_name.clear();
     current_music_loops = 0;
 }

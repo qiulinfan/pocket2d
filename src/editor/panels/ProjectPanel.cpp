@@ -3,8 +3,8 @@
 #include "imgui.h"
 #include "shared/config/SpritesheetConfig.h"
 #include "shared/resources/ResourcePath.h"
-#include "SDL2/SDL.h"
-#include "SDL2_image/SDL_image.h"
+#include "SDL3/SDL.h"
+#include "SDL3_image/SDL_image.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -382,11 +382,9 @@ TextureDrawRect BuildTextureFitRect(SDL_Texture *texture, const ImVec2 &min_poin
     TextureDrawRect draw_rect;
     if (texture == nullptr) return draw_rect;
 
-    int texture_width_i = 0;
-    int texture_height_i = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &texture_width_i, &texture_height_i);
-    const float texture_width = static_cast<float>(texture_width_i);
-    const float texture_height = static_cast<float>(texture_height_i);
+    float texture_width = 0.0f;
+    float texture_height = 0.0f;
+    SDL_GetTextureSize(texture, &texture_width, &texture_height);
     if (texture_width <= 0.0f || texture_height <= 0.0f) return draw_rect;
 
     const float available_width = max_point.x - min_point.x;
@@ -414,11 +412,9 @@ void DrawTextureRegionFitCentered(ImDrawList *draw_list, SDL_Texture *texture,
                                   const ImVec2 &uv_max) {
     if (draw_list == nullptr || texture == nullptr) return;
 
-    int texture_width_i = 0;
-    int texture_height_i = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &texture_width_i, &texture_height_i);
-    const float texture_width = static_cast<float>(texture_width_i);
-    const float texture_height = static_cast<float>(texture_height_i);
+    float texture_width = 0.0f;
+    float texture_height = 0.0f;
+    SDL_GetTextureSize(texture, &texture_width, &texture_height);
     const float region_width =
         texture_width * std::max(0.0f, uv_max.x - uv_min.x);
     const float region_height =
@@ -531,9 +527,11 @@ void RenderSpritesheetPopup(SDL_Renderer *renderer) {
     if (texture == nullptr) {
         ImGui::TextUnformatted("Unable to load this image.");
     } else {
-        int texture_width = 0;
-        int texture_height = 0;
-        SDL_QueryTexture(texture, nullptr, nullptr, &texture_width, &texture_height);
+        float texture_width_f = 0.0f;
+        float texture_height_f = 0.0f;
+        SDL_GetTextureSize(texture, &texture_width_f, &texture_height_f);
+        const int texture_width = static_cast<int>(texture_width_f);
+        const int texture_height = static_cast<int>(texture_height_f);
 
         ImGui::Text("Image: %s", popup_state.image_path.filename().string().c_str());
         ImGui::TextDisabled("%d x %d px", texture_width, texture_height);
@@ -969,9 +967,9 @@ ImVec2 ComputeSpritesheetSpritePreviewSize(SDL_Texture *texture, int rows,
                                            int columns) {
     if (texture == nullptr) return ImVec2(72.0f, 72.0f);
 
-    int texture_width = 0;
-    int texture_height = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &texture_width, &texture_height);
+    float texture_width = 0.0f;
+    float texture_height = 0.0f;
+    SDL_GetTextureSize(texture, &texture_width, &texture_height);
     const float sprite_width =
         static_cast<float>(texture_width) / static_cast<float>(std::max(columns, 1));
     const float sprite_height =

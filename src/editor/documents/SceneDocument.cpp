@@ -9,6 +9,9 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <stdexcept>
+#include <utility>
+#include <type_traits>
 #include <unordered_set>
 
 namespace {
@@ -108,11 +111,53 @@ void RotateClockwise(float x, float y, float rotation_degrees,
 
 } // namespace
 
+SceneDocument::SceneDocument(const SceneDocument &other)
+    : scene_asset_(other.scene_asset_), actor_uids_(other.actor_uids_),
+      hierarchy_cache_dirty_(other.hierarchy_cache_dirty_),
+      parent_actor_indices_(other.parent_actor_indices_), children_by_actor_index_(other.children_by_actor_index_),
+      physics_hierarchy_cache_dirty_(other.physics_hierarchy_cache_dirty_),
+      physics_hierarchy_states_by_actor_index_(other.physics_hierarchy_states_by_actor_index_),
+      dirty_(other.dirty_), next_scene_backed_uid_(other.next_scene_backed_uid_),
+      last_allocated_new_actor_ordinal_(other.last_allocated_new_actor_ordinal_),
+      new_actor_counter_dirty_(other.new_actor_counter_dirty_) {}
+
+SceneDocument::SceneDocument(SceneDocument &&other) {
+    if (other.applying_command_) throw std::logic_error("cannot move a document during edit precommit");
+    SwapState(other);
+}
+SceneDocument &SceneDocument::operator=(const SceneDocument &other) {
+    if (this == &other) return *this;
+    if (applying_command_) throw std::logic_error("cannot replace a document during edit precommit");
+    SceneDocument candidate(other); SwapState(candidate); return *this;
+}
+SceneDocument &SceneDocument::operator=(SceneDocument &&other) {
+    if (this == &other) return *this;
+    if (applying_command_ || other.applying_command_) throw std::logic_error("cannot move a document during edit precommit");
+    SceneDocument candidate(std::move(other)); SwapState(candidate); return *this;
+}
+void SceneDocument::SetPrecommitHook(PrecommitHook hook) {
+    if (applying_command_) throw std::logic_error("cannot change hook during edit precommit");
+    precommit_hook_ = std::move(hook);
+}
+void SceneDocument::SwapState(SceneDocument &other) noexcept {
+    static_assert(std::is_nothrow_swappable_v<SceneFormat::SceneAsset>);
+    using std::swap;
+    swap(scene_asset_, other.scene_asset_); swap(actor_uids_, other.actor_uids_);
+    swap(hierarchy_cache_dirty_, other.hierarchy_cache_dirty_);
+    swap(parent_actor_indices_, other.parent_actor_indices_); swap(children_by_actor_index_, other.children_by_actor_index_);
+    swap(physics_hierarchy_cache_dirty_, other.physics_hierarchy_cache_dirty_);
+    swap(physics_hierarchy_states_by_actor_index_, other.physics_hierarchy_states_by_actor_index_);
+    swap(dirty_, other.dirty_); swap(next_scene_backed_uid_, other.next_scene_backed_uid_);
+    swap(last_allocated_new_actor_ordinal_, other.last_allocated_new_actor_ordinal_);
+    swap(new_actor_counter_dirty_, other.new_actor_counter_dirty_);
+}
+
 /* --------------------------------------------------------------------------
 SceneDocument public API: disk I/O
 -------------------------------------------------------------------------- */
 
 bool SceneDocument::LoadFromSceneName(const std::string &scene_name) {
+    if (applying_command_) return false;
     /*
     This is the only place the editor document touches disk for loading.
     After this point, all edits target the in-memory cache below.
@@ -133,6 +178,7 @@ bool SceneDocument::LoadFromSceneName(const std::string &scene_name) {
 }
 
 bool SceneDocument::LoadFromScenePath(const std::filesystem::path &scene_path) {
+    if (applying_command_) return false;
     /*
     Convert absolute/relative file path into the same scene-name +
     subdirectory pair used by runtime loading so both code paths stay
@@ -185,6 +231,7 @@ bool SceneDocument::LoadFromScenePath(const std::filesystem::path &scene_path) {
 }
 
 bool SceneDocument::Save() {
+    if (applying_command_) return false;
     /*
     Saving flushes the editor cache back into the original source .scene
     file. Runtime stays a separate copy that will be refreshed explicitly.

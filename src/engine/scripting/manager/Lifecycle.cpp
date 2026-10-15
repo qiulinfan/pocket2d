@@ -1,3 +1,4 @@
+#include "scripting/LuaBoundary.h"
 #include "Internal.h"
 #include "core/Engine.h"
 #include "scripting/ComponentManager.h"
@@ -12,6 +13,16 @@ using namespace ManagerDetail;
 using APIRegistrationDetail::g_engine;
 
 namespace {
+
+// Normal deferred spawns append in order. A host duplicate can be published
+// between preparation and deferred activation, so insert only that inverted case.
+void AppendOrderedLifecycle(std::vector<LifecycleComponentRef> &entries,
+                            Actor::UID uid, ComponentRecord *record) {
+    LifecycleComponentRef next(uid, record);
+    if (entries.empty() || !CompareLifecycleComponentRef(next, entries.back())) entries.push_back(next);
+    else entries.insert(std::lower_bound(entries.begin(), entries.end(), next,
+                                        CompareLifecycleComponentRef), next);
+}
 
 struct PendingCollisionEvent {
     Actor::UID actor_uid = Actor::kInvalidUID;
@@ -65,9 +76,8 @@ bool TryCastRuntimeRigidbody(ComponentRecord *component, Rigidbody *&out_rigidbo
     out_rigidbody = nullptr;
     if (component == nullptr || component->removed) return false;
     try {
-        out_rigidbody = component->instance_table.cast<Rigidbody *>();
-    } catch (const luabridge::LuaException &) {
-        lua_settop(g_runtime.lua_state, 0);
+        out_rigidbody = LuaBoundary::Cast<Rigidbody *>(component->instance_table);
+    } catch (const LuaBoundary::Error &) {
         return false;
     }
     return out_rigidbody != nullptr;
@@ -77,9 +87,8 @@ bool TryCastRuntimeTransform(ComponentRecord *component, Transform *&out_transfo
     out_transform = nullptr;
     if (component == nullptr || component->removed) return false;
     try {
-        out_transform = component->instance_table.cast<Transform *>();
-    } catch (const luabridge::LuaException &) {
-        lua_settop(g_runtime.lua_state, 0);
+        out_transform = LuaBoundary::Cast<Transform *>(component->instance_table);
+    } catch (const LuaBoundary::Error &) {
         return false;
     }
     return out_transform != nullptr;
@@ -123,65 +132,75 @@ void ResolveLocalTransformFromWorld(Actor *actor, float world_x, float world_y,
     out_local_rotation = world_rotation - parent_transform->world_rotation;
 }
 
-void DispatchCollisionEventToActor(const PendingCollisionEvent &event) {
-    auto actor_it = g_runtime.actor_components.find(event.actor_uid);
-    if (actor_it == g_runtime.actor_components.end()) return;
-
-    // Components are already stored in key order, so iterating this vector
-    // preserves the required OnCollisionEnter/Exit dispatch order.
-    for (const std::unique_ptr<ComponentRecord> &component_ptr :
-         actor_it->second) {
-        ComponentRecord &component = *component_ptr;
-        if (!component.on_start_called) continue;
-        if (!IsComponentEnabled(component)) continue;
-
-        const bool should_call = event.is_enter ? component.has_on_collision_enter
-                                                : component.has_on_collision_exit;
-        if (!should_call) continue;
-
-        try {
-            if (event.is_enter) {
-                component.instance_table["OnCollisionEnter"](component.instance_table,
-                                                             event.collision);
-            } else {
-                component.instance_table["OnCollisionExit"](component.instance_table,
-                                                            event.collision);
-            }
-        } catch (const luabridge::LuaException &e) {
-            ReportError(GetActorNameByUID(event.actor_uid), e);
-            lua_settop(g_runtime.lua_state, 0);
-        }
-    }
+struct CallbackTarget {
+    Actor::UID uid;
+    std::string key;
+    luabridge::LuaRef reference;
+};
+CallbackTarget Snapshot(Actor::UID uid, const ComponentRecord &component) {
+    return {uid, component.key, component.instance_table};
 }
-
+bool Alive(const CallbackTarget &target) {
+    return IsComponentRefAlive(target.reference, target.uid, target.key);
+}
+void Invoke(const CallbackTarget &target, const char *method, const Collision *collision = nullptr) {
+    const int top = lua_gettop(g_runtime.lua_state);
+    try {
+        if (!Alive(target)) return;
+        const auto enabled = ProtectedField(target.reference, "enabled");
+        if (!Alive(target) || !LuaBoundary::IsEnabled(enabled)) return;
+        const auto callback = ProtectedField(target.reference, method);
+        if (!Alive(target) || !callback.isFunction()) return;
+        if (collision) LuaBoundary::CallDiscard(callback, target.reference, *collision);
+        else LuaBoundary::CallDiscard(callback, target.reference);
+    } catch (const LuaBoundary::Error &error) {
+        ReportError(GetActorNameByUID(target.uid), error);
+    }
+    lua_settop(g_runtime.lua_state, top);
+}
+void DispatchContact(Actor::UID uid, const Collision &collision, const char *method,
+                     bool ComponentRecord::*has_method) {
+    const auto found = g_runtime.actor_components.find(uid);
+    if (found == g_runtime.actor_components.end()) return;
+    std::vector<CallbackTarget> targets;
+    for (const auto &component : found->second)
+        if (!component->removed && component->on_start_called && component.get()->*has_method)
+            targets.push_back(Snapshot(uid, *component));
+    for (const auto &target : targets) Invoke(target, method, &collision);
+}
+void DispatchCollisionEventToActor(const PendingCollisionEvent &event) {
+    DispatchContact(event.actor_uid, event.collision, event.is_enter ? "OnCollisionEnter" : "OnCollisionExit",
+                    event.is_enter ? &ComponentRecord::has_on_collision_enter : &ComponentRecord::has_on_collision_exit);
+}
 void DispatchTriggerEventToActor(const PendingTriggerEvent &event) {
-    auto actor_it = g_runtime.actor_components.find(event.actor_uid);
-    if (actor_it == g_runtime.actor_components.end()) return;
-
-    for (const std::unique_ptr<ComponentRecord> &component_ptr :
-         actor_it->second) {
-        ComponentRecord &component = *component_ptr;
-        if (!component.on_start_called) continue;
-        if (!IsComponentEnabled(component)) continue;
-
-        const bool should_call =
-            event.is_enter ? component.has_on_trigger_enter
-                           : component.has_on_trigger_exit;
-        if (!should_call) continue;
-
-        try {
-            if (event.is_enter) {
-                component.instance_table["OnTriggerEnter"](component.instance_table,
-                                                           event.collision);
-            } else {
-                component.instance_table["OnTriggerExit"](component.instance_table,
-                                                          event.collision);
-            }
-        } catch (const luabridge::LuaException &e) {
-            ReportError(GetActorNameByUID(event.actor_uid), e);
-            lua_settop(g_runtime.lua_state, 0);
+    DispatchContact(event.actor_uid, event.collision, event.is_enter ? "OnTriggerEnter" : "OnTriggerExit",
+                    event.is_enter ? &ComponentRecord::has_on_trigger_enter : &ComponentRecord::has_on_trigger_exit);
+}
+void DestroyRemovedComponents(Actor::UID uid) {
+    while (true) {
+        auto found = g_runtime.actor_components.find(uid);
+        if (found == g_runtime.actor_components.end()) return;
+        std::vector<luabridge::LuaRef> removed;
+        for (const auto &component : found->second)
+            if (component->removed && !component->on_destroy_called) removed.push_back(component->instance_table);
+        if (removed.empty()) break;
+        for (const auto &reference : removed) {
+            // Reacquire after each callback. Only use a record pointer until the
+            // invocation starts; no vector iterator is advanced after user code.
+            found = g_runtime.actor_components.find(uid);
+            if (found == g_runtime.actor_components.end()) return;
+            ComponentRecord *target = nullptr;
+            for (const auto &component : found->second)
+                if (AreSameLuaRef(component->instance_table, reference)) { target = component.get(); break; }
+            if (target && target->removed) RunComponentOnDestroyIfNeeded(*target, uid);
         }
     }
+    auto found = g_runtime.actor_components.find(uid);
+    if (found == g_runtime.actor_components.end()) return;
+    auto &components = found->second;
+    std::erase_if(components, [](const auto &component) { return component->removed && component->on_destroy_called; });
+    RebuildComponentIndexForActor(uid);
+    RebuildTypeIndexForActor(uid);
 }
 
 } // namespace
@@ -220,77 +239,49 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
 
 // per-frame lifecycle entry points
 void ComponentManager::ProcessPendingOnStart() {
-    if (g_runtime.pending_on_start.empty()) return;
-
-    // 关键点：先把队列 move 到局部变量
-    // 这样 OnStart 里新增的组件会留在 g_runtime.pending_on_start
-    // 自动延后到下一帧处理
-    std::vector<PendingOnStartRecord> pending_records = std::move(g_runtime.pending_on_start);
+    auto pending = std::move(g_runtime.pending_on_start);
     g_runtime.pending_on_start.clear();
-
-    for (const PendingOnStartRecord &pending : pending_records) {
-        ComponentRecord *component =
-            FindComponentRecord(pending.actor_uid, pending.component_key);
-        if (component == nullptr) continue;
-        if (component->on_start_called) continue;
-
-        if (component->has_on_start && IsComponentEnabled(*component)) {
-            try {
-                // Pass self explicitly: ref["OnStart"](ref)
-                component->instance_table["OnStart"](component->instance_table);
-            } catch (const luabridge::LuaException &e) {
-                ReportError(GetActorNameByUID(pending.actor_uid), e);
-                // LuaBridge exception path may leave values on the Lua stack.
-                // Reset stack so later calls/shutdown always see a clean state.
-                lua_settop(g_runtime.lua_state, 0);
-            }
-        }
-        // OnStart 只尝试一次 (即便当时 disabled 也记为已尝试)
+    std::vector<CallbackTarget> targets;
+    for (const auto &entry : pending) {
+        const auto *component = FindComponentRecord(entry.actor_uid, entry.component_key);
+        if (component && !component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
+    }
+    for (const auto &target : targets) {
+        if (g_engine && g_engine->RequiresSceneReset()) return;
+        auto *component = FindComponentRecord(target.uid, target.key);
+        if (!component || !Alive(target) || component->on_start_called) continue;
+        const bool has_callback = component->has_on_start;
         component->on_start_called = true;
+        if (has_callback) Invoke(target, "OnStart");
     }
 }
 
-// per-frame lifecycle entry points
 void ComponentManager::ProcessOnUpdate() {
-    // 只遍历“声明了 OnUpdate 的组件”，不再全量扫 + isFunction()
-    const size_t update_component_count = g_runtime.on_update_components.size();
-    for (size_t i = 0; i < update_component_count; i++) {
-        const LifecycleComponentRef &entry = g_runtime.on_update_components[i];
-        ComponentRecord *component = entry.component;
-        if (component == nullptr) continue;
+    std::vector<CallbackTarget> targets;
+    targets.reserve(g_runtime.on_update_components.size());
+    for (const auto &entry : g_runtime.on_update_components) {
+        auto *component = entry.component;
+        if (!component || component->removed) continue;
+        if (component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
+    }
+    for (const auto &target : targets) {
+        if (g_engine && g_engine->RequiresSceneReset()) return;
+        auto *component = FindComponentRecord(target.uid, target.key);
+        if (!component || !Alive(target)) continue;
+        // Preserve original per-component ordering: earlier Lua updates can
+        // change this emitter's enabled state during the same tick.
         SyncBuiltinParticleSystemState(*component);
-        if (!component->on_start_called) continue;
-        if (!IsComponentEnabled(*component)) continue;
-
-        try {
-            component->instance_table["OnUpdate"](component->instance_table);
-        } catch (const luabridge::LuaException &e) {
-            ReportError(GetActorNameByUID(entry.actor_uid), e);
-            // Keep Lua stack balanced after script errors.
-            lua_settop(g_runtime.lua_state, 0);
-        }
+        Invoke(target, "OnUpdate");
     }
 }
 
-// per-frame lifecycle entry points
 void ComponentManager::ProcessOnLateUpdate() {
-    // 只遍历“声明了 OnLateUpdate 的组件”，不再全量扫 + isFunction()
-    const size_t late_update_component_count = g_runtime.on_late_update_components.size();
-    for (size_t i = 0; i < late_update_component_count; i++) {
-        const LifecycleComponentRef &entry = g_runtime.on_late_update_components[i];
-        ComponentRecord *component = entry.component;
-        if (component == nullptr) continue;
-        if (!component->on_start_called) continue;
-        if (!IsComponentEnabled(*component)) continue;
-
-        try {
-            component->instance_table["OnLateUpdate"](component->instance_table);
-        } catch (const luabridge::LuaException &e) {
-            ReportError(GetActorNameByUID(entry.actor_uid), e);
-            // Keep Lua stack balanced after script errors.
-            lua_settop(g_runtime.lua_state, 0);
-        }
-    }
+    std::vector<CallbackTarget> targets;
+    targets.reserve(g_runtime.on_late_update_components.size());
+    for (const auto &entry : g_runtime.on_late_update_components)
+        if (entry.component && !entry.component->removed && entry.component->on_start_called)
+            targets.push_back(Snapshot(entry.actor_uid, *entry.component));
+    for (const auto &target : targets) Invoke(target, "OnLateUpdate");
 }
 
 // per-frame lifecycle entry points
@@ -420,30 +411,10 @@ void ComponentManager::FinalizePrePhysicsDestructions() {
             return;
         }
 
-        for (Actor::UID actor_uid : dirty_actor_uids) {
-            auto actor_it = g_runtime.actor_components.find(actor_uid);
-            if (actor_it == g_runtime.actor_components.end()) continue;
-
-            std::vector<std::unique_ptr<ComponentRecord>> &components = actor_it->second;
-            for (std::unique_ptr<ComponentRecord> &component_ptr : components) {
-                if (!component_ptr->removed) continue;
-                RunComponentOnDestroyIfNeeded(*component_ptr, actor_uid);
-            }
-
-            /*
-            Component teardown is batched here so physics, lifecycle dispatch,
-            and lookup indices all see one stable runtime view during update.
-            */
-            components.erase(
-                std::remove_if(
-                    components.begin(), components.end(),
-                    [](const std::unique_ptr<ComponentRecord> &component) {
-                        return component->removed;
-                    }),
-                components.end());
-            RebuildComponentIndexForActor(actor_uid);
-            RebuildTypeIndexForActor(actor_uid);
-        }
+        // Consume existing marks before user code; new marks from OnDestroy
+        // must survive even when they concern an actor processed earlier.
+        for (Actor::UID actor_uid : dirty_actor_uids) g_runtime.dirty_component_actor_uids.erase(actor_uid);
+        for (Actor::UID actor_uid : dirty_actor_uids) DestroyRemovedComponents(actor_uid);
 
         RebuildLifecycleListsForDirtyActors(dirty_actor_uids);
 
@@ -489,9 +460,6 @@ void ComponentManager::FinalizePrePhysicsDestructions() {
                 g_runtime.actor_uids_sorted.end());
         }
 
-        for (Actor::UID actor_uid : dirty_actor_uids) {
-            g_runtime.dirty_component_actor_uids.erase(actor_uid);
-        }
         for (Actor::UID actor_uid : destroyed_actor_uids) {
             g_runtime.pending_destroy_actor_uids.erase(actor_uid);
         }
@@ -511,6 +479,7 @@ void ComponentManager::QueueCollisionEvent(Actor *actor, Actor *other, const b2V
 
     Collision collision;
     collision.other = other;
+    collision.other_handle = ActorHandle(other);
     collision.point = point;
     collision.relative_velocity = relative_velocity;
     collision.normal = normal;
@@ -531,6 +500,7 @@ void ComponentManager::QueueTriggerEvent(Actor *actor, Actor *other, const b2Vec
 
     Collision collision;
     collision.other = other;
+    collision.other_handle = ActorHandle(other);
     collision.point = point;
     collision.relative_velocity = relative_velocity;
     collision.normal = normal;
@@ -551,7 +521,8 @@ void ComponentManager::FinalizeFrameMutations() {
     }
 
     std::unordered_set<Actor::UID> dirty_actor_uids =
-        g_runtime.dirty_component_actor_uids;
+        std::move(g_runtime.dirty_component_actor_uids);
+    g_runtime.dirty_component_actor_uids.clear();
 
     for (Actor::UID actor_uid : g_runtime.pending_actor_uids_to_activate) {
         if (g_runtime.pending_destroy_actor_uids.find(actor_uid) !=
@@ -560,15 +531,22 @@ void ComponentManager::FinalizeFrameMutations() {
         }
         if (g_runtime.actor_order_by_uid.find(actor_uid) ==
             g_runtime.actor_order_by_uid.end()) {
-            g_runtime.actor_order_by_uid[actor_uid] = g_runtime.actor_uids_sorted.size();
+            g_runtime.actor_order_by_uid[actor_uid] = g_runtime.next_actor_order++;
         }
         auto actor_ptr_it = g_runtime.actor_by_uid.find(actor_uid);
         if (actor_ptr_it == g_runtime.actor_by_uid.end() ||
             actor_ptr_it->second == nullptr) {
             continue;
         }
-        // IDs are globally increasing, so runtime-instantiated actors keep order by append.
-        g_runtime.actor_uids_sorted.push_back(actor_uid);
+        // Normally append; an immediate host duplicate can already follow this
+        // delayed actor in publication order. Keep animation/physics traversal
+        // consistent with the lifecycle caches in that mixed case.
+        auto &active = g_runtime.actor_uids_sorted;
+        const auto before = [](Actor::UID a, Actor::UID b) {
+            return g_runtime.actor_order_by_uid.at(a) < g_runtime.actor_order_by_uid.at(b);
+        };
+        if (active.empty() || !before(actor_uid, active.back())) active.push_back(actor_uid);
+        else active.insert(std::lower_bound(active.begin(), active.end(), actor_uid, before), actor_uid);
 
         // Newly instantiated actors have no existing lifecycle entries yet.
         // Append them directly instead of forcing a full dirty-list rebuild/sort.
@@ -579,12 +557,10 @@ void ComponentManager::FinalizeFrameMutations() {
                 ComponentRecord &component = *component_ptr;
                 if (component.removed) continue;
                 if (component.has_on_update) {
-                    g_runtime.on_update_components.emplace_back(actor_uid,
-                                                               &component);
+                    AppendOrderedLifecycle(g_runtime.on_update_components, actor_uid, &component);
                 }
                 if (component.has_on_late_update) {
-                    g_runtime.on_late_update_components.emplace_back(actor_uid,
-                                                                     &component);
+                    AppendOrderedLifecycle(g_runtime.on_late_update_components, actor_uid, &component);
                 }
             }
         }
@@ -593,59 +569,12 @@ void ComponentManager::FinalizeFrameMutations() {
     }
     g_runtime.pending_actor_uids_to_activate.clear();
 
-    // Only touch actors that mutated this frame.
-    for (Actor::UID actor_uid : dirty_actor_uids) {
-        auto actor_it = g_runtime.actor_components.find(actor_uid);
-        if (actor_it == g_runtime.actor_components.end()) continue;
-        std::vector<std::unique_ptr<ComponentRecord>> &components = actor_it->second;
-        for (std::unique_ptr<ComponentRecord> &component_ptr : components) {
-            if (!component_ptr->removed) continue;
-            RunComponentOnDestroyIfNeeded(*component_ptr, actor_uid);
-        }
-        components.erase(
-            std::remove_if(
-                components.begin(), components.end(),
-                [](const std::unique_ptr<ComponentRecord> &component) {
-                    return component->removed;
-                }),
-            components.end());
-        RebuildComponentIndexForActor(actor_uid);
-        RebuildTypeIndexForActor(actor_uid);
-    }
+    // Snapshot-based teardown permits OnDestroy to add/remove components.
+    for (Actor::UID actor_uid : dirty_actor_uids) DestroyRemovedComponents(actor_uid);
     RebuildLifecycleListsForDirtyActors(dirty_actor_uids);
-    g_runtime.dirty_component_actor_uids.clear();
 
-    if (!g_runtime.pending_destroy_actor_uids.empty()) {
-        g_runtime.pending_on_start.erase(
-            std::remove_if(
-                g_runtime.pending_on_start.begin(),
-                g_runtime.pending_on_start.end(),
-                [](const PendingOnStartRecord &pending) {
-                    return g_runtime.pending_destroy_actor_uids.find(
-                               pending.actor_uid) !=
-                           g_runtime.pending_destroy_actor_uids.end();
-                }),
-            g_runtime.pending_on_start.end());
-    }
-
-    for (Actor::UID actor_uid : g_runtime.pending_destroy_actor_uids) {
-        auto actor_ptr_it = g_runtime.actor_by_uid.find(actor_uid);
-        Actor *actor_ptr = (actor_ptr_it == g_runtime.actor_by_uid.end())
-                               ? nullptr
-                               : actor_ptr_it->second;
-        if (actor_ptr != nullptr) {
-            actor_ptr->runtime_destroyed = true;
-        }
-        g_runtime.actor_by_uid.erase(actor_uid);
-        g_runtime.actor_components.erase(actor_uid);
-        g_runtime.component_index_by_key.erase(actor_uid);
-        g_runtime.component_first_key_by_type.erase(actor_uid);
-        g_runtime.component_keys_by_type.erase(actor_uid);
-        g_runtime.actor_order_by_uid.erase(actor_uid);
-        g_runtime.actor_uids_sorted.erase(
-            std::remove(g_runtime.actor_uids_sorted.begin(),
-                        g_runtime.actor_uids_sorted.end(), actor_uid),
-            g_runtime.actor_uids_sorted.end());
-    }
-    g_runtime.pending_destroy_actor_uids.clear();
+    // Destruction callbacks may have removed components on another actor.
+    // Reuse the same snapshot-safe drain instead of erasing new pending actors
+    // without their OnDestroy or leaving cached lifecycle pointers dangling.
+    FinalizePrePhysicsDestructions();
 }

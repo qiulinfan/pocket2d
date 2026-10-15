@@ -1,17 +1,28 @@
+#include "scripting/LuaBoundary.h"
 #include "Internal.h"
 #include "core/Engine.h"
 #include "rendering/SpriteRenderer.h"
 #include "scripting/ComponentManager.h"
+#include "scripting/EventBus.h"
+#include "scripting/SceneComponentPlan.h"
+#include "scripting/RuntimeActorPlan.h"
+#include "scripting/ScriptReloadCandidate.h"
 #include "particles/ParticleSystem.h"
 #include "physics/Rigidbody.h"
 #include "scene/Transform.h"
+#include "scene/Tilemap.h"
+#include "rendering/SpriteAnimation.h"
 #include "scene/Scene.h"
+#include "scene/ActorHandle.h"
 #include "../luaapi/RegistrationDetail.h"
 #include "shared/scene_format/SceneFormat.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <stdexcept>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace ManagerDetail;
 
@@ -36,9 +47,262 @@ luabridge::LuaRef BuildLuaBoolArrayTable(const Actor::BoolArray &values) {
     return table;
 }
 
+// Validate the graph that default cloning will own before allocating any clone
+// with user-supplied metatables. Releasing a rejected candidate must not schedule
+// copied __gc callbacks against the still-running world.
+void ValidateDefaultMetatables(const luabridge::LuaRef &prototype) {
+    lua_State *state=prototype.state();
+    struct StackScope{lua_State *state;int top;~StackScope(){lua_settop(state,top);}} stack{state,lua_gettop(state)};
+    std::vector<luabridge::LuaRef> roots;
+    std::unordered_set<const void *> root_ids;
+    auto current=prototype;
+    while(current.isTable()) {
+        current.push(state);
+        if(!root_ids.insert(lua_topointer(state,-1)).second){lua_pop(state,1);break;}
+        roots.push_back(current);
+        luabridge::LuaRef base(state);
+        if(lua_getmetatable(state,-1)) {
+            lua_pushliteral(state,"__index");lua_rawget(state,-2);
+            if(lua_istable(state,-1))base=luabridge::LuaRef::fromStack(state,-1);
+            lua_pop(state,2);
+        }
+        lua_pop(state,1);current=std::move(base);
+    }
+    std::vector<luabridge::LuaRef> pending;
+    const auto seen_fields=luabridge::newTable(state);
+    for(const auto &root:roots) {
+        root.push(state);const int source=lua_gettop(state);
+        seen_fields.push(state);const int seen=lua_gettop(state);
+        lua_pushnil(state);
+        while(lua_next(state,source)) {
+            lua_pushvalue(state,-2);lua_rawget(state,seen);const bool defined=lua_toboolean(state,-1);lua_pop(state,1);
+            if(!defined) {
+                lua_pushvalue(state,-2);lua_pushboolean(state,true);lua_rawset(state,seen);
+                if(!(lua_type(state,-2)==LUA_TSTRING && lua_isfunction(state,-1))) {
+                    pending.push_back(luabridge::LuaRef::fromStack(state,-2));
+                    pending.push_back(luabridge::LuaRef::fromStack(state,-1));
+                }
+            }
+            lua_pop(state,1);
+        }
+        lua_pop(state,2);
+    }
+    std::unordered_set<const void *> visited;
+    while(!pending.empty()) {
+        auto value=std::move(pending.back());pending.pop_back();
+        if(!value.isTable())continue; // Functions/upvalues and native value metadata are not cloned tables.
+        value.push(state);const int table=lua_gettop(state);const void *identity=lua_topointer(state,table);
+        if(root_ids.contains(identity)||!visited.insert(identity).second){lua_pop(state,1);continue;}
+        if(lua_getmetatable(state,table)) {
+            for(const char *field:{"__gc","__close","__mode"}) {
+                lua_pushstring(state,field);lua_rawget(state,-2);const bool forbidden=!lua_isnil(state,-1);lua_pop(state,1);
+                if(forbidden)throw std::runtime_error(std::string("unsupported default metatable ")+field+"; construct owned/finalizable state in OnStart");
+            }
+            pending.push_back(luabridge::LuaRef::fromStack(state,-1));lua_pop(state,1);
+        }
+        lua_pushnil(state);
+        while(lua_next(state,table)) {
+            pending.push_back(luabridge::LuaRef::fromStack(state,-2));
+            pending.push_back(luabridge::LuaRef::fromStack(state,-1));lua_pop(state,1);
+        }
+        lua_pop(state,1);
+    }
+}
+
+// Mutable defaults belong to an instance. Traverse a finite object graph with
+// an explicit worklist, preserving cycles/aliases without recursive C++ calls.
+// Methods keep using the prototype; closures intentionally keep their upvalues.
+void CopyComponentDefaults(const luabridge::LuaRef &instance,
+                           const luabridge::LuaRef &prototype,
+                           const std::string &type_name,
+                           const luabridge::LuaRef *retained_instance = nullptr) {
+    lua_State *state = prototype.state();
+    struct StackScope {
+        lua_State *state;
+        int top;
+        ~StackScope() { lua_settop(state, top); }
+    } stack_scope{state, lua_gettop(state)};
+    struct PendingTable {
+        luabridge::LuaRef source;
+        luabridge::LuaRef destination;
+        bool prototype_root;
+    };
+    std::unordered_map<const void *, luabridge::LuaRef> copies;
+    // Reload prepares missing defaults without mutating the retained instance.
+    // Seed matching table identities so new aliases and prototype self-references
+    // point into preserved state rather than an abandoned temporary clone.
+    if (retained_instance) {
+        struct Pair { luabridge::LuaRef source, target; int depth; };
+        std::vector<Pair> aligned;
+        auto enqueue = [&](const luabridge::LuaRef &source,
+                           const luabridge::LuaRef &target, int depth) {
+            source.push(state); const void *identity = lua_topointer(state,-1); lua_pop(state,1);
+            const auto found = copies.find(identity);
+            if (found != copies.end()) {
+                if (!ManagerDetail::AreSameLuaRef(found->second,target))
+                    throw std::runtime_error("new default aliases conflict with preserved instance state");
+                return;
+            }
+            if (aligned.size() >= 100000 || depth > 64)
+                throw std::runtime_error("retained default graph exceeds reload limit");
+            // Record now, not when visiting children. Thus every root field's
+            // table identity is known before a sibling map uses it as a key.
+            copies.emplace(identity,target); aligned.push_back({source,target,depth});
+        };
+        enqueue(prototype,*retained_instance,0);
+        for (std::size_t position=0; position<aligned.size(); ++position) {
+            const auto pair=aligned[position];
+            pair.source.push(state); const int source_index=lua_gettop(state);
+            pair.target.push(state); const int target_index=lua_gettop(state);
+            lua_pushnil(state);
+            while (lua_next(state,source_index)) {
+                if (lua_istable(state,-1)) {
+                    if (lua_istable(state,-2)) {
+                        const auto mapped=copies.find(lua_topointer(state,-2));
+                        if (mapped==copies.end())
+                            throw std::runtime_error("table-key default identity has no retained-state correspondence");
+                        mapped->second.push(state);
+                    } else lua_pushvalue(state,-2);
+                    lua_rawget(state,target_index);
+                    if (lua_istable(state,-1))
+                        enqueue(luabridge::LuaRef::fromStack(state,-2),
+                                luabridge::LuaRef::fromStack(state,-1),pair.depth+1);
+                    lua_pop(state,1);
+                }
+                lua_pop(state,1);
+            }
+            lua_pop(state,2);
+        }
+    }
+    std::vector<PendingTable> pending;
+    std::vector<luabridge::LuaRef> prototypes;
+    std::unordered_set<const void *> visited_prototypes;
+    luabridge::LuaRef current_prototype = prototype;
+    while (current_prototype.isTable()) {
+        current_prototype.push(state);
+        const int table_index = lua_gettop(state);
+        const void *identity = lua_topointer(state, table_index);
+        if (!visited_prototypes.insert(identity).second) {
+            lua_pop(state, 1);
+            break;
+        }
+        copies.emplace(identity, instance);
+        prototypes.push_back(current_prototype);
+        luabridge::LuaRef base(state);
+        if (lua_getmetatable(state, table_index)) {
+            lua_pushliteral(state, "__index");
+            lua_rawget(state, -2);
+            if (lua_istable(state, -1)) base = luabridge::LuaRef::fromStack(state, -1);
+            // Function-valued __index is executable code, not static defaults.
+            lua_pop(state, 2);
+        }
+        lua_pop(state, 1);
+        current_prototype = base;
+    }
+    for (auto it = prototypes.rbegin(); it != prototypes.rend(); ++it)
+        pending.push_back({*it, instance, true});
+    const auto seen_root_fields = luabridge::newTable(state);
+
+    auto push_copy = [&](int index) {
+        index = lua_absindex(state, index);
+        const int value_type = lua_type(state, index);
+        if (value_type == LUA_TTABLE || value_type == LUA_TUSERDATA) {
+            const void *identity = lua_topointer(state, index);
+            const auto found = copies.find(identity);
+            if (found != copies.end()) {
+                found->second.push(state);
+                return;
+            }
+            if (value_type == LUA_TTABLE) {
+                auto source = luabridge::LuaRef::fromStack(state, index);
+                auto destination = luabridge::newTable(state);
+                copies.emplace(identity, destination);
+                pending.push_back({source, destination, false});
+                destination.push(state);
+                return;
+            }
+            // These native userdatas are explicit values, not owned resources.
+            if (luabridge::Stack<b2Vec2>::isInstance(state, index)) {
+                auto value=luabridge::Stack<b2Vec2>::get(state,index);
+                LuaBoundary::Check(value,"cloned default userdata");
+                LuaBoundary::Check(luabridge::Stack<b2Vec2>::push(state,*value),"cloned default userdata push");
+            } else if (luabridge::Stack<glm::vec2>::isInstance(state, index)) {
+                auto value=luabridge::Stack<glm::vec2>::get(state,index);
+                LuaBoundary::Check(value,"cloned default userdata");
+                LuaBoundary::Check(luabridge::Stack<glm::vec2>::push(state,*value),"cloned default userdata push");
+            } else if (luabridge::Stack<ActorHandle>::isInstance(state, index)) {
+                auto value=luabridge::Stack<ActorHandle>::get(state,index);
+                LuaBoundary::Check(value,"cloned default userdata");
+                LuaBoundary::Check(luabridge::Stack<ActorHandle>::push(state,*value),"cloned default userdata push");
+            } else {
+                throw std::runtime_error("unsupported userdata default in component '" +
+                    type_name + "'; construct owned objects in OnStart");
+            }
+            copies.emplace(identity, luabridge::LuaRef::fromStack(state, -1));
+            return;
+        }
+        if (value_type == LUA_TTHREAD || value_type == LUA_TLIGHTUSERDATA) {
+            throw std::runtime_error("unsupported " + std::string(lua_typename(state, value_type)) +
+                " default in component '" + type_name + "'; construct it in OnStart");
+        }
+        lua_pushvalue(state, index);
+    };
+
+    while (!pending.empty()) {
+        PendingTable current = std::move(pending.back());
+        pending.pop_back();
+        current.source.push(state);
+        const int source_index = lua_gettop(state);
+        current.destination.push(state);
+        const int destination_index = lua_gettop(state);
+        seen_root_fields.push(state);
+        const int seen_index = lua_gettop(state);
+        lua_pushnil(state);
+        while (lua_next(state, source_index) != 0) {
+            bool already_defined = false;
+            if (current.prototype_root) {
+                lua_pushvalue(state, -2);
+                lua_rawget(state, seen_index);
+                already_defined = lua_toboolean(state, -1);
+                lua_pop(state, 1);
+                if (!already_defined) {
+                    lua_pushvalue(state, -2);
+                    lua_pushboolean(state, true);
+                    lua_rawset(state, seen_index);
+                }
+            }
+            // Record methods as overrides too: a base table must never shadow
+            // a derived method merely because methods stay on the prototype.
+            const bool inherited_method = current.prototype_root &&
+                lua_type(state, -2) == LUA_TSTRING && lua_isfunction(state, -1);
+            if (!already_defined && !inherited_method) {
+                push_copy(-2);
+                push_copy(-2);
+                lua_rawset(state, destination_index);
+            }
+            lua_pop(state, 1);
+        }
+        if (!current.prototype_root && lua_getmetatable(state, source_index)) {
+            push_copy(-1);
+            lua_setmetatable(state, destination_index);
+            lua_pop(state, 1);
+        }
+        lua_pop(state, 3);
+    }
+}
+
 } // namespace
 
 namespace ManagerDetail {
+
+luabridge::LuaRef CloneComponentDefaults(const luabridge::LuaRef &prototype,
+                                        const std::string &type_name,
+                                        const luabridge::LuaRef *retained_instance) {
+    ValidateDefaultMetatables(prototype);
+    auto result = luabridge::newTable(g_runtime.lua_state);
+    CopyComponentDefaults(result, prototype, type_name, retained_instance);
+    return result;
+}
 
 bool AssignPropertyValueToLuaField(luabridge::LuaRef &instance_table,
                                    const std::string &property_name,
@@ -47,15 +311,13 @@ bool AssignPropertyValueToLuaField(luabridge::LuaRef &instance_table,
         [&](const auto &typed_value) {
             using ValueType = std::decay_t<decltype(typed_value)>;
             if constexpr (std::is_same_v<ValueType, Actor::BoolArray>) {
-                instance_table[property_name] =
-                    BuildLuaBoolArrayTable(typed_value);
+                ProtectedSetField(instance_table, property_name.c_str(), BuildLuaBoolArrayTable(typed_value));
             } else if constexpr (std::is_same_v<ValueType, Actor::IntArray> ||
                                  std::is_same_v<ValueType, Actor::DoubleArray> ||
                                  std::is_same_v<ValueType, Actor::StringArray>) {
-                instance_table[property_name] =
-                    BuildLuaArrayTable(typed_value);
+                ProtectedSetField(instance_table, property_name.c_str(), BuildLuaArrayTable(typed_value));
             } else {
-                instance_table[property_name] = typed_value;
+                ProtectedSetField(instance_table, property_name.c_str(), luabridge::LuaRef(g_runtime.lua_state, typed_value));
             }
         },
         value);
@@ -135,10 +397,9 @@ void SyncTransformAndRigidbodyAfterPropertyEdit(
         Transform *transform = nullptr;
         Rigidbody *rigidbody = nullptr;
         try {
-            transform = edited_component.instance_table.cast<Transform *>();
-            rigidbody = rigidbody_component->instance_table.cast<Rigidbody *>();
-        } catch (const luabridge::LuaException &) {
-            lua_settop(g_runtime.lua_state, 0);
+            transform = LuaBoundary::Cast<Transform *>(edited_component.instance_table);
+            rigidbody = LuaBoundary::Cast<Rigidbody *>(rigidbody_component->instance_table);
+        } catch (const LuaBoundary::Error &) {
             return;
         }
         if (transform == nullptr || rigidbody == nullptr) return;
@@ -172,10 +433,9 @@ void SyncTransformAndRigidbodyAfterPropertyEdit(
     Transform *transform = nullptr;
     Rigidbody *rigidbody = nullptr;
     try {
-        transform = transform_component->instance_table.cast<Transform *>();
-        rigidbody = edited_component.instance_table.cast<Rigidbody *>();
-    } catch (const luabridge::LuaException &) {
-        lua_settop(g_runtime.lua_state, 0);
+        transform = LuaBoundary::Cast<Transform *>(transform_component->instance_table);
+        rigidbody = LuaBoundary::Cast<Rigidbody *>(edited_component.instance_table);
+    } catch (const LuaBoundary::Error &) {
         return;
     }
     if (transform == nullptr || rigidbody == nullptr) return;
@@ -195,7 +455,16 @@ void SyncTransformAndRigidbodyAfterPropertyEdit(
 } // namespace
 
 // rebind actor pointers after a scene container changes
-void ComponentManager::BindActorsForScene(std::deque<Actor> &actors) {
+Actor *ComponentManager::ResolveActorHandle(Actor::UID uid, std::uint64_t generation) {
+    if (uid == Actor::kInvalidUID || generation == 0) return nullptr;
+    if (g_runtime.pending_destroy_actor_uids.count(uid) != 0) return nullptr;
+    const auto found = g_runtime.actor_by_uid.find(uid);
+    if (found == g_runtime.actor_by_uid.end() || found->second == nullptr) return nullptr;
+    Actor *actor = found->second;
+    return !actor->runtime_destroyed && actor->runtime_generation == generation ? actor : nullptr;
+}
+
+void ComponentManager::BindActorsForScene(std::list<Actor> &actors) {
     // Bind after scene vector is finalized, so pointers injected into Lua
     // refer to stable actor objects for this scene lifetime.
     g_runtime.scene_actors = &actors;
@@ -215,6 +484,7 @@ void ComponentManager::BindActorsForScene(std::deque<Actor> &actors) {
 
     for (Actor &actor : actors) {
         if (actor.runtime_destroyed) continue;
+        if (actor.runtime_generation == 0) actor.AssignRuntimeGeneration();
         const size_t actor_order = g_runtime.actor_uids_sorted.size();
         g_runtime.actor_by_uid[actor.uid] = &actor;
         g_runtime.actors_by_name[actor.actor_name].push_back(&actor);
@@ -227,7 +497,7 @@ void ComponentManager::BindActorsForScene(std::deque<Actor> &actors) {
              component_it->second) {
             ComponentRecord &component = *component_ptr;
             // Flexible reference: each component can reach its owner actor.
-            component.instance_table["actor"] = &actor;
+            SetSystemField(component.instance_table, "actor", luabridge::LuaRef(g_runtime.lua_state, ActorHandle(&actor)));
             if (component.removed) continue;
             if (component.has_on_update) {
                 g_runtime.on_update_components.emplace_back(actor.uid,
@@ -239,6 +509,7 @@ void ComponentManager::BindActorsForScene(std::deque<Actor> &actors) {
             }
         }
     }
+    g_runtime.next_actor_order = g_runtime.actor_uids_sorted.size();
     std::sort(g_runtime.on_update_components.begin(),
               g_runtime.on_update_components.end(),
               CompareLifecycleComponentRef);
@@ -254,64 +525,40 @@ void ComponentManager::BindActorsForScene(std::deque<Actor> &actors) {
 // instantiate one component from parsed scene / template spec
 void ComponentManager::InstantiateComponentForActor(
     Actor::UID actor_uid, const Actor::ComponentSpec &component_spec) {
-    luabridge::LuaRef instance_table(g_runtime.lua_state);
-    if (IsBuiltinComponentType(component_spec.type)) {
-        if (component_spec.type == "Rigidbody") {
-            instance_table = luabridge::LuaRef(g_runtime.lua_state, Rigidbody());
-        } else if (component_spec.type == "ParticleSystem") {
-            instance_table = luabridge::LuaRef(g_runtime.lua_state, ParticleSystem());
-        } else if (component_spec.type == "Transform") {
-            instance_table = luabridge::LuaRef(g_runtime.lua_state, Transform());
-        } else if (component_spec.type == "SpriteRenderer") {
-            instance_table = luabridge::LuaRef(g_runtime.lua_state, SpriteRenderer());
-        }
-    } else {
-        auto type_it = g_runtime.component_type_tables.find(component_spec.type);
-        if (type_it == g_runtime.component_type_tables.end()) {
-            std::cout << "warning: failed to locate component "
-                      << component_spec.type << "; skipping component"
-                      << std::endl;
+    // Construction is callback-free even if a Lua allocation would otherwise
+    // schedule a user finalizer. Nested scene plans already keep GC paused.
+    struct ConstructionGC {
+        lua_State *state; bool running;
+        explicit ConstructionGC(lua_State *value):state(value),running(lua_gc(value,LUA_GCISRUNNING)!=0){lua_gc(state,LUA_GCSTOP);}
+        ~ConstructionGC(){if(running)lua_gc(state,LUA_GCRESTART);}
+    } gc(g_runtime.lua_state);
+    if (component_spec.type == "Tilemap" || component_spec.type == "Rigidbody") {
+        const bool has_map = FindPrimaryComponentByType(actor_uid, "Tilemap") != nullptr;
+        const bool has_body = FindPrimaryComponentByType(actor_uid, "Rigidbody") != nullptr;
+        if ((component_spec.type == "Rigidbody" && has_map) ||
+            (component_spec.type == "Tilemap" && (has_map || has_body)))
+            throw std::runtime_error("Tilemap actor cannot contain another Tilemap or Rigidbody");
+    }
+    luabridge::LuaRef prototype(g_runtime.lua_state);
+    if (!IsBuiltinComponentType(component_spec.type)) {
+        const auto found = g_runtime.component_type_tables.find(component_spec.type);
+        if (found == g_runtime.component_type_tables.end()) {
+            std::cout << "warning: failed to locate component " << component_spec.type << "; skipping component" << std::endl;
             return;
         }
-
-        // 创建实例 table + inherit + 注入系统字段
-        instance_table = luabridge::newTable(g_runtime.lua_state);
-        luabridge::LuaRef parent_table = type_it->second;
-        EstablishInheritance(instance_table, parent_table);
+        prototype = found->second;
     }
-
-    // Requirement: every component can read self.key in Lua.
-    instance_table["key"] = component_spec.key;
-    // Requirement: all components start enabled.
-    instance_table["enabled"] = true;
-    auto actor_ptr_it = g_runtime.actor_by_uid.find(actor_uid);
-    if (actor_ptr_it != g_runtime.actor_by_uid.end()) {
-        instance_table["actor"] = actor_ptr_it->second;
-    }
-    ApplyPropertyOverrides(instance_table, component_spec.overrides);
-
-    // 生命周期函数拥有关系在实例化时一次性缓存，避免每帧 isFunction() 开销
-    const bool has_on_start = instance_table["OnStart"].isFunction();
-    const bool has_on_destroy = instance_table["OnDestroy"].isFunction();
-    const bool has_on_update = instance_table["OnUpdate"].isFunction();
-    const bool has_on_late_update = instance_table["OnLateUpdate"].isFunction();
-    const bool has_on_collision_enter = instance_table["OnCollisionEnter"].isFunction();
-    const bool has_on_collision_exit = instance_table["OnCollisionExit"].isFunction();
-    const bool has_on_trigger_enter = instance_table["OnTriggerEnter"].isFunction();
-    const bool has_on_trigger_exit = instance_table["OnTriggerExit"].isFunction();
-
-    auto actor_it = g_runtime.actor_components.try_emplace(actor_uid).first;
-    actor_it->second.emplace_back(std::make_unique<ComponentRecord>(
-        component_spec.key, component_spec.type, std::move(instance_table),
-        has_on_start, has_on_destroy, has_on_update, has_on_late_update,
-        has_on_collision_enter, has_on_collision_exit, has_on_trigger_enter,
-        has_on_trigger_exit));
-    // 排队到下一帧执行 OnStart 的 list
-    g_runtime.pending_on_start.emplace_back(actor_uid, component_spec.key);
-
-    // 运行时增删改由帧末统一重建生命周期列表
-    if (actor_ptr_it != g_runtime.actor_by_uid.end()) {
-        g_runtime.dirty_component_actor_uids.insert(actor_uid);
+    auto prepared = PrepareComponentRecord(component_spec, prototype);
+    if (g_runtime.pending_destroy_actor_uids.count(actor_uid)) return;
+    InstallPreparedComponent(actor_uid, std::move(prepared));
+    if (component_spec.type == "Tilemap") {
+        try { InitializeTilemap(actor_uid, component_spec.key); }
+        catch (...) {
+            // Failed asset setup must not leave a half-registered native object.
+            auto *failed = FindComponentRecord(actor_uid, component_spec.key);
+            if (failed != nullptr) failed->removed = true;
+            throw;
+        }
     }
 }
 
@@ -352,29 +599,18 @@ void ComponentManager::RemoveComponent(Actor::UID actor_uid,
     if (actor_it == g_runtime.actor_components.end()) return;
 
     ComponentRecord *target = nullptr;
-    if (component_ref.isTable()) {
-        luabridge::LuaRef key_ref = component_ref["key"];
-        if (key_ref.isString()) {
-            const std::string key = key_ref.cast<std::string>();
-            target = FindComponentRecord(actor_uid, key);
-        }
-    }
-
-    if (target == nullptr) {
-        for (std::unique_ptr<ComponentRecord> &component_ptr :
-             actor_it->second) {
-            ComponentRecord &component = *component_ptr;
-            if (component.removed) continue;
-            if (AreSameLuaRef(component.instance_table, component_ref)) {
-                target = &component;
-                break;
-            }
+    // Identity comes from the registered object, never a script-controlled key
+    // getter (which could reenter or point at a different component).
+    for (const auto &component : actor_it->second) {
+        if (!component->removed && AreSameLuaRef(component->instance_table, component_ref)) {
+            target = component.get();
+            break;
         }
     }
 
     if (target == nullptr) return;
     target->removed = true;
-    target->instance_table["enabled"] = false;
+    SetSystemField(target->instance_table, "enabled", luabridge::LuaRef(g_runtime.lua_state, false));
     auto index_it = g_runtime.component_index_by_key.find(actor_uid);
     if (index_it != g_runtime.component_index_by_key.end()) {
         index_it->second.erase(target->key);
@@ -387,25 +623,54 @@ void ComponentManager::RemoveComponent(Actor::UID actor_uid,
 bool ComponentManager::RenameComponentKey(Actor::UID actor_uid,
                                           const std::string &old_key,
                                           const std::string &new_key) {
-    if (old_key.empty() || new_key.empty()) return false;
-    if (old_key == new_key) return false;
+    if (!g_runtime.lua_state || old_key.empty() || new_key.empty() || old_key == new_key)
+        return false;
+    if (APIRegistrationDetail::g_engine && APIRegistrationDetail::g_engine->RequiresSceneReset())
+        return false;
     if (FindComponentRecord(actor_uid, new_key) != nullptr) return false;
-
     ComponentRecord *component = FindComponentRecord(actor_uid, old_key);
     if (component == nullptr) return false;
 
+    // Keep finalizers outside the identity publication boundary, including when
+    // this operation nests inside another prepared owner-thread command.
+    struct GCScope {
+        lua_State *state;
+        explicit GCScope(lua_State *value) : state(value) { PauseScenePreparationGC(state); }
+        ~GCScope() { ResumeScenePreparationGC(state); }
+    } gc(g_runtime.lua_state);
+    const int stack_top = lua_gettop(g_runtime.lua_state);
+    bool publishing = false;
     try {
-        component->instance_table["key"] = new_key;
-    } catch (const luabridge::LuaException &) {
-        lua_settop(g_runtime.lua_state, 0);
+        const std::string previous_key = old_key;
+        const std::string replacement_key = new_key;
+        EventBus::KeyRemapPlan events;
+        std::string error;
+        if (!EventBus::PrepareKeyRemap(
+                {{component->instance_table, actor_uid, previous_key, replacement_key}}, events, error))
+            return false;
+
+        publishing = true;
+        SetSystemField(component->instance_table, "key", luabridge::LuaRef(g_runtime.lua_state, replacement_key));
+        component->key = replacement_key;
+        for (auto &pending : g_runtime.pending_on_start) {
+            if (pending.actor_uid == actor_uid && pending.component_key == previous_key)
+                pending.component_key = replacement_key;
+        }
+        SortComponentsForActor(actor_uid);
+        EventBus::CommitKeyRemap(std::move(events));
+        // Deferred actors have not joined these lists yet. Activation appends
+        // them once; rebuilding here would cause duplicate Update/Late calls.
+        if (std::find(g_runtime.pending_actor_uids_to_activate.begin(),
+                      g_runtime.pending_actor_uids_to_activate.end(), actor_uid) ==
+            g_runtime.pending_actor_uids_to_activate.end())
+            RebuildLifecycleListsForDirtyActors(std::unordered_set<Actor::UID>{actor_uid});
+        return true;
+    } catch (const std::exception &error) {
+        lua_settop(g_runtime.lua_state, stack_top);
+        if (publishing && APIRegistrationDetail::g_engine)
+            APIRegistrationDetail::g_engine->ReportRuntimeActorPublicationFailure(error.what());
         return false;
     }
-
-    component->key = new_key;
-    SortComponentsForActor(actor_uid);
-    RebuildLifecycleListsForDirtyActors(
-        std::unordered_set<Actor::UID>{actor_uid});
-    return true;
 }
 
 // runtime component add / remove
@@ -413,17 +678,29 @@ bool ComponentManager::SetComponentPropertyValue(
     Actor::UID actor_uid, const std::string &component_key,
     const std::string &property_name,
     const Actor::ComponentPropertyValue &value) {
-    if (property_name.empty()) return false;
+    if (property_name.empty() || property_name == "actor" || property_name == "key") return false;
+    const int stack_top = lua_gettop(g_runtime.lua_state);
 
     ComponentRecord *component = FindComponentRecord(actor_uid, component_key);
     if (component == nullptr) return false;
 
     try {
-        AssignPropertyValueToLuaField(component->instance_table, property_name,
-                                      value);
+        if (component->type == "SpriteAnimation")
+            return SetSpriteAnimationProperty(actor_uid, component_key, property_name, value);
+        if (component->type == "Tilemap") {
+            if (property_name == "map_resource") {
+                const auto *resource = std::get_if<std::string>(&value);
+                return resource != nullptr && SetTilemapResource(actor_uid, component_key, *resource);
+            }
+            if (property_name != "enabled" || !std::holds_alternative<bool>(value)) return false;
+        }
+        auto reference = component->instance_table;
+        AssignPropertyValueToLuaField(reference, property_name, value);
+        if (!IsComponentRefAlive(reference, actor_uid, component_key)) return false;
+        component = FindComponentRecord(actor_uid, component_key);
 
         if (component->type == "ParticleSystem" && property_name == "enabled") {
-            ParticleSystem *system = component->instance_table.cast<ParticleSystem *>();
+            ParticleSystem *system = LuaBoundary::Cast<ParticleSystem *>(component->instance_table);
             if (system != nullptr) {
                 system->SyncRuntimeState();
             }
@@ -434,8 +711,11 @@ bool ComponentManager::SetComponentPropertyValue(
         // not leave rendering and physics looking out of sync for a frame.
         SyncTransformAndRigidbodyAfterPropertyEdit(actor_uid, *component,
                                                    property_name, value);
-    } catch (const luabridge::LuaException &) {
-        lua_settop(g_runtime.lua_state, 0);
+    } catch (const LuaBoundary::Error &) {
+        lua_settop(g_runtime.lua_state, stack_top);
+        return false;
+    } catch (const std::exception &error) {
+        std::cerr << "component property rejected: " << error.what() << '\n';
         return false;
     }
 
@@ -446,7 +726,7 @@ bool ComponentManager::SetRuntimeComponentPropertyValue(
     Actor::UID actor_uid, const std::string &component_key,
     const std::string &property_name,
     const Actor::ComponentPropertyValue &value) {
-    if (property_name.empty()) return false;
+    if (property_name.empty() || property_name == "actor" || property_name == "key") return false;
 
     auto actor_it = g_runtime.actor_by_uid.find(actor_uid);
     if (actor_it == g_runtime.actor_by_uid.end() || actor_it->second == nullptr) {
@@ -460,29 +740,34 @@ bool ComponentManager::SetRuntimeComponentPropertyValue(
         SceneFormat::FindComponentSpec(actor->component_specs, component_key);
     if (component_spec == nullptr) return false;
 
-    SceneFormat::UpsertComponentProperty(*component_spec, property_name, value);
+    Actor::ComponentSpec candidate = *component_spec;
+    SceneFormat::UpsertComponentProperty(candidate, property_name, value);
+    std::unique_ptr<PreparedRuntimeComponent> prepared;
+    if (IsBuiltinComponentType(candidate.type)) {
+        std::string preparation_error;
+        prepared = PrepareRuntimeComponent(candidate, preparation_error);
+        if (!prepared) {
+            std::cerr << "component property rejected: " << preparation_error << '\n';
+            return false;
+        }
+    }
     const bool can_patch_in_place =
         !IsBuiltinComponentType(component_spec->type) ||
-        component_spec->type == "Transform" ||
-        component_spec->type == "SpriteRenderer";
-    if (can_patch_in_place &&
-        SetComponentPropertyValue(actor_uid, component_key, property_name,
-                                  value)) {
+        component_spec->type == "Transform" || component_spec->type == "SpriteRenderer" ||
+        component_spec->type == "Tilemap" || component_spec->type == "SpriteAnimation";
+    if (can_patch_in_place) {
+        if (!SetComponentPropertyValue(actor_uid, component_key, property_name, value)) return false;
+        SceneFormat::UpsertComponentProperty(*component_spec, property_name, value);
         return true;
     }
-
-    /*
-    Some built-ins rebuild internal runtime state from their serialized spec.
-    For those, mutate the authored spec first, then destroy/recreate the live
-    component so the instance is reconstructed from the updated data.
-    */
-    const luabridge::LuaRef component_ref =
-        ComponentManager::GetComponentByKey(actor_uid, component_key);
+    const auto component_ref = ComponentManager::GetComponentByKey(actor_uid, component_key);
     if (component_ref.isNil()) return false;
-
     ComponentManager::RemoveComponent(actor_uid, component_ref);
     ComponentManager::FinalizeFrameMutations();
-    ComponentManager::InstantiateComponentForActor(actor_uid, *component_spec);
+    component_spec = SceneFormat::FindComponentSpec(actor->component_specs, component_key);
+    if (component_spec == nullptr) throw std::runtime_error("component authoring spec disappeared during replacement");
+    *component_spec = std::move(candidate);
+    InstallRuntimeComponent(*prepared, actor_uid);
     if (g_runtime.scene_actors != nullptr) {
         ComponentManager::BindActorsForScene(*g_runtime.scene_actors);
     }
@@ -490,46 +775,30 @@ bool ComponentManager::SetRuntimeComponentPropertyValue(
 }
 
 // actor-level helpers exposed through Actor static APIs
-luabridge::LuaRef ComponentManager::InstantiateActor( const std::string &template_name) {
-    // Actor.Instantiate 语义：
-    // 立即可被 Find / FindAll 找到
-    // 组件生命周期从下一帧开始
+luabridge::LuaRef ComponentManager::InstantiateActor(const std::string &template_name) {
     using APIRegistrationDetail::g_engine;
-    if (g_runtime.lua_state == nullptr || g_runtime.scene_actors == nullptr) {
-        return MakeNilRef();
+    if (!g_runtime.lua_state || !g_runtime.scene_actors || !g_engine) return MakeNilRef();
+    if (g_engine->RequiresSceneReset()) throw std::runtime_error("runtime requires reset");
+    std::unique_ptr<PreparedRuntimeActor> prepared;
+    try {
+        const auto candidate = Actor::ReadTemplateForSpawn(template_name);
+        Actor actor = candidate.actor;
+        actor.uid = g_engine->AllocateRuntimeGeneratedActorUID();
+        actor.runtime_generation = 0;
+        actor.scene_backed = false;
+        actor.parent_uid = Actor::kInvalidUID;
+        actor.runtime_destroyed = false;
+        std::string error;
+        prepared = PrepareRuntimeActor(std::move(actor), error);
+        if (!prepared) throw std::runtime_error(error);
+        Actor::CommitSpawnTemplate(candidate);
+        Actor *published = PublishRuntimeActor(*prepared, *g_runtime.scene_actors, true);
+        g_engine->NotifyRuntimeActorPublished(*published);
+        return luabridge::LuaRef(g_runtime.lua_state, ActorHandle(published));
+    } catch (const std::exception &failure) {
+        if (prepared && prepared->CommitStarted()) g_engine->ReportRuntimeActorPublicationFailure(failure.what());
+        throw std::runtime_error(ScriptReloadCandidate::SanitizeDiagnosticText(failure.what()));
     }
-    if (g_engine == nullptr) {
-        return MakeNilRef();
-    }
-
-    Actor actor = Actor::LoadTemplate(template_name);
-    actor.uid = g_engine->AllocateRuntimeGeneratedActorUID();
-    actor.scene_backed = false;
-    actor.parent_uid = Actor::kInvalidUID;
-    actor.runtime_destroyed = false;
-    std::sort(actor.component_specs.begin(), actor.component_specs.end(),
-              [](const Actor::ComponentSpec &a, const Actor::ComponentSpec &b) {
-                  return a.key < b.key;
-              });
-
-    g_runtime.scene_actors->emplace_back(std::move(actor));
-    Actor *actor_ptr = &g_runtime.scene_actors->back();
-    /*
-    Instantiated actors are inserted into runtime lookup tables immediately so
-    Lua can Find/SetParent them in the same frame, even though lifecycle
-    callbacks still begin on the next frame boundary.
-    */
-    g_runtime.actor_by_uid[actor_ptr->uid] = actor_ptr;
-    g_runtime.actors_by_name[actor_ptr->actor_name].push_back(actor_ptr);
-    g_runtime.actor_order_by_uid[actor_ptr->uid] =
-        g_runtime.scene_actors->empty() ? 0 : (g_runtime.scene_actors->size() - 1);
-    g_runtime.pending_actor_uids_to_activate.push_back(actor_ptr->uid);
-
-    for (const Actor::ComponentSpec &component_spec : actor_ptr->component_specs) {
-        InstantiateComponentForActor(actor_ptr->uid, component_spec);
-    }
-    SortComponentsForActor(actor_ptr->uid);
-    return luabridge::LuaRef(g_runtime.lua_state, actor_ptr);
 }
 
 // actor-level helpers exposed through Actor static APIs
@@ -556,7 +825,7 @@ void ComponentManager::DestroyActor(Actor *actor) {
              components_it->second) {
             ComponentRecord &component = *component_ptr;
             component.removed = true;
-            component.instance_table["enabled"] = false;
+            SetSystemField(component.instance_table, "enabled", luabridge::LuaRef(g_runtime.lua_state, false));
         }
         g_runtime.component_index_by_key.erase(actor_uid);
         g_runtime.component_first_key_by_type.erase(actor_uid);

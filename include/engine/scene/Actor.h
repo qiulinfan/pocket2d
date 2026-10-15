@@ -12,6 +12,8 @@ namespace luabridge {
 class LuaRef;
 }
 
+struct ActorTemplateCandidate;
+
 struct Actor {
 public:
     using UID = std::uint64_t;
@@ -50,6 +52,8 @@ public:
     // Stable actor identity used by both editor and runtime. 
     // Scene-backed actors persist this to .scene file; runtime-only actors receive transient UIDs.
     UID uid = kInvalidUID;
+    std::uint64_t runtime_generation = 0;
+    void AssignRuntimeGeneration();
     bool scene_backed = false;
 
     // Stable parent identity in the same UID space.
@@ -98,6 +102,10 @@ public:
 
     // loads an actor data copy from an actor template file.
     static Actor LoadTemplate(const std::string &template_name);
+    // Runtime spawn publishes a new cache entry only after complete actor preparation.
+    static ActorTemplateCandidate ReadTemplateForSpawn(const std::string &template_name);
+    static void CommitSpawnTemplate(const ActorTemplateCandidate &candidate);
+    static void ClearTemplateCache();
 
     // 当前场景中实例化一个 actor, 返回其 Lua 引用.
     static luabridge::LuaRef Instantiate(const std::string &template_name);
@@ -109,6 +117,11 @@ public:
     static luabridge::LuaRef FindAll(const std::string &name);
 
     Actor() {}
+};
+
+struct ActorTemplateCandidate {
+    Actor actor;
+    std::string uncached_path;
 };
 
 #endif

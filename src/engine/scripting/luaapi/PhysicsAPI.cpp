@@ -5,6 +5,8 @@
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include "LuaBridge/detail/ClassInfo.h"
+#include "scripting/LuaBoundary.h"
+#include "RawMetamethod.h"
 #include <optional>
 #include <vector>
 
@@ -28,17 +30,31 @@ void InstallClassMetamethod(const char *name, lua_CFunction function) {
     lua_pop(g_lua_state, 1);
 }
 
+b2Vec2 ReadVector(lua_State *state, int index) {
+    const auto result = luabridge::Stack<const b2Vec2 &>::get(state, index);
+    LuaBoundary::Check(result, "Vector2 operand");
+    return result.value().get();
+}
+float ReadScalar(lua_State *state, int index) {
+    const auto result = luabridge::Stack<float>::get(state, index);
+    LuaBoundary::Check(result, "Vector2 scalar operand");
+    return result.value();
+}
+void PushVector(lua_State *state, const b2Vec2 &value) {
+    LuaBoundary::Check(luabridge::Stack<b2Vec2>::push(state, value), "Vector2 result");
+}
+
 int LuaVector2Add(lua_State *L) {
-    const b2Vec2 &a = luabridge::Stack<const b2Vec2 &>::get(L, 1);
-    const b2Vec2 &b = luabridge::Stack<const b2Vec2 &>::get(L, 2);
-    luabridge::Stack<b2Vec2>::push(L, a + b);
+    const b2Vec2 a = ReadVector(L, 1);
+    const b2Vec2 b = ReadVector(L, 2);
+    PushVector(L, a + b);
     return 1;
 }
 
 int LuaVector2Sub(lua_State *L) {
-    const b2Vec2 &a = luabridge::Stack<const b2Vec2 &>::get(L, 1);
-    const b2Vec2 &b = luabridge::Stack<const b2Vec2 &>::get(L, 2);
-    luabridge::Stack<b2Vec2>::push(L, a - b);
+    const b2Vec2 a = ReadVector(L, 1);
+    const b2Vec2 b = ReadVector(L, 2);
+    PushVector(L, a - b);
     return 1;
 }
 
@@ -49,29 +65,28 @@ int LuaVector2Mul(lua_State *L) {
     const bool rhs_is_number = lua_isnumber(L, 2) != 0;
 
     if (lhs_is_vector && rhs_is_number) {
-        const b2Vec2 &vec = luabridge::Stack<const b2Vec2 &>::get(L, 1);
-        const float scalar = luabridge::Stack<float>::get(L, 2);
-        luabridge::Stack<b2Vec2>::push(L, scalar * vec);
+        const b2Vec2 vec = ReadVector(L, 1);
+        const float scalar = ReadScalar(L, 2);
+        PushVector(L, scalar * vec);
         return 1;
     }
 
     if (lhs_is_number && rhs_is_vector) {
-        const float scalar = luabridge::Stack<float>::get(L, 1);
-        const b2Vec2 &vec = luabridge::Stack<const b2Vec2 &>::get(L, 2);
-        luabridge::Stack<b2Vec2>::push(L, scalar * vec);
+        const float scalar = ReadScalar(L, 1);
+        const b2Vec2 vec = ReadVector(L, 2);
+        PushVector(L, scalar * vec);
         return 1;
     }
 
-    return luaL_error(
-        L, "Vector2 multiplication expects (Vector2, number) or (number, Vector2)");
+    throw LuaBoundary::Error("Vector2 multiplication expects (Vector2, number) or (number, Vector2)");
 }
 
 void InjectVector2API() {
     luabridge::getGlobalNamespace(g_lua_state)
         .beginClass<b2Vec2>("Vector2")
         .addConstructor<void (*)(float, float)>()
-        .addProperty("x", &b2Vec2::x)
-        .addProperty("y", &b2Vec2::y)
+        .addPropertyReadWrite("x", &b2Vec2::x)
+        .addPropertyReadWrite("y", &b2Vec2::y)
         .addFunction("Normalize", &b2Vec2::Normalize)
         .addFunction("Length", &b2Vec2::Length)
         .addStaticFunction("Distance",
@@ -80,19 +95,19 @@ void InjectVector2API() {
                            static_cast<float (*)(const b2Vec2 &, const b2Vec2 &)>( &b2Dot))
         .endClass();
 
-    InstallClassMetamethod<b2Vec2>("__add", &LuaVector2Add);
-    InstallClassMetamethod<b2Vec2>("__sub", &LuaVector2Sub);
-    InstallClassMetamethod<b2Vec2>("__mul", &LuaVector2Mul);
+    InstallClassMetamethod<b2Vec2>("__add", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Add>);
+    InstallClassMetamethod<b2Vec2>("__sub", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Sub>);
+    InstallClassMetamethod<b2Vec2>("__mul", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Mul>);
 }
 
 void InjectCollisionAPI() {
     luabridge::getGlobalNamespace(g_lua_state)
         .beginClass<Collision>("Collision")
         .addConstructor<void (*)()>()
-        .addProperty("other", &Collision::other)
-        .addProperty("point", &Collision::point)
-        .addProperty("relative_velocity", &Collision::relative_velocity)
-        .addProperty("normal", &Collision::normal)
+        .addPropertyReadWrite("other", &Collision::other_handle)
+        .addPropertyReadWrite("point", &Collision::point)
+        .addPropertyReadWrite("relative_velocity", &Collision::relative_velocity)
+        .addPropertyReadWrite("normal", &Collision::normal)
         .endClass();
 }
 
@@ -118,10 +133,10 @@ void InjectPhysicsAPI() {
     luabridge::getGlobalNamespace(g_lua_state)
         .beginClass<RayCast::HitResult>("HitResult")
         .addConstructor<void (*)()>()
-        .addProperty("actor", &RayCast::HitResult::actor)
-        .addProperty("point", &RayCast::HitResult::point)
-        .addProperty("normal", &RayCast::HitResult::normal)
-        .addProperty("is_trigger", &RayCast::HitResult::is_trigger)
+        .addPropertyReadWrite("actor", &RayCast::HitResult::actor_handle)
+        .addPropertyReadWrite("point", &RayCast::HitResult::point)
+        .addPropertyReadWrite("normal", &RayCast::HitResult::normal)
+        .addPropertyReadWrite("is_trigger", &RayCast::HitResult::is_trigger)
         .endClass();
 
     luabridge::getGlobalNamespace(g_lua_state)

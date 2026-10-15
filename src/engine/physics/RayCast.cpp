@@ -26,6 +26,7 @@ public:
 
         RaycastHitCandidate candidate;
         candidate.hit.actor = metadata->actor;
+        candidate.hit.actor_handle = ActorHandle(metadata->actor);
         candidate.hit.point = point;
         candidate.hit.normal = normal;
         candidate.hit.is_trigger = metadata->kind == RayCast::FixtureKind::Trigger;

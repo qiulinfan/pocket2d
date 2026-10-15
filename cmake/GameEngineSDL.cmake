@@ -1,217 +1,64 @@
 include_guard(GLOBAL)
+include(FetchContent)
+
+# Native SDL3 dependencies, pinned to reviewed upstream releases. CMake's
+# FETCHCONTENT_SOURCE_DIR_<NAME> overrides support offline source checkouts.
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL_SHARED ON CACHE BOOL "" FORCE)
+set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TESTS OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_AVIF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TIF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_WEBP ON CACHE BOOL "" FORCE)
+set(SDLTTF_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLTTF_PLUTOSVG OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_TESTS OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_GME OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_MOD OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_MIDI OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_FLAC_LIBFLAC OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_MP3_MPG123 OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_OPUS OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_VORBIS_VORBISFILE OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(sdl3
+    URL https://codeload.github.com/libsdl-org/SDL/tar.gz/refs/tags/release-3.4.18)
+FetchContent_Declare(sdl3_image
+    URL https://codeload.github.com/libsdl-org/SDL_image/tar.gz/refs/tags/release-3.4.8)
+FetchContent_Declare(sdl3_ttf
+    URL https://codeload.github.com/libsdl-org/SDL_ttf/tar.gz/refs/tags/release-3.2.2)
+FetchContent_Declare(sdl3_mixer
+    URL https://codeload.github.com/libsdl-org/SDL_mixer/tar.gz/refs/tags/release-3.2.4)
+FetchContent_MakeAvailable(sdl3 sdl3_image sdl3_ttf sdl3_mixer)
 
 add_library(game_engine_sdl_headers INTERFACE)
-target_include_directories(
-    game_engine_sdl_headers
-    SYSTEM
-    INTERFACE
-        "${PROJECT_SOURCE_DIR}/thirdparty"
-)
-
-function(_game_engine_collect_windows_runtime_dlls out_var)
-    if(NOT WIN32 OR NOT GAME_ENGINE_STAGE_SDL_RUNTIME)
-        set(${out_var} "" PARENT_SCOPE)
-        return()
-    endif()
-
-    file(GLOB _game_engine_runtime_dlls CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/dlls/*.dll"
-        "${PROJECT_SOURCE_DIR}/thirdparty/SDL2/lib/*.dll"
-        "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_image/lib/*.dll"
-        "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_image/lib/optional/*.dll"
-        "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_mixer/lib/*.dll"
-        "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_mixer/lib/optional/*.dll"
-        "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_ttf/lib/*.dll"
-    )
-    list(REMOVE_DUPLICATES _game_engine_runtime_dlls)
-    set(${out_var} "${_game_engine_runtime_dlls}" PARENT_SCOPE)
-endfunction()
-
-function(_game_engine_ensure_windows_root_runtime_target)
-    if(NOT WIN32 OR NOT GAME_ENGINE_STAGE_SDL_RUNTIME)
-        return()
-    endif()
-
-    if(TARGET game_engine_windows_root_runtime_dlls)
-        return()
-    endif()
-
-    _game_engine_collect_windows_runtime_dlls(_game_engine_runtime_dlls)
-
-    set(_game_engine_root_runtime_commands)
-    foreach(_game_engine_runtime_dll IN LISTS _game_engine_runtime_dlls)
-        list(APPEND _game_engine_root_runtime_commands
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_game_engine_runtime_dll}"
-                    "${PROJECT_SOURCE_DIR}"
-        )
-    endforeach()
-
-    add_custom_target(
-        game_engine_windows_root_runtime_dlls
-        ${_game_engine_root_runtime_commands}
-        VERBATIM
-    )
-    set_target_properties(game_engine_windows_root_runtime_dlls PROPERTIES
-        FOLDER "runtime"
-    )
-endfunction()
+target_link_libraries(game_engine_sdl_headers INTERFACE
+    SDL3::SDL3 SDL3_image::SDL3_image SDL3_ttf::SDL3_ttf SDL3_mixer::SDL3_mixer)
+add_library(game_engine_sdl INTERFACE)
+target_link_libraries(game_engine_sdl INTERFACE game_engine_sdl_headers)
 
 function(game_engine_ensure_sdl)
-    if(NOT TARGET game_engine_sdl)
-        add_library(game_engine_sdl INTERFACE)
-        target_link_libraries(game_engine_sdl INTERFACE game_engine_sdl_headers)
-
-        if(WIN32)
-            add_library(game_engine_sdl2 SHARED IMPORTED GLOBAL)
-            set_target_properties(
-                game_engine_sdl2
-                PROPERTIES
-                    IMPORTED_IMPLIB "${PROJECT_SOURCE_DIR}/thirdparty/SDL2/lib/SDL2.lib"
-                    IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/thirdparty/SDL2/lib/SDL2.dll"
-            )
-
-            add_library(game_engine_sdl2main STATIC IMPORTED GLOBAL)
-            set_target_properties(
-                game_engine_sdl2main
-                PROPERTIES
-                    IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/thirdparty/SDL2/lib/SDL2main.lib"
-            )
-
-            add_library(game_engine_sdl2_image SHARED IMPORTED GLOBAL)
-            set_target_properties(
-                game_engine_sdl2_image
-                PROPERTIES
-                    IMPORTED_IMPLIB "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_image/lib/SDL2_image.lib"
-                    IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_image/lib/SDL2_image.dll"
-            )
-
-            add_library(game_engine_sdl2_mixer SHARED IMPORTED GLOBAL)
-            set_target_properties(
-                game_engine_sdl2_mixer
-                PROPERTIES
-                    IMPORTED_IMPLIB "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_mixer/lib/SDL2_mixer.lib"
-                    IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_mixer/lib/SDL2_mixer.dll"
-            )
-
-            add_library(game_engine_sdl2_ttf SHARED IMPORTED GLOBAL)
-            set_target_properties(
-                game_engine_sdl2_ttf
-                PROPERTIES
-                    IMPORTED_IMPLIB "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_ttf/lib/SDL2_ttf.lib"
-                    IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_ttf/lib/SDL2_ttf.dll"
-            )
-
-            target_link_libraries(
-                game_engine_sdl
-                INTERFACE
-                    game_engine_sdl2
-                    game_engine_sdl2main
-                    game_engine_sdl2_image
-                    game_engine_sdl2_mixer
-                    game_engine_sdl2_ttf
-            )
-        elseif(APPLE)
-            set(_game_engine_frameworks
-                "${PROJECT_SOURCE_DIR}/thirdparty/SDL2/lib/SDL2.framework"
-                "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_image/lib/SDL2_image.framework"
-                "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_mixer/lib/SDL2_mixer.framework"
-                "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_ttf/lib/SDL2_ttf.framework"
-            )
-
-            target_include_directories(
-                game_engine_sdl
-                SYSTEM
-                INTERFACE
-                    "${PROJECT_SOURCE_DIR}/thirdparty/SDL2/lib/SDL2.framework/Headers"
-                    "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_image/lib/SDL2_image.framework/Headers"
-                    "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_mixer/lib/SDL2_mixer.framework/Headers"
-                    "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_ttf/lib/SDL2_ttf.framework/Headers"
-            )
-            target_link_libraries(game_engine_sdl INTERFACE ${_game_engine_frameworks})
-        else()
-            find_package(PkgConfig REQUIRED)
-            pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
-            pkg_check_modules(SDL2_IMAGE REQUIRED IMPORTED_TARGET SDL2_image)
-            pkg_check_modules(SDL2_MIXER REQUIRED IMPORTED_TARGET SDL2_mixer)
-            pkg_check_modules(SDL2_TTF REQUIRED IMPORTED_TARGET SDL2_ttf)
-
-            target_link_libraries(
-                game_engine_sdl
-                INTERFACE
-                    PkgConfig::SDL2
-                    PkgConfig::SDL2_IMAGE
-                    PkgConfig::SDL2_MIXER
-                    PkgConfig::SDL2_TTF
-            )
-        endif()
-    endif()
+    # Dependencies above are initialized once per configure.
 endfunction()
 
 function(game_engine_link_sdl target)
-    game_engine_ensure_sdl()
     target_link_libraries(${target} PRIVATE game_engine_sdl)
-
     if(WIN32 AND GAME_ENGINE_STAGE_SDL_RUNTIME)
-        _game_engine_collect_windows_runtime_dlls(_game_engine_runtime_dlls)
-
-        foreach(_game_engine_runtime_dll IN LISTS _game_engine_runtime_dlls)
-            add_custom_command(
-                TARGET ${target}
-                POST_BUILD
-                COMMAND
-                    ${CMAKE_COMMAND} -E copy_if_different
-                    "${_game_engine_runtime_dll}"
-                    "$<TARGET_FILE_DIR:${target}>"
-                COMMENT "Staging runtime DLLs for ${target}"
-            )
-        endforeach()
-    endif()
-
-    if(APPLE AND GAME_ENGINE_STAGE_SDL_RUNTIME)
-        set(_game_engine_frameworks
-            "${PROJECT_SOURCE_DIR}/thirdparty/SDL2/lib/SDL2.framework"
-            "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_image/lib/SDL2_image.framework"
-            "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_mixer/lib/SDL2_mixer.framework"
-            "${PROJECT_SOURCE_DIR}/thirdparty/SDL2_ttf/lib/SDL2_ttf.framework"
-        )
-
-        add_custom_command(
-            TARGET ${target}
-            POST_BUILD
-            COMMAND
-                ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_FILE_DIR:${target}>/Frameworks"
-            COMMENT "Creating Frameworks directory for ${target}"
-        )
-
-        foreach(_game_engine_framework IN LISTS _game_engine_frameworks)
-            get_filename_component(_game_engine_framework_name "${_game_engine_framework}" NAME)
-            add_custom_command(
-                TARGET ${target}
-                POST_BUILD
-                COMMAND
-                    ${CMAKE_COMMAND} -E copy_directory
-                    "${_game_engine_framework}"
-                    "$<TARGET_FILE_DIR:${target}>/Frameworks/${_game_engine_framework_name}"
-                COMMENT "Embedding ${_game_engine_framework_name} for ${target}"
-            )
-        endforeach()
-
-        set_target_properties(
-            ${target}
-            PROPERTIES
-                BUILD_RPATH "@executable_path/Frameworks"
-                INSTALL_RPATH "@executable_path/Frameworks"
-        )
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${target}> $<TARGET_FILE_DIR:${target}>
+            COMMAND_EXPAND_LISTS VERBATIM)
     endif()
 endfunction()
 
 function(game_engine_mirror_windows_runtime_to_root target)
-    if(NOT WIN32 OR NOT GAME_ENGINE_STAGE_SDL_RUNTIME)
-        return()
+    if(WIN32 AND GAME_ENGINE_STAGE_SDL_RUNTIME)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${target}> "${PROJECT_SOURCE_DIR}"
+            COMMAND_EXPAND_LISTS VERBATIM)
     endif()
-
-    _game_engine_ensure_windows_root_runtime_target()
-    add_dependencies(${target} game_engine_windows_root_runtime_dlls)
 endfunction()

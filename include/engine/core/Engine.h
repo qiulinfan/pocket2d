@@ -9,8 +9,9 @@
 #include "glm/glm.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <list>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <unordered_map>
 
@@ -28,9 +29,11 @@ private:
     SDL_Renderer *renderer = nullptr;
 
     // runtime actor container for the current scene
-    std::deque<Actor> actors;
+    std::list<Actor> actors;
 
     bool is_game_running = true;
+    bool runtime_initialized_ = false;
+    bool runtime_shutdown_ = false;
     std::string current_scene_name = "";
 
     // queued scene load request, applied at the start of the next frame
@@ -38,6 +41,11 @@ private:
     bool has_pending_scene_load = false;
     std::string pending_scene_name = "";
     std::string last_scene_load_error_;
+    std::string last_runtime_actor_error_;
+    std::string last_scene_edit_error_;
+    std::uint64_t scene_load_attempt_revision_ = 0;
+    bool scene_reset_required_ = false;
+    bool scene_transition_active_ = false;
 
     // runtime camera state
     float runtime_zoom_factor = 1.0f;
@@ -71,9 +79,12 @@ private:
     float displayed_gameplay_fps_ = 0.0f;
 
     void update();
+    void advanceGameplay();
+    void finishGameplayFrame();
     void render();
     void initialize();
     void processPendingSceneLoad();
+    void failSceneCommit(const std::string &message);
     void clearFrame();
     void clearEditorHostFrame();
     void destroyRuntimeRenderTarget();
@@ -85,18 +96,6 @@ private:
     void rebuildRuntimeActorUIDMap();
     Actor *findRuntimeActorByUID(Actor::UID actor_uid);
     const Actor *findRuntimeActorByUID(Actor::UID actor_uid) const;
-    bool applySceneMutation(const SceneFormat::SceneMutation &mutation);
-    bool applyCreateActorMutation( const SceneFormat::CreateActorMutation &mutation);
-    bool applyDeleteActorMutation( const SceneFormat::DeleteActorMutation &mutation);
-    bool applySetActorNameMutation( const SceneFormat::SetActorNameMutation &mutation);
-    bool applySetActorParentMutation( const SceneFormat::SetActorParentMutation &mutation);
-    bool applyAddComponentMutation( const SceneFormat::AddComponentMutation &mutation);
-    bool applyDeleteComponentMutation( const SceneFormat::DeleteComponentMutation &mutation);
-    bool applyRenameComponentMutation( const SceneFormat::RenameComponentMutation &mutation);
-    bool applySetComponentTypeMutation( const SceneFormat::SetComponentTypeMutation &mutation);
-    bool applySetComponentPropertyMutation( const SceneFormat::SetComponentPropertyMutation &mutation);
-    bool rebuildRuntimeComponentFromSpec(Actor &actor,
-                                         const std::string &component_key);
     void ResetPerformanceCounters();
     void RecordRuntimeRenderFrame();
     void RecordGameplayFrame();
@@ -110,6 +109,11 @@ public:
     // Start SDL/runtime systems without entering the blocking game loop.
     // 初始化 SDL/运行时系统, 但不进入游戏循环.
     void InitializeRuntime();
+    // Initialize simulation services without a window, renderer, or audio device.
+    void InitializeHeadless();
+    // Advance the real gameplay pipeline by exactly one 1/60-second tick.
+    // Input comes from ProcessSDLEvent; no SDL polling, rendering, or pacing.
+    void StepSimulation();
     // Tear down SDL/runtime systems created by InitializeRuntime.
     // 关闭由 InitializeRuntime 创建的 SDL/运行时系统.
     void ShutdownRuntime();
@@ -130,7 +134,7 @@ public:
     // or mutating runtime state.
     void RunPresentPausedFrame(bool quit_requested_this_frame);
     // Present the current backbuffer to the window once drawing is complete.
-    // `advance_gameplay_frame` should stay false for frozen editor previews.
+    // The legacy flag is retained for hosts; simulation now owns frame advance.
     void PresentFrame(bool advance_gameplay_frame = true);
     // Run the traditional standalone runtime loop until quit.
     // 运行传统的独立运行时循环直到退出.
@@ -149,10 +153,17 @@ public:
     // Return the loaded game configuration data.
     const GameConfigData &GetConfig() const;
     const std::string &GetLastSceneLoadError() const;
+    const std::string &GetLastSceneEditError() const { return last_scene_edit_error_; }
+    const std::string &GetLastRuntimeActorError() const { return last_runtime_actor_error_; }
+    // Internal publication hooks; failure after commit requires a fresh runtime.
+    void NotifyRuntimeActorPublished(Actor &actor);
+    void ReportRuntimeActorPublicationFailure(const std::string &message);
+    std::uint64_t GetSceneLoadAttemptRevision() const { return scene_load_attempt_revision_; }
+    bool RequiresSceneReset() const { return scene_reset_required_; }
     std::size_t GetActorCount() const;
     // Return read-only access to the current live runtime actor container.
     // Editors can inspect this during play mode without owning runtime state.
-    const std::deque<Actor> &GetRuntimeActors() const;
+    const std::list<Actor> &GetRuntimeActors() const;
     // Look up one live runtime actor by runtime id / stable editor uid.
     const Actor *GetRuntimeActorByUID(Actor::UID actor_uid) const;
     PhysicsHierarchy::State GetRuntimePhysicsHierarchyStateByUID(Actor::UID actor_uid) const;
@@ -167,7 +178,10 @@ public:
     Actor::UID AllocateRuntimeGeneratedActorUID();
     // Reload the runtime from a shared scene asset snapshot.
     // 使用共享场景资源快照重新装载运行时.
-    bool LoadSceneAsset(const SceneFormat::SceneAsset &scene_asset);
+    // Optional host gate runs after all preparation, before world mutation.
+    // The editor uses it to save the outgoing draft only for a valid target.
+    bool LoadSceneAsset(const SceneFormat::SceneAsset &scene_asset,
+                        const std::function<bool()> &before_commit = {});
     bool ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command);
     // Toggle offscreen runtime rendering for the docked editor viewport.
     // 切换用于编辑器嵌入视口的离屏运行时渲染.

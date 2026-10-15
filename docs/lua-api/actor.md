@@ -13,6 +13,7 @@ The `Actor` type is both:
 | --- | --- |
 | `actor:GetName()` | Returns the actor name |
 | `actor:GetUID()` | Returns the stable runtime/editor actor UID |
+| `actor:IsValid()` / `actor.is_valid` | Whether this handle still identifies a live actor |
 | `actor:SetParent(parent_actor)` | Reparents the actor in the live runtime world |
 | `actor:GetChildCount()` | Returns the number of direct children |
 | `actor:GetChildren()` | Returns direct children as a Lua array |
@@ -45,8 +46,29 @@ The `Actor` type is both:
 
 ## Notes
 
+- Lua actors are generation-checked handles. Caching an actor across another
+  actor's destruction is safe. Destroying that actor invalidates its handle;
+  reusing the same scene UID later does not revive an old handle.
+- Handles for the same UID and runtime generation compare equal with `==`.
+  `component.actor`, collision `other`, raycast `actor`, hierarchy lookups and
+  `Actor.Find` all use the same identity rules.
+- Check `IsValid()` before using a cached actor after a lifecycle change.
+  This does not make arbitrary cached component objects or Lua table contents
+  into a durable savegame format.
+
 - `GetChildren()` only returns direct children.
 - `GetComponentInChildren()` and `GetComponentsInChildren()` include `self`
   first, then descendants.
 - Runtime child queries are derived from parent links on demand; there is no
   separate permanent children tree in the runtime core.
+
+## Runtime creation failure boundary
+
+`Actor.Instantiate` prepares the complete candidate before returning a findable
+handle. A rejected candidate never runs gameplay `OnDestroy`. Successfully
+published actors retain their established lifecycle behavior, including destruction
+before their first start. A newly rejected template can be repaired on disk and
+retried; successfully cached templates retain the existing cache lifetime. Failed
+attempts may reserve unused UIDs or generated component keys. See
+[runtime actor preparation](../development/runtime-actor-preparation.md) for
+activation timing and the separate fatal publication boundary.

@@ -1,7 +1,12 @@
+#include "scripting/LuaBoundary.h"
 #include "scripting/EventBus.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include <algorithm>
+#include <cassert>
+#include <set>
+#include <unordered_set>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -51,6 +56,34 @@ EventBus::Hooks g_hooks;
 std::unordered_map<std::string, std::vector<EventSubscription>>
     g_event_subscriptions;
 std::vector<PendingEventOperation> g_pending_event_operations;
+unsigned g_dispatch_depth = 0;
+struct DispatchScope {
+    DispatchScope() { ++g_dispatch_depth; }
+    ~DispatchScope() { --g_dispatch_depth; }
+};
+const void *RawIdentity(const luabridge::LuaRef &value) {
+    value.push(g_hooks.lua_state);
+    const void *identity = lua_topointer(g_hooks.lua_state, -1);
+    lua_pop(g_hooks.lua_state, 1);
+    return identity;
+}
+struct CallbackIdentity {
+    Actor::UID uid;
+    std::string key;
+    const void *component;
+    const void *function;
+    bool operator==(const CallbackIdentity &) const = default;
+};
+struct CallbackHash {
+    std::size_t operator()(const CallbackIdentity &value) const {
+        auto hash = std::hash<Actor::UID>{}(value.uid);
+        const auto combine = [&](std::size_t part) { hash ^= part + 0x9e3779b9U + (hash << 6) + (hash >> 2); };
+        combine(std::hash<std::string>{}(value.key));
+        combine(std::hash<const void *>{}(value.component));
+        combine(std::hash<const void *>{}(value.function));
+        return hash;
+    }
+};
 
 
 bool AreSameRef(const luabridge::LuaRef &a, const luabridge::LuaRef &b) {
@@ -77,12 +110,9 @@ bool IsComponentRefAlive(const luabridge::LuaRef &component_ref,
 }
 
 // EventBus 统一捕获 Lua 回调异常, 并交回宿主侧格式化输出
-void ReportError(Actor::UID actor_uid, const luabridge::LuaException &e) {
+void ReportError(Actor::UID actor_uid, const LuaBoundary::Error &e) {
     if (g_hooks.report_error != nullptr) {
         g_hooks.report_error(actor_uid, e);
-    }
-    if (g_hooks.lua_state != nullptr) {
-        lua_settop(g_hooks.lua_state, 0);
     }
 }
 
@@ -101,6 +131,138 @@ bool DoesSubscriptionMatch(const EventSubscription &subscription,
 } // namespace
 
 namespace EventBus {
+
+struct ReloadPlan::State {
+    decltype(g_event_subscriptions) active;
+    decltype(g_pending_event_operations) pending;
+};
+ReloadPlan::ReloadPlan() = default;
+ReloadPlan::~ReloadPlan() = default;
+ReloadPlan::ReloadPlan(ReloadPlan &&) noexcept = default;
+ReloadPlan &ReloadPlan::operator=(ReloadPlan &&) noexcept = default;
+bool IsDispatching() { return g_dispatch_depth != 0; }
+
+bool PrepareReload(const std::vector<ComponentReload> &components, ReloadPlan &plan, std::string &error) {
+    plan.state_.reset();
+    error.clear();
+    if (IsDispatching()) { error = "EventBus reload requires an idle dispatch boundary"; return false; }
+    if (!g_hooks.lua_state) { error = "EventBus is not initialized"; return false; }
+    struct StackScope {
+        lua_State *state;
+        int top;
+        ~StackScope() { lua_settop(state, top); }
+    } stack{g_hooks.lua_state, lua_gettop(g_hooks.lua_state)};
+    try {
+        using FunctionMap = std::unordered_map<const void *, luabridge::LuaRef>;
+        std::unordered_map<const void *, FunctionMap> mappings;
+        for (const auto &component : components) {
+            if (component.component.state() != g_hooks.lua_state ||
+                (!component.component.isTable() && !component.component.isUserdata()))
+                throw std::invalid_argument("reload requires a component object from the active Lua VM");
+            const auto [entry, inserted] = mappings.try_emplace(RawIdentity(component.component));
+            if (!inserted) throw std::invalid_argument("duplicate component reload entry");
+            for (const auto &replacement : component.functions) {
+                if (replacement.before.state() != g_hooks.lua_state || replacement.after.state() != g_hooks.lua_state ||
+                    !replacement.before.isFunction() || (!replacement.after.isNil() && !replacement.after.isFunction()))
+                    throw std::invalid_argument("reload callback replacement must be a function to function/nil in the active VM");
+                const auto [mapping, fresh] = entry->second.emplace(RawIdentity(replacement.before), replacement.after);
+                if (!fresh) {
+                    const bool same = mapping->second.isNil() && replacement.after.isNil();
+                    if (!same && !AreSameRef(mapping->second, replacement.after))
+                        throw std::invalid_argument("ambiguous replacement for one old callback function");
+                }
+            }
+        }
+        auto candidate = std::make_unique<ReloadPlan::State>();
+        candidate->active = g_event_subscriptions;
+        candidate->pending = g_pending_event_operations;
+        const auto remap = [&](auto &entry) {
+            const auto owner = mappings.find(RawIdentity(entry.component_ref));
+            if (owner == mappings.end()) return true;
+            const auto function = owner->second.find(RawIdentity(entry.function_ref));
+            if (function == owner->second.end())
+                throw std::invalid_argument("affected component has an unmapped callback (anonymous/instance closure)");
+            if (function->second.isNil()) return false;
+            entry.function_ref = function->second;
+            return true;
+        };
+        for (auto event = candidate->active.begin(); event != candidate->active.end();) {
+            auto &subscriptions = event->second;
+            std::unordered_set<CallbackIdentity, CallbackHash> seen;
+            std::erase_if(subscriptions, [&](auto &subscription) {
+                if (!remap(subscription)) return true;
+                // Same identity rules as Subscribe; retain the first position
+                // when two old methods now resolve to the same new function.
+                return !seen.insert({subscription.actor_uid, subscription.component_key,
+                                     RawIdentity(subscription.component_ref), RawIdentity(subscription.function_ref)}).second;
+            });
+            if (subscriptions.empty()) event = candidate->active.erase(event);
+            else ++event;
+        }
+        // Keep FIFO exactly. ApplyPendingOperations already deduplicates each
+        // Subscribe against the active set; removing nonadjacent queued entries
+        // here could change subscribe/unsubscribe/subscribe semantics.
+        std::erase_if(candidate->pending, [&](auto &operation) { return !remap(operation); });
+        plan.state_ = std::move(candidate);
+        return true;
+    } catch (const std::exception &failure) {
+        error = failure.what();
+        return false;
+    }
+}
+void CommitReload(ReloadPlan &&plan) noexcept {
+    assert(!IsDispatching()); // caller commits immediately at the idle boundary
+    if (!plan.state_) return;
+    g_event_subscriptions.swap(plan.state_->active);
+    g_pending_event_operations.swap(plan.state_->pending);
+    plan.state_.reset();
+}
+
+struct KeyRemapPlan::State {
+    lua_State *vm=nullptr;
+    std::unordered_map<const void *,ComponentKeyRemap> components;
+};
+KeyRemapPlan::KeyRemapPlan()=default;
+KeyRemapPlan::~KeyRemapPlan()=default;
+KeyRemapPlan::KeyRemapPlan(KeyRemapPlan &&) noexcept=default;
+KeyRemapPlan &KeyRemapPlan::operator=(KeyRemapPlan &&) noexcept=default;
+bool PrepareKeyRemap(const std::vector<ComponentKeyRemap> &components,KeyRemapPlan &plan,std::string &error) {
+    plan.state_.reset();error.clear();
+    if(IsDispatching()){error="EventBus key remap requires an idle dispatch boundary";return false;}
+    if(!g_hooks.lua_state){error="EventBus is not initialized";return false;}
+    const int top=lua_gettop(g_hooks.lua_state);
+    try {
+        auto candidate=std::make_unique<KeyRemapPlan::State>();candidate->vm=g_hooks.lua_state;
+        std::set<std::pair<Actor::UID,std::string>> targets;
+        for(const auto &component:components) {
+            if(component.component.state()!=g_hooks.lua_state||(!component.component.isTable()&&!component.component.isUserdata()))
+                throw std::invalid_argument("key remap requires a component object from the active Lua VM");
+            if(component.actor_uid==Actor::kInvalidUID||component.before.empty()||component.after.empty()||
+               component.before.size()>256||component.after.size()>256||component.before.find('\0')!=std::string::npos||component.after.find('\0')!=std::string::npos||component.before==component.after)
+                throw std::invalid_argument("key remap requires distinct valid component keys and actor identity");
+            if(!IsComponentRefAlive(component.component,component.actor_uid,component.before))
+                throw std::invalid_argument("key remap component is not alive at its original key");
+            if(!targets.emplace(component.actor_uid,component.after).second)
+                throw std::invalid_argument("key remap contains a duplicate target key");
+            if(!candidate->components.emplace(RawIdentity(component.component),component).second)
+                throw std::invalid_argument("key remap contains a duplicate component");
+        }
+        plan.state_=std::move(candidate);lua_settop(g_hooks.lua_state,top);return true;
+    }catch(const std::exception &failure){lua_settop(g_hooks.lua_state,top);error=failure.what();return false;}
+}
+void CommitKeyRemap(KeyRemapPlan &&plan) {
+    if(!plan.state_)return;
+    if(IsDispatching()||g_hooks.lua_state!=plan.state_->vm)
+        throw std::runtime_error("EventBus key remap lost its idle Lua lifetime boundary");
+    const auto remap=[&](auto &entry) {
+        const auto found=plan.state_->components.find(RawIdentity(entry.component_ref));
+        if(found!=plan.state_->components.end()&&entry.actor_uid==found->second.actor_uid&&entry.component_key==found->second.before)
+            entry.component_key=found->second.after;
+    };
+    for(auto &[event,entries]:g_event_subscriptions)for(auto &entry:entries)remap(entry);
+    for(auto &entry:g_pending_event_operations)remap(entry);
+    plan.state_.reset();
+}
 
 // initialize hooks and clear old subscription state
 void Initialize(const Hooks &hooks) {
@@ -122,6 +284,7 @@ void Shutdown() {
 
 // publish immediately to current active subscribers
 void Publish(const std::string &event_type, luabridge::LuaRef event_object) {
+    const DispatchScope dispatch;
     // Publish 是立即分发的: 只读取“当前已生效”的订阅表
     auto subscriptions_it = g_event_subscriptions.find(event_type);
     if (subscriptions_it == g_event_subscriptions.end()) return;
@@ -151,11 +314,13 @@ void Publish(const std::string &event_type, luabridge::LuaRef event_object) {
             continue;
         }
 
+        const int top = lua_gettop(g_hooks.lua_state);
         try {
-            subscription.function_ref(subscription.component_ref, event_object);
-        } catch (const luabridge::LuaException &e) {
+            LuaBoundary::CallDiscard(subscription.function_ref, subscription.component_ref, event_object);
+        } catch (const LuaBoundary::Error &e) {
             ReportError(subscription.actor_uid, e);
         }
+        lua_settop(g_hooks.lua_state, top);
     }
 }
 

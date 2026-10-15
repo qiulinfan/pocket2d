@@ -1,0 +1,10 @@
+{
+  "name": "@pocket2d/script-authoring",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Optional, pinned TypeScript-to-Lua authoring checks for Pocket2D",
+  "engines": { "node": ">=20" },
+  "scripts": { "compile": "node compile.mjs", "test": "node test.mjs" },
+  "devDependencies": { "typescript": "6.0.2", "typescript-to-lua": "1.37.1" }
+}

@@ -1,6 +1,7 @@
 #ifndef TRANSFORM_H
 #define TRANSFORM_H
 
+#include "scene/ActorHandle.h"
 #include <string>
 
 struct Actor;
@@ -15,6 +16,7 @@ public:
     components so Lua, inspector, and runtime hot-editing can treat them uniformly.
     */
     Actor *actor = nullptr;
+    ActorHandle actor_handle;
     std::string key = "";
     bool enabled = true;
 

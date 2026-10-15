@@ -4,7 +4,7 @@
 #include "engine/core/Engine.h"
 #include "scripting/ComponentManager.h"
 #include "imgui.h"
-#include "SDL2/SDL.h"
+#include "SDL3/SDL.h"
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
@@ -568,7 +568,7 @@ std::vector<ActorScreenBounds> BuildPickBoundsForClick(const Engine &engine, con
                                                         std::vector<ActorScreenBounds> pick_bounds;
 
     if (play_mode_active) {
-        const std::deque<Actor> &runtime_actors = engine.GetRuntimeActors();
+        const std::list<Actor> &runtime_actors = engine.GetRuntimeActors();
         pick_bounds.reserve(runtime_actors.size());
         for (const Actor &runtime_actor : runtime_actors) {
             if (runtime_actor.runtime_destroyed) continue;
@@ -1165,8 +1165,6 @@ SceneViewPanelResult RenderSceneViewPanel(
     (void)scene_view_height;
     SceneViewPanelResult controls_result;
     EnsureSceneCameraInitialized(engine, scene_document);
-    const std::size_t scene_panel_command_begin_index = (out_edit_commands != nullptr) ? out_edit_commands->size() : 0;
-    bool scene_panel_commands_applied_immediately = false;
 
 
     const bool window_visible =
@@ -1231,7 +1229,6 @@ SceneViewPanelResult RenderSceneViewPanel(
     }
 
     if (scene_editing_enabled && image_hovered) {
-        const std::size_t command_count_before_drop = (out_edit_commands != nullptr) ? out_edit_commands->size() : 0;
         const bool dropped_asset = HandleSceneAssetDrop(
                                         engine, g_scene_camera_state, scene_document, centered_cursor,
                                         image_size, selected_actor_index, selected_runtime_actor_uid,
@@ -1239,12 +1236,6 @@ SceneViewPanelResult RenderSceneViewPanel(
         controls_result.scene_changed |= dropped_asset;
         if (dropped_asset) {
             preview_refresh_requested = true;
-            if (out_edit_commands != nullptr) {
-                for (std::size_t command_index = command_count_before_drop; command_index < out_edit_commands->size(); ++command_index) {
-                    engine.ApplySceneEditCommand((*out_edit_commands)[command_index]);
-                }
-                scene_panel_commands_applied_immediately = true;
-            }
         }
     }
 
@@ -1267,7 +1258,6 @@ SceneViewPanelResult RenderSceneViewPanel(
         }
     }
 
-    const std::size_t command_count_before_drag = (out_edit_commands != nullptr) ? out_edit_commands->size() : 0;
     controls_result.scene_changed |= UpdateSelectedActorDrag(
                                     engine, g_scene_camera_state, scene_document, centered_cursor,
                                     image_size,
@@ -1275,13 +1265,6 @@ SceneViewPanelResult RenderSceneViewPanel(
                                     out_edit_commands);
     if (controls_result.scene_changed) {
         preview_refresh_requested = true;
-        if (out_edit_commands != nullptr) {
-            for (std::size_t command_index = command_count_before_drag;
-                 command_index < out_edit_commands->size(); ++command_index) {
-                engine.ApplySceneEditCommand((*out_edit_commands)[command_index]);
-            }
-            scene_panel_commands_applied_immediately = true;
-        }
     }
 
     if (preview_refresh_requested) {
@@ -1318,10 +1301,6 @@ SceneViewPanelResult RenderSceneViewPanel(
 
     ImGui::SetCursorScreenPos(ImVec2(cursor_screen_pos.x, centered_cursor.y + image_size.y));
     ImGui::Dummy(ImVec2(available_size.x, std::max(0.0f, available_size.y - image_size.y)));
-    if (scene_panel_commands_applied_immediately && out_edit_commands != nullptr) {
-        controls_result.immediate_apply_begin_index = scene_panel_command_begin_index;
-        controls_result.immediate_apply_end_index = out_edit_commands->size();
-    }
     ImGui::End();
     return controls_result;
 }

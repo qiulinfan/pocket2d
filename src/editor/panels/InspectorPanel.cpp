@@ -1,9 +1,11 @@
 #include "editor/panels/InspectorPanel.h"
 #include "editor/core/EditorDragDrop.h"
 #include "editor/documents/SceneDocument.h"
+#include "editor/documents/TilemapDocument.h"
 #include "engine/core/Engine.h"
 #include "scripting/ComponentManager.h"
 #include "shared/resources/SpriteAssetReference.h"
+#include "shared/resources/ResourcePath.h"
 #include "imgui.h"
 #include <algorithm>
 #include <cctype>
@@ -14,6 +16,79 @@
 
 namespace EditorPanels {
 namespace {
+
+void RenderTilemapAssetEditor(const std::vector<Actor::ComponentProperty> &properties,
+                              TilemapDocument &document) {
+    std::string resource;
+    for (const auto &property : properties) {
+        if (property.name == "map_resource") {
+            if (const auto *value = std::get_if<std::string>(&property.value)) resource = *value;
+            break;
+        }
+    }
+    ImGui::SeparatorText("Map Asset");
+    if (resource.empty()) { ImGui::TextDisabled("Assign a map_resource to edit its cells."); return; }
+    const auto maps = std::filesystem::absolute(ResourcePath::ResourceSubdirectory("maps")).lexically_normal();
+    const auto requested = (maps / resource).lexically_normal();
+    if (std::filesystem::path(resource).is_absolute() ||
+        !ResourcePath::IsPathWithinDirectory(requested, maps)) {
+        ImGui::TextWrapped("Map resource must be a relative path inside this project's maps folder.");
+        return;
+    }
+    if (document.HasAsset() && document.GetPath() != requested && document.HasUnsavedChanges()) {
+        ImGui::TextWrapped("Unsaved map edits: %s", document.GetPath().filename().string().c_str());
+        if (ImGui::Button("Save Current Map")) document.Save();
+        ImGui::SameLine();
+        if (ImGui::Button("Discard Current Map Edits")) document.Revert();
+        if (!document.GetLastError().empty()) ImGui::TextWrapped("%s", document.GetLastError().c_str());
+        return;
+    }
+    if (!document.Open(requested)) {
+        ImGui::TextWrapped("%s", document.GetLastError().c_str());
+        return;
+    }
+    const auto &asset = document.GetAsset();
+    ImGui::Text("%d x %d cells | %.3g world units / cell", asset.width, asset.height, asset.cell_size);
+    ImGui::TextWrapped("Atlas: %s (%d x %d)", asset.atlas.image.c_str(), asset.atlas.columns, asset.atlas.rows);
+    ImGui::TextDisabled("%s", document.HasUnsavedChanges() ? "Unsaved map edits" : "Map matches saved asset");
+
+    // Values live in this ImGui window's storage, never in process-global state.
+    auto *storage = ImGui::GetStateStorage();
+    const auto layer_key = ImGui::GetID("map_layer");
+    const auto x_key = ImGui::GetID("map_cell_x");
+    const auto y_key = ImGui::GetID("map_cell_y");
+    const auto tile_key = ImGui::GetID("map_tile_id");
+    int layer = storage->GetInt(layer_key, 0);
+    int x = storage->GetInt(x_key, 0), y = storage->GetInt(y_key, 0);
+    int tile = storage->GetInt(tile_key, 1);
+    ImGui::Combo("Layer", &layer, "ground\0solid\0");
+    ImGui::InputInt("Cell X", &x);
+    ImGui::InputInt("Cell Y", &y);
+    ImGui::InputInt("Tile ID (0 = empty)", &tile);
+    storage->SetInt(layer_key, layer); storage->SetInt(x_key, x);
+    storage->SetInt(y_key, y); storage->SetInt(tile_key, tile);
+    const std::string layer_name = layer == 1 ? "solid" : "ground";
+    if (x >= 0 && y >= 0 && x < asset.width && y < asset.height)
+        ImGui::Text("Current tile: %d", TilemapAsset::GetLayer(asset, layer_name).cells[static_cast<std::size_t>(y * asset.width + x)]);
+    else
+        ImGui::TextDisabled("Cell is outside this map.");
+    if (ImGui::Button("Apply Cell")) document.SetCell(layer_name, x, y, tile);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!document.CanUndo());
+    if (ImGui::Button("Undo Map")) document.Undo();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!document.CanRedo());
+    if (ImGui::Button("Redo Map")) document.Redo();
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(!document.HasUnsavedChanges());
+    if (ImGui::Button("Save Map")) document.Save();
+    ImGui::SameLine();
+    if (ImGui::Button("Discard Map Edits")) document.Revert();
+    ImGui::EndDisabled();
+    if (!document.GetLastError().empty()) ImGui::TextWrapped("%s", document.GetLastError().c_str());
+    ImGui::TextWrapped("Save Map writes this authoring copy. Play-mode changes are not saved to the asset.");
+}
 
 /*
 Inspector keeps a scene-backed selection valid while still allowing the empty
@@ -549,7 +624,8 @@ bool RenderInspectorPanel(const Engine &engine, SceneDocument &scene_document,
                           Actor::UID selected_runtime_actor_uid,
                           bool play_mode_active,
                           bool scene_editing_enabled,
-                          std::vector<SceneFormat::SceneEditCommand> *out_edit_commands) {
+                          std::vector<SceneFormat::SceneEditCommand> *out_edit_commands,
+                          TilemapDocument *tilemap_document) {
     /*
     Inspector edits the editor-owned SceneDocument cache. Runtime decides later
     when to mirror those document changes into its live copy, except for the
@@ -742,6 +818,9 @@ bool RenderInspectorPanel(const Engine &engine, SceneDocument &scene_document,
             if (component_spec.type == "Rigidbody") {
                 RenderPhysicsHierarchyInfo(
                     scene_document.GetPhysicsHierarchyState(actor_index));
+            }
+            if (component_spec.type == "Tilemap" && tilemap_document != nullptr) {
+                RenderTilemapAssetEditor(inspectable_properties, *tilemap_document);
             }
         }
 

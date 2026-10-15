@@ -2,6 +2,7 @@
 #define COLLISION_H
 
 #include "box2d/box2d.h"
+#include "scene/ActorHandle.h"
 
 struct Actor;
 
@@ -9,6 +10,7 @@ struct Collision {
     // other actor involved in this contact
     // 与当前 actor 接触的另一个 actor
     Actor *other = nullptr;
+    ActorHandle other_handle;
 
     // world-space contact point. trigger events may use a sentinel value
     // 世界坐标下的接触点. trigger 事件可能会用哨兵值

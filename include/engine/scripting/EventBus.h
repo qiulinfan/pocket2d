@@ -3,11 +3,15 @@
 
 #include "scene/Actor.h"
 #include <string>
+#include <memory>
+#include <vector>
+#include "lua.hpp"
+#include "scripting/LuaBoundary.h"
+#include "LuaBridge/LuaBridge.h"
 
 struct lua_State;
 
 namespace luabridge {
-class LuaException;
 class LuaRef;
 }
 
@@ -37,8 +41,69 @@ struct Hooks {
     // host-side error reporter for Lua callback failures
     // Lua 回调报错时交给宿主侧输出
     void (*report_error)(Actor::UID actor_uid,
-                         const luabridge::LuaException &) = nullptr;
+                         const LuaBoundary::Error &) = nullptr;
 };
+
+struct FunctionReplacement {
+    luabridge::LuaRef before;
+    luabridge::LuaRef after; // nil removes this callback, including queued operations
+};
+struct ComponentReload {
+    luabridge::LuaRef component;
+    std::vector<FunctionReplacement> functions;
+};
+
+// An owned candidate snapshot. It must be destroyed before its Lua VM closes.
+// Prepare and commit belong to one idle owner-thread transaction: no EventBus
+// mutation or user-code dispatch may occur between these calls.
+class ReloadPlan {
+public:
+    ReloadPlan();
+    ~ReloadPlan();
+    ReloadPlan(ReloadPlan &&) noexcept;
+    ReloadPlan &operator=(ReloadPlan &&) noexcept;
+    ReloadPlan(const ReloadPlan &) = delete;
+    ReloadPlan &operator=(const ReloadPlan &) = delete;
+private:
+    struct State;
+    std::unique_ptr<State> state_;
+    friend bool PrepareReload(const std::vector<ComponentReload> &, ReloadPlan &, std::string &);
+    friend void CommitReload(ReloadPlan &&) noexcept;
+};
+
+bool PrepareReload(const std::vector<ComponentReload> &components, ReloadPlan &plan, std::string &error);
+void CommitReload(ReloadPlan &&plan) noexcept;
+bool IsDispatching();
+
+// Identity-only rename delta. Callback functions (including anonymous closures)
+// and FIFO subscription operations are retained, including operations queued by
+// teardown callbacks after preparation. Registry validation/publication belongs
+// to the caller; only component identities alive at `before` may be prepared.
+struct ComponentKeyRemap {
+    luabridge::LuaRef component;
+    Actor::UID actor_uid;
+    std::string before;
+    std::string after;
+};
+class KeyRemapPlan {
+public:
+    KeyRemapPlan();
+    ~KeyRemapPlan();
+    KeyRemapPlan(KeyRemapPlan &&) noexcept;
+    KeyRemapPlan &operator=(KeyRemapPlan &&) noexcept;
+    KeyRemapPlan(const KeyRemapPlan &) = delete;
+    KeyRemapPlan &operator=(const KeyRemapPlan &) = delete;
+private:
+    struct State;
+    std::unique_ptr<State> state_;
+    friend bool PrepareKeyRemap(const std::vector<ComponentKeyRemap> &, KeyRemapPlan &, std::string &);
+    friend void CommitKeyRemap(KeyRemapPlan &&);
+};
+bool PrepareKeyRemap(const std::vector<ComponentKeyRemap> &components, KeyRemapPlan &plan, std::string &error);
+// Call after publishing all registry keys at an idle dispatch boundary. Does
+// not invoke callbacks. String allocation failure is a post-publication failure;
+// callers must use their fatal/reset path rather than claim an ordinary rollback.
+void CommitKeyRemap(KeyRemapPlan &&plan);
 
 // initialize hooks and clear old subscription state
 // 初始化 hooks, 并清空旧的订阅状态

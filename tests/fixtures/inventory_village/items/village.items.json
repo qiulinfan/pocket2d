@@ -1,0 +1,8 @@
+{"version":1,"items":[
+{"id":"herb","display_name":"Herb","kind":"food","max_stack":5,"health_restore":1},
+{"id":"ore","display_name":"Ore","kind":"material","max_stack":5},
+{"id":"sword","display_name":"Sword","kind":"weapon","max_stack":1,"equipment_slot":"subweapon","attack":2},
+{"id":"helmet","display_name":"Helmet","kind":"armor","max_stack":1,"equipment_slot":"head","defense":1},
+{"id":"armor","display_name":"Chest armor","kind":"armor","max_stack":1,"equipment_slot":"chest","defense":2},
+{"id":"boots","display_name":"Boots","kind":"armor","max_stack":1,"equipment_slot":"legs","defense":1,"move_speed_bonus":1}
+]}

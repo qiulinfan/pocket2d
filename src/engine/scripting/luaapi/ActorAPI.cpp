@@ -1,34 +1,69 @@
 #include "RegistrationDetail.h"
-#include "scene/Actor.h"
+#include "scene/ActorHandle.h"
+#include "scripting/ComponentManager.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
+#include "LuaBridge/detail/ClassInfo.h"
+#include "scripting/LuaBoundary.h"
+#include "RawMetamethod.h"
 
 namespace {
 
 using APIRegistrationDetail::g_lua_state;
 
+void DestroyActorHandle(const ActorHandle *actor) {
+    if (actor != nullptr) ComponentManager::DestroyActor(actor->Resolve());
+}
+
+ActorHandle ReadHandle(lua_State *state, int index) {
+    const auto result = luabridge::Stack<const ActorHandle &>::get(state, index);
+    LuaBoundary::Check(result, "Actor equality operand");
+    return result.value().get();
+}
+
+int EqualActorHandles(lua_State *state) {
+    if (!luabridge::Stack<ActorHandle>::isInstance(state, 1) ||
+        !luabridge::Stack<ActorHandle>::isInstance(state, 2)) {
+        lua_pushboolean(state, false);
+        return 1;
+    }
+    const ActorHandle left = ReadHandle(state, 1);
+    const ActorHandle right = ReadHandle(state, 2);
+    lua_pushboolean(state, left.uid == right.uid && left.generation == right.generation);
+    return 1;
+}
+
 void InjectActorAPI() {
     luabridge::getGlobalNamespace(g_lua_state)
-        .beginClass<Actor>("Actor")
-        .addFunction("GetName", &Actor::GetName)
-        .addFunction("GetUID", &Actor::GetUID)
-        .addFunction("SetParent", &Actor::SetParent)
-        .addFunction("AddComponent", &Actor::AddComponent)
-        .addFunction("RemoveComponent", &Actor::RemoveComponent)
-        .addFunction("GetComponentByKey", &Actor::GetComponentByKey)
-        .addFunction("GetComponent", &Actor::GetComponent)
-        .addFunction("GetComponents", &Actor::GetComponents)
-        .addFunction("GetChildCount", &Actor::GetChildCount)
-        .addFunction("GetChildren", &Actor::GetChildren)
-        .addFunction("GetComponentInChildren", &Actor::GetComponentInChildren)
+        .beginClass<ActorHandle>("Actor")
+        .addFunction("IsValid", &ActorHandle::IsValid)
+        .addProperty("is_valid", &ActorHandle::IsValid)
+        .addFunction("GetName", &ActorHandle::GetName)
+        .addFunction("GetUID", &ActorHandle::GetUID)
+        .addFunction("SetParent", &ActorHandle::SetParent)
+        .addFunction("AddComponent", &ActorHandle::AddComponent)
+        .addFunction("RemoveComponent", &ActorHandle::RemoveComponent)
+        .addFunction("GetComponentByKey", &ActorHandle::GetComponentByKey)
+        .addFunction("GetComponent", &ActorHandle::GetComponent)
+        .addFunction("GetComponents", &ActorHandle::GetComponents)
+        .addFunction("GetChildCount", &ActorHandle::GetChildCount)
+        .addFunction("GetChildren", &ActorHandle::GetChildren)
+        .addFunction("GetComponentInChildren", &ActorHandle::GetComponentInChildren)
         .addFunction("GetComponentsInChildren",
-                     &Actor::GetComponentsInChildren)
+                     &ActorHandle::GetComponentsInChildren)
         .endClass();
+
+    lua_rawgetp(g_lua_state, LUA_REGISTRYINDEX,
+                luabridge::detail::getClassRegistryKey<ActorHandle>());
+    lua_pushstring(g_lua_state, "__eq");
+    lua_pushcfunction(g_lua_state, APIRegistrationDetail::CheckedRawMetamethod<EqualActorHandles>);
+    lua_rawset(g_lua_state, -3);
+    lua_pop(g_lua_state, 1);
 
     luabridge::getGlobalNamespace(g_lua_state)
         .beginNamespace("Actor")
         .addFunction("Instantiate", &Actor::Instantiate)
-        .addFunction("Destroy", &Actor::Destroy)
+        .addFunction("Destroy", &DestroyActorHandle)
         .addFunction("Find", &Actor::Find)
         .addFunction("FindAll", &Actor::FindAll)
         .endNamespace();

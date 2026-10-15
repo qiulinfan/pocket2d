@@ -1,13 +1,20 @@
 #include "particles/ParticleManager.h"
+#include "core/TaskExecutor.h"
 #include "rendering/Renderer.h"
 #include "rendering/SDLRenderHelper.h"
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <limits>
+#include <stdexcept>
 #include "glm/glm.hpp"
 
 namespace {
 
 constexpr float kPixelsPerUnit = 100.0f;
+constexpr size_t kParallelParticleThreshold = 8192;
+constexpr size_t kParticleChunkSize = 1024;
+std::unique_ptr<TaskExecutor> particle_executor;
 
 // 线性插值: 用于在粒子生命周期内平滑过渡属性值
 float Lerp(float start, float end, float t) {
@@ -30,7 +37,7 @@ bool IsPivotBoundOutsideViewport(const SDL_FRect &dst, const SDL_FPoint &pivot,
     const float bottom = dst.h - pivot.y;
     const float max_dx = std::max(left, right);
     const float max_dy = std::max(top, bottom);
-    const float radius = std::sqrt(max_dx * max_dx + max_dy * max_dy);
+    const double radius = std::hypot(static_cast<double>(max_dx), static_cast<double>(max_dy));
     const float pivot_x = dst.x + pivot.x;
     const float pivot_y = dst.y + pivot.y;
 
@@ -41,8 +48,77 @@ bool IsPivotBoundOutsideViewport(const SDL_FRect &dst, const SDL_FPoint &pivot,
 
 } // namespace
 
+namespace {
+constexpr double kStateLimit = static_cast<double>(std::numeric_limits<float>::max()) / 256.0;
+void RequireParticle(bool valid, const char *message) {
+    if (!valid) throw std::runtime_error(message);
+}
+void ValidateMotion(double position, double velocity, double gravity, double drag, double ticks) {
+    // Absolute-value envelope for v'=(v+g)*drag, p'=p+v'. The 256x margin
+    // covers float integration rounding and intermediate arithmetic.
+    const double base = std::abs(velocity) + ticks * std::abs(gravity);
+    double bound = base;
+    const double gain = std::max(1.0, std::abs(drag));
+    if (base != 0 && gain > 1) {
+        const double log_bound = std::log(base) + ticks * std::log(gain);
+        RequireParticle(log_bound <= std::log(kStateLimit), "ParticleSystem lifetime velocity exceeds finite range");
+        bound = std::exp(log_bound);
+    }
+    RequireParticle(std::isfinite(bound) && bound <= kStateLimit &&
+        std::abs(position) + ticks * bound <= kStateLimit,
+        "ParticleSystem lifetime position/rotation exceeds finite range");
+}
+}
+
+void ParticleManager::ValidateEmitterConfig(const ParticleEmitterConfig &config) {
+    RequireParticle(config.duration_frames >= 1 && config.duration_frames <= static_cast<int>(kMaxParticlesPerEmitter),
+        "ParticleSystem duration must be 1..1000000");
+    RequireParticle(config.reserve_hint <= kMaxParticlesPerEmitter, "ParticleSystem capacity exceeds 1000000");
+    for (const float value : {config.gravity_scale_x, config.gravity_scale_y, config.drag_factor,
+                            config.angular_drag_factor})
+        RequireParticle(std::isfinite(value), "ParticleSystem configuration must be finite");
+    for (const auto channel : {std::pair{config.has_end_color_r, config.end_color_r},
+            std::pair{config.has_end_color_g, config.end_color_g},
+            std::pair{config.has_end_color_b, config.end_color_b},
+            std::pair{config.has_end_color_a, config.end_color_a}})
+        RequireParticle(!channel.first || (channel.second >= 0 && channel.second <= 255),
+            "ParticleSystem end color must be 0..255 when enabled");
+    RequireParticle(!config.has_end_scale || (std::isfinite(config.end_scale) && std::abs(static_cast<double>(config.end_scale)) <= kStateLimit),
+        "ParticleSystem end scale exceeds finite range");
+}
+
+void ParticleManager::ValidateParticle(const ParticleEmitterConfig &config, const ParticleSpawnRequest &request) {
+    ValidateEmitterConfig(config);
+    for (const float value : {request.x, request.y, request.velocity_x, request.velocity_y,
+                            request.scale, request.rotation, request.angular_velocity})
+        RequireParticle(std::isfinite(value), "ParticleSystem spawn values must be finite");
+    RequireParticle(std::abs(static_cast<double>(request.scale)) <= kStateLimit, "ParticleSystem scale exceeds finite range");
+    const double ticks = config.duration_frames;
+    ValidateMotion(request.x, request.velocity_x, config.gravity_scale_x, config.drag_factor, ticks);
+    ValidateMotion(request.y, request.velocity_y, config.gravity_scale_y, config.drag_factor, ticks);
+    ValidateMotion(request.rotation, request.angular_velocity, 0, config.angular_drag_factor, ticks);
+}
+
+void ParticleManager::ValidateSpawnRequest(int emitter_id, const ParticleSpawnRequest &request) {
+    if (IsEmitterAlive(emitter_id)) ValidateParticle(emitters[emitter_id].config, request);
+}
+
+void ParticleManager::RequireSpawnCapacity(int emitter_id, size_t count) {
+    if (!IsEmitterAlive(emitter_id)) return;
+    RequireParticle(count <= kMaxParticlesPerEmitter - emitters[emitter_id].active_count,
+        "ParticleSystem live particle capacity exceeds 1000000");
+}
+
+void ParticleManager::ReserveSpawnCapacity(int emitter_id, size_t count) {
+    if (!IsEmitterAlive(emitter_id)) return;
+    RequireSpawnCapacity(emitter_id, count);
+    auto &emitter = emitters[emitter_id];
+    emitter.EnsureParticleCapacity(emitter.active_count + count);
+}
+
 // Reserve space for one emitter's SoA buffers before particles are spawned.
 void ParticleManager::EmitterSlot::EnsureParticleCapacity(size_t capacity) {
+    if (capacity > kMaxParticlesPerEmitter) throw std::runtime_error("ParticleSystem capacity exceeds 1000000");
     if (capacity <= reserved_capacity) return;
 
     pos_x.reserve(capacity);
@@ -65,7 +141,7 @@ void ParticleManager::EmitterSlot::EnsureParticleCapacity(size_t capacity) {
 
     image_ids.reserve(capacity);
     sorting_orders.reserve(capacity);
-    start_frame.reserve(capacity);
+    ages.reserve(capacity);
     is_active.reserve(capacity);
 
     reserved_capacity = capacity;
@@ -116,11 +192,10 @@ void ParticleManager::EmitterSlot::ClearParticles() {
     shared_image_id = 0;
     shared_sorting_order = 9999;
     has_uniform_render_state = true;
-    start_frame.clear();
+    ages.clear();
     is_active.clear();
     free_list.clear();
     active_count = 0;
-    frame_number = 0;
     runtime_enabled = true;
     config = ParticleEmitterConfig();
 }
@@ -150,11 +225,15 @@ bool ParticleManager::IsEmitterAlive(int emitter_id) {
 void ParticleManager::ConfigureEmitter(int emitter_id,
                                        const ParticleEmitterConfig &config) {
     if (!IsEmitterAlive(emitter_id)) return;
-    emitters[emitter_id].config = config;
-    if (emitters[emitter_id].config.duration_frames < 1) {
-        emitters[emitter_id].config.duration_frames = 1;
+    ValidateEmitterConfig(config);
+    auto &emitter = emitters[emitter_id];
+    // Reconfiguration is uncommon; validate live particles once here, never per update.
+    ParticleSpawnRequest particle;
+    for (size_t i = 0; i < emitter.is_active.size(); ++i) {
+        if (GetParticleState(emitter_id, i, particle)) ValidateParticle(config, particle);
     }
-    emitters[emitter_id].EnsureParticleCapacity(emitters[emitter_id].config.reserve_hint);
+    emitter.EnsureParticleCapacity(config.reserve_hint);
+    emitter.config = config;
 }
 
 // emitter lifecycle
@@ -176,6 +255,8 @@ void ParticleManager::SpawnParticle(int emitter_id,
                                     const ParticleSpawnRequest &request) {
     if (!IsEmitterAlive(emitter_id)) return;
 
+    RequireSpawnCapacity(emitter_id, 1);
+    ValidateSpawnRequest(emitter_id, request);
     EmitterSlot &emitter = emitters[emitter_id];
     int image_id = request.image_id;
     if (image_id < 0 || static_cast<size_t>(image_id) >= image_names.size()) {
@@ -215,7 +296,7 @@ void ParticleManager::SpawnParticle(int emitter_id,
         emitter.initial_color_a.push_back(255);
         emitter.image_ids.push_back(0);
         emitter.sorting_orders.push_back(0);
-        emitter.start_frame.push_back(0);
+        emitter.ages.push_back(0);
         emitter.is_active.push_back(false);
     }
 
@@ -237,13 +318,27 @@ void ParticleManager::SpawnParticle(int emitter_id,
     emitter.initial_color_a[index] = emitter.color_a[index];
     emitter.image_ids[index] = image_id;
     emitter.sorting_orders[index] = request.sorting_order;
-    emitter.start_frame[index] = emitter.frame_number;
+    emitter.ages[index] = 0;
     emitter.is_active[index] = true;
     ++emitter.active_count;
 }
 
 // spawn, simulate, queue, render
 void ParticleManager::Update(float dt) {
+    bool has_large_emitter = false;
+    for (const EmitterSlot &emitter : emitters) {
+        if (emitter.active && emitter.runtime_enabled &&
+            emitter.active_count >= kParallelParticleThreshold) {
+            has_large_emitter = true;
+            break;
+        }
+    }
+    if (has_large_emitter && !particle_executor)
+        particle_executor = std::make_unique<TaskExecutor>();
+    Update(dt, has_large_emitter ? particle_executor.get() : nullptr);
+}
+
+void ParticleManager::Update(float dt, TaskExecutor *executor) {
     (void)dt;
     for (EmitterSlot &emitter : emitters) {
         if (!emitter.active) continue;
@@ -252,8 +347,8 @@ void ParticleManager::Update(float dt) {
         for (size_t i = 0; i < emitter.pos_x.size(); ++i) {
             if (!emitter.is_active[i]) continue;
             // Check if the particle's lifetime has expired: 将其标记为不活跃并放入 free list.
-            const int frames_particle_has_been_alive = emitter.frame_number - emitter.start_frame[i];
-            if (frames_particle_has_been_alive >= emitter.config.duration_frames) {
+            const auto frames_particle_has_been_alive = emitter.ages[i];
+            if (frames_particle_has_been_alive >= static_cast<std::uint32_t>(emitter.config.duration_frames)) {
                 emitter.is_active[i] = false;
                 emitter.free_list.push_back(static_cast<int>(i));
                 if (emitter.active_count > 0) {
@@ -261,8 +356,14 @@ void ParticleManager::Update(float dt) {
                 }
                 continue;
             }
+        }
 
-
+        // Lifetime bookkeeping stays ordered on the main thread, preserving
+        // free-list reuse. Workers only write disjoint preallocated SoA slots.
+        const auto integrate = [&emitter](size_t begin, size_t end) {
+          for (size_t i = begin; i < end; ++i) {
+            if (!emitter.is_active[i]) continue;
+            const auto frames_particle_has_been_alive = emitter.ages[i]++;
             // 更新活跃粒子的速度, 位置, 旋转
             emitter.velocity_x[i] += emitter.config.gravity_scale_x;
             emitter.velocity_y[i] += emitter.config.gravity_scale_y;
@@ -303,9 +404,17 @@ void ParticleManager::Update(float dt) {
                                               emitter.config.end_color_a,
                                               lifetime_progress);
             }
+          }
+        };
+        if (executor && emitter.active_count >= kParallelParticleThreshold)
+            executor->ParallelFor(emitter.pos_x.size(), kParticleChunkSize, integrate);
+        else {
+            // Use the same cache-sized ranges on the serial path so worker
+            // speedups measure parallelism rather than different locality.
+            for (size_t begin = 0; begin < emitter.pos_x.size(); begin += kParticleChunkSize)
+                integrate(begin, std::min(begin + kParticleChunkSize, emitter.pos_x.size()));
         }
 
-        ++emitter.frame_number;
     }
 }
 
@@ -382,10 +491,10 @@ void ParticleManager::RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
         if (emitter.color_a[i] <= 0) continue;
         if (emitter.scale[i] == 0.0f) continue;
 
-        SDL_RendererFlip flip = SDL_FLIP_NONE;
+        SDL_FlipMode flip = SDL_FLIP_NONE;
         if (emitter.scale[i] < 0.0f) {
-            flip = static_cast<SDL_RendererFlip>(flip | SDL_FLIP_HORIZONTAL);
-            flip = static_cast<SDL_RendererFlip>(flip | SDL_FLIP_VERTICAL);
+            flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_HORIZONTAL);
+            flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_VERTICAL);
         }
 
         const float particle_scale = glm::abs(emitter.scale[i]);
@@ -402,6 +511,9 @@ void ParticleManager::RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
         dst.y = final_y * kPixelsPerUnit +
                 static_cast<float>(camera_height) * 0.5f * (1.0f / safe_zoom) -
                 pivot.y;
+
+        if (!std::isfinite(dst.x) || !std::isfinite(dst.y) ||
+            !std::isfinite(dst.w) || !std::isfinite(dst.h)) continue;
 
         if (IsPivotBoundOutsideViewport(dst, pivot, viewport_width,
                                         viewport_height)) {
@@ -429,7 +541,7 @@ void ParticleManager::RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
             has_last_alpha_mod = true;
         }
 
-        SDLRenderHelper::SDL_RenderCopyEx(Actor::kInvalidUID, "", renderer,
+        SDLRenderHelper::SDL_RenderTextureRotated(Actor::kInvalidUID, "", renderer,
                                           texture, nullptr,
                                           &dst, emitter.rotation[i], &pivot,
                                           flip);
@@ -441,10 +553,37 @@ void ParticleManager::RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
 // Used when changing scenes or resetting the game.
 // 清除所有 emitter 和相关数据. 这可以在切换场景或重置游戏时使用.
 void ParticleManager::Clear() {
+    particle_executor.reset();
     emitters.clear();
     free_emitters.clear();
     image_name_to_id.clear();
     image_names.clear();
+}
+
+size_t ParticleManager::GetActiveParticleCount(int emitter_id) {
+    return IsEmitterAlive(emitter_id) ? emitters[emitter_id].active_count : 0;
+}
+
+bool ParticleManager::GetParticleState(int emitter_id, size_t index,
+                                       ParticleSpawnRequest &state) {
+    if (!IsEmitterAlive(emitter_id)) return false;
+    const EmitterSlot &emitter = emitters[emitter_id];
+    if (index >= emitter.is_active.size() || !emitter.is_active[index]) return false;
+    state.x = emitter.pos_x[index];
+    state.y = emitter.pos_y[index];
+    state.velocity_x = emitter.velocity_x[index];
+    state.velocity_y = emitter.velocity_y[index];
+    state.scale = emitter.scale[index];
+    state.rotation = emitter.rotation[index];
+    state.angular_velocity = emitter.angular_velocity[index];
+    state.color_r = emitter.color_r[index];
+    state.color_g = emitter.color_g[index];
+    state.color_b = emitter.color_b[index];
+    state.color_a = emitter.color_a[index];
+    state.image_id = emitter.image_ids[index];
+    state.image_name = image_names[state.image_id];
+    state.sorting_order = emitter.sorting_orders[index];
+    return true;
 }
 
 // intern image names into integer ids for cheaper storage and comparison

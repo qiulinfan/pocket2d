@@ -1,0 +1,5 @@
+{"actors":[
+ {"uid":10,"name":"terrain","components":{"map":{"type":"Tilemap","map_resource":"farm.tilemap.json","enabled":true},"transform":{"type":"Transform","x":-8,"y":-8,"rotation":0}}},
+ {"uid":2,"name":"player","components":{"body":{"type":"Rigidbody","x":0.5,"y":0.5,"gravity_scale":0,"collider_type":"circle","radius":0.25,"has_trigger":false,"friction":0,"bounciness":0},"movement":{"type":"FarmMovement"},"collision_probe":{"type":"CollisionEditProbe","enabled":false},"sprite":{"type":"SpriteRenderer","sprite":"player.bmp","scale_x":3.125,"scale_y":3.125,"sorting_order":20},"transform":{"type":"Transform","x":0.5,"y":0.5}}},
+ {"uid":3,"name":"farm","components":{"logic":{"type":"FarmLogic"},"view":{"type":"FarmView"}}}
+]}

@@ -71,13 +71,13 @@ target_sources(
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui/imgui_draw.cpp"
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui/imgui_tables.cpp"
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui/imgui_widgets.cpp"
-        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdl2.cpp"
-        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdlrenderer2.cpp"
+        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdl3.cpp"
+        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.cpp"
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui/imgui.h"
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui/imgui_internal.h"
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui/imconfig.h"
-        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdl2.h"
-        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdlrenderer2.h"
+        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdl3.h"
+        "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.h"
 )
 target_include_directories(
     imgui_runtime
@@ -85,13 +85,6 @@ target_include_directories(
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui"
         "${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends"
 )
-if(WIN32)
-    target_include_directories(
-        imgui_runtime
-        PRIVATE
-            "${PROJECT_SOURCE_DIR}/thirdparty/SDL2"
-    )
-endif()
 target_link_libraries(imgui_runtime PUBLIC game_engine_sdl)
 set_target_properties(imgui_runtime PROPERTIES FOLDER "thirdparty")
 

@@ -18,6 +18,10 @@ void RegisterActorAPI();
 void RegisterEventAPI();
 void RegisterPhysicsAPI();
 void RegisterBuiltinComponentAPI();
+void RegisterRigidbodyAPI();
+void RegisterParticleSystemAPI();
+void RegisterSaveAPI();
+void RegisterInventoryAPI();
 
 } // namespace APIRegistrationDetail
 

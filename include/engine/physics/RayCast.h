@@ -2,6 +2,7 @@
 #define RAYCAST_H
 
 #include "box2d/box2d.h"
+#include "scene/ActorHandle.h"
 #include <optional>
 #include <vector>
 
@@ -11,6 +12,7 @@ namespace RayCast {
 
 struct HitResult {
     Actor *actor = nullptr;
+    ActorHandle actor_handle;
     b2Vec2 point = b2Vec2(0.0f, 0.0f);
     b2Vec2 normal = b2Vec2(0.0f, 0.0f);
     bool is_trigger = false;

@@ -7,6 +7,7 @@
 #include "shared/scene_format/SceneMutation.h"
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -18,10 +19,21 @@ public:
     using ActorUID = SceneFormat::SceneActorUID;
     static inline constexpr ActorUID kInvalidActorUID = SceneFormat::kInvalidSceneActorUID;
 
+    SceneDocument() = default;
+    // Copies/moves carry document data, never another document's live hook.
+    // Assignment preserves the destination hook.
+    SceneDocument(const SceneDocument &other);
+    SceneDocument(SceneDocument &&other);
+    SceneDocument &operator=(const SceneDocument &other);
+    SceneDocument &operator=(SceneDocument &&other);
+    using PrecommitHook = std::function<bool(const SceneDocument &, const SceneFormat::SceneEditCommand &)>;
+    void SetPrecommitHook(PrecommitHook hook);
+
     /*
     SceneDocument owns the editor-side cache for one .scene file. The editor
-    mutates this cache first, then mirrors it into runtime when needed, and
-    only writes it back to disk on explicit save / shutdown.
+    prepares edits on a detached copy. An optional precommit hook validates or
+    commits the runtime mirror before the document publishes the candidate.
+    Loading and saving are separate I/O operations and do not invoke this hook.
     Load one scene file into the editor-owned cache
     */
     bool LoadFromSceneName(const std::string &scene_name);
@@ -79,6 +91,8 @@ public:
     Mutate actor/component data inside the editor cache. Successful edits
     mark the document dirty so save/reload logic can react once per frame.
     */
+    // Empty commands, no-op mutations, invalid mutations and hook rejection
+    // return false without publishing any part of the command.
     bool ApplyMutation(const SceneFormat::SceneMutation &mutation);
     bool ApplyEditCommand(const SceneFormat::SceneEditCommand &command);
     bool SetActorName(std::size_t actor_index, const std::string &name, SceneFormat::SceneEditCommand *out_command = nullptr);
@@ -119,6 +133,11 @@ public:
     bool IsTemplateBackedComponent(std::size_t actor_index, const std::string &component_key) const;
 
 private:
+    bool ApplyMutationUnchecked(const SceneFormat::SceneMutation &mutation);
+    bool ApplyPreparedEditCommand(SceneDocument &candidate, const SceneFormat::SceneEditCommand &command);
+    void SwapState(SceneDocument &other) noexcept;
+    PrecommitHook precommit_hook_;
+    bool applying_command_ = false;
     // Scene-backed actor UIDs belong to the authoring document. Runtime-only
     // actors use a separate allocator owned by Engine.
     ActorUID AllocateNextSceneBackedActorUID(const std::unordered_set<ActorUID> &used_uids);
@@ -137,6 +156,7 @@ private:
     const ActorRecord *FindActorRecord(std::size_t actor_index) const;
     Actor::ComponentSpec *FindRawComponentSpec(std::size_t actor_index, const std::string &component_key);
     Actor::ComponentSpec *FindOrCreateRawComponentSpec(std::size_t actor_index, const std::string &component_key, const std::string &fallback_type_name);
+    void SyncBodyWorldPosesForSubtree(std::size_t actor_index);
     void SyncPoseLinkedComponentProperty(
         std::size_t actor_index, const std::string &source_component_key,
         const std::string &property_name,

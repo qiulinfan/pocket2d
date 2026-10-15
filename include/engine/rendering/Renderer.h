@@ -1,8 +1,8 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-#include "SDL2/SDL.h"
-#include "SDL2_ttf/SDL_ttf.h"
+#include "SDL3/SDL.h"
+#include "SDL3_ttf/SDL_ttf.h"
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -79,6 +79,8 @@ public:
 
     static void Init();
     static void Shutdown();
+    // Release this tick's presentation requests when simulation runs headless.
+    static void DiscardFrameRequests();
 
     // resource loading and draw queue entry points
     // 资源加载和绘制队列入口

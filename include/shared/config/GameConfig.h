@@ -16,6 +16,7 @@ struct GameConfigData {
     float zoom_factor = 1.0f;
 
     std::string game_title = "";
+    std::string save_namespace = "";
     std::string initial_scene_name = "";
 };
 

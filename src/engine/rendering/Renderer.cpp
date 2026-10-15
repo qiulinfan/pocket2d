@@ -6,7 +6,7 @@
 #include "particles/ParticleManager.h"
 #include "scene/Scene.h"
 #include "glm/glm.hpp"
-#include "SDL2_image/SDL_image.h"
+#include "SDL3_image/SDL_image.h"
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
@@ -51,6 +51,13 @@ std::string ResolveSystemFontPath() {
 }
 
 std::string ResolveImagePath(const std::string &image_name) {
+    const std::filesystem::path exact(image_name);
+    if (exact.is_absolute()) {
+        const auto root = std::filesystem::weakly_canonical(std::filesystem::absolute(ResourcePath::ResourceSubdirectory("images")));
+        const auto resolved = std::filesystem::weakly_canonical(exact);
+        return ResourcePath::IsPathWithinDirectory(resolved, root) &&
+                       std::filesystem::is_regular_file(resolved) ? resolved.string() : "";
+    }
     return ResourcePath::ResolveResourcePath(
         ResourcePath::ResourceSubdirectory("images"), image_name,
         {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".gif", ".webp"},
@@ -140,20 +147,21 @@ SDL_Texture *CreateDefaultParticleTexture(SDL_Renderer *renderer) {
     if (renderer == nullptr) return nullptr;
 
     // Create an SDL_Surface (a cpu-side texture) with no special flags, 8 width, 8 height, 32 bits of color depth (RGBA) and no masking.
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, 8, 8, 32, SDL_PIXELFORMAT_RGBA8888);
+    SDL_Surface *surface = SDL_CreateSurface(8, 8, SDL_PIXELFORMAT_RGBA8888);
     if (surface == nullptr) return nullptr;
 
     // Ensure color set to white (255, 255, 255, 255)
-    const Uint32 white_color = SDL_MapRGBA(surface->format, 255, 255, 255, 255);
-    SDL_FillRect(surface, nullptr, white_color);
+    const Uint32 white_color = SDL_MapSurfaceRGBA(surface, 255, 255, 255, 255);
+    SDL_FillSurfaceRect(surface, nullptr, white_color);
 
     // Create a gpu-side texture from the cpu-side surface now that we're done editing it.
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
     // Clean up the surface and cache this default texture for future use (we'll probably spawn many particles with it).
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     if (texture != nullptr) {
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
     }
     return texture;
 }
@@ -161,24 +169,24 @@ SDL_Texture *CreateDefaultParticleTexture(SDL_Renderer *renderer) {
 SDL_Texture *CreateMissingTexture(SDL_Renderer *renderer) {
     if (renderer == nullptr) return nullptr;
 
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(
-        0, 32, 32, 32, SDL_PIXELFORMAT_RGBA8888);
+    SDL_Surface *surface = SDL_CreateSurface(32, 32, SDL_PIXELFORMAT_RGBA8888);
     if (surface == nullptr) return nullptr;
 
-    const Uint32 magenta = SDL_MapRGBA(surface->format, 255, 0, 255, 255);
-    const Uint32 black = SDL_MapRGBA(surface->format, 0, 0, 0, 255);
+    const Uint32 magenta = SDL_MapSurfaceRGBA(surface, 255, 0, 255, 255);
+    const Uint32 black = SDL_MapSurfaceRGBA(surface, 0, 0, 0, 255);
     for (int y = 0; y < 32; y += 8) {
         for (int x = 0; x < 32; x += 8) {
             SDL_Rect rect = {x, y, 8, 8};
             const bool bright_square = ((x / 8) + (y / 8)) % 2 == 0;
-            SDL_FillRect(surface, &rect, bright_square ? magenta : black);
+            SDL_FillSurfaceRect(surface, &rect, bright_square ? magenta : black);
         }
     }
 
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     if (texture != nullptr) {
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
     }
     return texture;
 }
@@ -220,10 +228,10 @@ void Renderer::PruneTextCache() {
 // Initialize shared rendering backends and per-session caches.
 void Renderer::Init() {
     if (initialized) return;
-    if (TTF_Init() != 0) {
+    if (!TTF_Init()) {
         LogRendererWarningOnce("ttf:init",
                                std::string("text rendering disabled: ") +
-                                   TTF_GetError());
+                                   SDL_GetError());
         return;
     }
     initialized = true;
@@ -356,9 +364,13 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
         return nullptr;
     }
 
-    int texture_width = 0;
-    int texture_height = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &texture_width, &texture_height);
+    // SDL3 defaults to linear filtering. World/UI image assets retain the
+    // engine's pixel-art sampling contract; text keeps its separate filtering.
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+
+    float texture_width = 0;
+    float texture_height = 0;
+    SDL_GetTextureSize(texture, &texture_width, &texture_height);
 
     CachedImageTexture cached;
     cached.texture = texture;
@@ -415,6 +427,14 @@ void Renderer::DrawText(const std::string &text_content,
     text_draw_requests.push_back( {text_content, font_name, font_size, font_color, x, y});
 }
 
+void Renderer::DiscardFrameRequests() {
+    scene_draw_requests.clear();
+    scene_particle_batches.clear();
+    ui_draw_requests.clear();
+    pixel_draw_requests.clear();
+    text_draw_requests.clear();
+}
+
 // Render one frame by flushing queued scene images, particles, text, and pixels.
 void Renderer::RenderFrame(SDL_Renderer *renderer, float camera_x,
                            float camera_y, float zoom_factor,
@@ -428,7 +448,7 @@ void Renderer::RenderFrame(SDL_Renderer *renderer, float camera_x,
     RenderAndClearAllText(renderer, safe_output_scale_x,
                           safe_output_scale_y);
     RenderAndClearAllPixels(renderer);
-    SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
     PruneTextCache();
 }
 
@@ -490,12 +510,12 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
             draw_height = source_rect.h;
         }
 
-        SDL_RendererFlip flip = SDL_FLIP_NONE;
+        SDL_FlipMode flip = SDL_FLIP_NONE;
         if (request.scale_x < 0.0f) {
-            flip = static_cast<SDL_RendererFlip>(flip | SDL_FLIP_HORIZONTAL);
+            flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_HORIZONTAL);
         }
         if (request.scale_y < 0.0f) {
-            flip = static_cast<SDL_RendererFlip>(flip | SDL_FLIP_VERTICAL);
+            flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_VERTICAL);
         }
 
         const float x_scale = glm::abs(request.scale_x);
@@ -526,7 +546,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                                static_cast<Uint8>(ClampByte(request.b)));
         SDL_SetTextureAlphaMod(texture, static_cast<Uint8>(ClampByte(request.a)));
 
-        SDLRenderHelper::SDL_RenderCopyEx(
+        SDLRenderHelper::SDL_RenderTextureRotated(
             Actor::kInvalidUID, "", renderer, texture, source_rect_ptr, &dst,
             request.rotation_degrees,
             &pivot, flip);
@@ -535,7 +555,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
         SDL_SetTextureAlphaMod(texture, 255);
     };
 
-    SDL_RenderSetScale(renderer, safe_zoom * output_scale_x,
+    SDL_SetRenderScale(renderer, safe_zoom * output_scale_x,
                       safe_zoom * output_scale_y);
     size_t scene_request_index = 0;
     size_t particle_batch_index = 0;
@@ -558,7 +578,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
             camera_x, camera_y, zoom_factor, camera_width, camera_height);
         ++particle_batch_index;
     }
-    SDL_RenderSetScale(renderer, output_scale_x, output_scale_y);
+    SDL_SetRenderScale(renderer, output_scale_x, output_scale_y);
 
     for (const ImageDrawRequest &request : ui_draw_requests) {
         float texture_w = 0.0f;
@@ -584,7 +604,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                                static_cast<Uint8>(ClampByte(request.b)));
         SDL_SetTextureAlphaMod(texture, static_cast<Uint8>(ClampByte(request.a)));
 
-        SDLRenderHelper::SDL_RenderCopyEx(Actor::kInvalidUID, "", renderer,
+        SDLRenderHelper::SDL_RenderTextureRotated(Actor::kInvalidUID, "", renderer,
                                           texture, source_rect_ptr,
                                           &dst, 0.0f, nullptr, SDL_FLIP_NONE);
 
@@ -605,7 +625,7 @@ void Renderer::RenderAndClearAllText(SDL_Renderer *renderer,
     const float safe_output_scale_y = SafeOutputScale(output_scale_y);
     const float raster_scale =
         std::max(safe_output_scale_x, safe_output_scale_y);
-    SDL_RenderSetScale(renderer, safe_output_scale_x, safe_output_scale_y);
+    SDL_SetRenderScale(renderer, safe_output_scale_x, safe_output_scale_y);
 
     for (const TextDrawRequest &req : text_draw_requests) {
         if (req.font_size <= 0 || req.text.empty()) continue;
@@ -630,7 +650,7 @@ void Renderer::RenderAndClearAllText(SDL_Renderer *renderer,
             if (font == nullptr) continue;
 
             SDL_Surface *surface =
-                TTF_RenderUTF8_Blended(font, req.text.c_str(), req.color);
+                TTF_RenderText_Blended(font, req.text.c_str(), req.text.size(), req.color);
             if (surface == nullptr) continue;
 
             SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -643,7 +663,7 @@ void Renderer::RenderAndClearAllText(SDL_Renderer *renderer,
                 cached.last_used_timestamp = SDL_GetTicks();
                 cache_it = text_cache.emplace(cache_key, cached).first;
             }
-            SDL_FreeSurface(surface);
+            SDL_DestroySurface(surface);
         }
 
         if (cache_it == text_cache.end()) continue;
@@ -655,7 +675,7 @@ void Renderer::RenderAndClearAllText(SDL_Renderer *renderer,
                               safe_output_scale_x,
                           static_cast<float>(cache_it->second.height) /
                               safe_output_scale_y};
-        SDL_RenderCopyExF(renderer, cache_it->second.texture, nullptr, &dest,
+        SDL_RenderTextureRotated(renderer, cache_it->second.texture, nullptr, &dest,
                           0.0, nullptr, SDL_FLIP_NONE);
     }
 
@@ -675,7 +695,7 @@ void Renderer::RenderAndClearAllPixels(SDL_Renderer *renderer) {
         SDL_SetRenderDrawColor(renderer, ClampByteU8(request.r),
                                ClampByteU8(request.g), ClampByteU8(request.b),
                                ClampByteU8(request.a));
-        SDL_RenderDrawPoint(renderer, request.x, request.y);
+        SDL_RenderPoint(renderer, request.x, request.y);
     }
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
     pixel_draw_requests.clear();
@@ -719,7 +739,7 @@ void Engine::render() {
     } else {
         SDL_SetRenderTarget(renderer, nullptr);
     }
-    SDL_RenderSetViewport(renderer, nullptr);
+    SDL_SetRenderViewport(renderer, nullptr);
     clearFrame();
 
     // Built-in render components contribute draw requests during the render
@@ -736,7 +756,7 @@ void Engine::render() {
     if (!render_runtime_to_texture_ || runtime_render_target_ == nullptr) {
         output_width = render_width;
         output_height = render_height;
-        SDL_GetRendererOutputSize(renderer, &output_width, &output_height);
+        SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
     }
     const float output_scale_x =
         static_cast<float>(std::max(1, output_width)) /
@@ -744,6 +764,12 @@ void Engine::render() {
     const float output_scale_y =
         static_cast<float>(std::max(1, output_height)) /
         static_cast<float>(render_height);
+    const float half_world_width = render_width / (200.0f * zoom_factor);
+    const float half_world_height = render_height / (200.0f * zoom_factor);
+    ComponentManager::QueueTilemaps(camera_position.x - half_world_width,
+                                    camera_position.y - half_world_height,
+                                    camera_position.x + half_world_width,
+                                    camera_position.y + half_world_height);
     Renderer::RenderFrame(renderer, camera_position.x, camera_position.y,
                           zoom_factor, render_width, render_height,
                           output_scale_x, output_scale_y);
@@ -751,7 +777,7 @@ void Engine::render() {
 
     if (render_runtime_to_texture_) {
         SDL_SetRenderTarget(renderer, nullptr);
-        SDL_RenderSetViewport(renderer, nullptr);
+        SDL_SetRenderViewport(renderer, nullptr);
         clearEditorHostFrame();
     }
 }

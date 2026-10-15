@@ -1,0 +1,16 @@
+{
+  "actors":[
+    {"uid":1,"name":"village","components":{"logic":{"type":"Village"}}},
+    {"uid":2,"name":"player","components":{
+      "body":{"type":"Rigidbody","gravity_scale":0,"has_trigger":true,"trigger_type":"circle","trigger_radius":0.25,"collider_type":"circle","radius":0.25,"friction":0,"bounciness":0},
+      "logic":{"type":"Defender"},"transform":{"type":"Transform"}}},
+    {"uid":3,"name":"altar","components":{
+      "body":{"type":"Rigidbody","x":0,"y":4,"body_type":"static","has_trigger":false,"width":0.8,"height":0.8},
+      "transform":{"type":"Transform","x":0,"y":4}}},
+    {"uid":4,"name":"supply","components":{
+      "body":{"type":"Rigidbody","x":1,"y":0,"body_type":"static","has_collider":false,"trigger_type":"circle","trigger_radius":0.3},
+      "logic":{"type":"Supply"},"transform":{"type":"Transform","x":1,"y":0}}},
+    {"uid":5,"name":"devil_tree","components":{"transform":{"type":"Transform","x":4,"y":0}}},
+    {"uid":6,"name":"view","components":{"view":{"type":"DefenseView"}}}
+  ]
+}

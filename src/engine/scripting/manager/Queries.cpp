@@ -1,9 +1,13 @@
+#include "scripting/LuaBoundary.h"
 #include "Internal.h"
+#include "scene/Tilemap.h"
+#include "rendering/SpriteAnimation.h"
 #include "rendering/SpriteRenderer.h"
 #include "scripting/ComponentManager.h"
 #include "particles/ParticleSystem.h"
 #include "physics/Rigidbody.h"
 #include "scene/Transform.h"
+#include "scene/ActorHandle.h"
 #include <algorithm>
 #include <unordered_set>
 
@@ -26,36 +30,48 @@ luabridge::LuaRef BuildChildrenResult(Actor::UID actor_uid) {
         const Actor *candidate_actor = actor_it->second;
         if (candidate_actor->parent_uid != actor_uid) continue;
         result_table[lua_index++] =
-            luabridge::LuaRef(g_runtime.lua_state, actor_it->second);
+            luabridge::LuaRef(g_runtime.lua_state, ActorHandle(actor_it->second));
     }
 
     return result_table;
 }
 
-bool IsActorSelfOrDescendantOf(Actor::UID candidate_uid, Actor::UID root_uid) {
-    if (candidate_uid == Actor::kInvalidUID || root_uid == Actor::kInvalidUID) {
-        return false;
+// Memoize ancestry only for this query. Each parent edge is walked at most
+// once, while first-match queries can still stop without indexing the scene.
+// Public parent fields and pending actors are observed immediately.
+class DescendantQuery {
+public:
+    explicit DescendantQuery(Actor::UID root_uid) {
+        states_.emplace(root_uid, State::Descendant);
     }
 
-    Actor::UID current_uid = candidate_uid;
-    std::unordered_set<Actor::UID> visited_uids;
-    while (current_uid != Actor::kInvalidUID &&
-           visited_uids.insert(current_uid).second) {
-        if (current_uid == root_uid) return true;
-
-        auto actor_it = g_runtime.actor_by_uid.find(current_uid);
-        if (actor_it == g_runtime.actor_by_uid.end() ||
-            actor_it->second == nullptr) {
-            break;
+    bool Contains(Actor::UID uid) {
+        bool descendant = false;
+        while (uid != Actor::kInvalidUID) {
+            const auto inserted = states_.emplace(uid, State::Visiting);
+            if (!inserted.second) {
+                descendant = inserted.first->second == State::Descendant;
+                break;
+            }
+            path_.push_back(uid);
+            const auto actor = g_runtime.actor_by_uid.find(uid);
+            if (actor == g_runtime.actor_by_uid.end() || actor->second == nullptr) break;
+            uid = actor->second->parent_uid;
         }
-
-        const Actor *actor = actor_it->second;
-        if (actor->parent_uid == current_uid) break;
-        current_uid = actor->parent_uid;
+        // Encountering Visiting means a cycle not containing the root. Every
+        // path ending in that cycle is outside the requested subtree.
+        for (Actor::UID visited : path_) {
+            states_[visited] = descendant ? State::Descendant : State::Outside;
+        }
+        path_.clear();
+        return descendant;
     }
 
-    return false;
-}
+private:
+    enum class State { Visiting, Outside, Descendant };
+    std::unordered_map<Actor::UID, State> states_;
+    std::vector<Actor::UID> path_;
+};
 
 luabridge::LuaRef BuildComponentsInChildrenResult(Actor::UID actor_uid,
                                                   const std::string &type_name,
@@ -64,34 +80,26 @@ luabridge::LuaRef BuildComponentsInChildrenResult(Actor::UID actor_uid,
         return first_only ? MakeNilRef() : MakeEmptyArrayTable();
     }
 
-    luabridge::LuaRef result_table = MakeEmptyArrayTable();
+    DescendantQuery descendants(actor_uid);
+    luabridge::LuaRef result_table = first_only ? MakeNilRef() : MakeEmptyArrayTable();
     int lua_index = 1;
 
+    // Traversal order is deliberately independent of ancestry resolution:
+    // preserve scene order even when children precede their parents in a scene.
     for (Actor::UID candidate_uid : g_runtime.actor_uids_sorted) {
-        if (!IsActorSelfOrDescendantOf(candidate_uid, actor_uid)) continue;
-
-        luabridge::LuaRef components =
-            ComponentManager::GetComponentsByType(candidate_uid, type_name);
-        if (!components.isTable()) continue;
-
-        components.push(g_runtime.lua_state);
-        const int components_stack_index = lua_absindex(g_runtime.lua_state, -1);
-        const int component_count = static_cast<int>(
-            lua_rawlen(g_runtime.lua_state, components_stack_index));
-        for (int component_index = 1; component_index <= component_count;
-             ++component_index) {
-            luabridge::LuaRef component_ref = components[component_index];
-            if (component_ref.isNil()) continue;
-            if (first_only) {
-                lua_pop(g_runtime.lua_state, 1);
-                return component_ref;
-            }
-            result_table[lua_index++] = component_ref;
+        if (!descendants.Contains(candidate_uid)) continue;
+        const auto actor_types = g_runtime.component_keys_by_type.find(candidate_uid);
+        if (actor_types == g_runtime.component_keys_by_type.end()) continue;
+        const auto keys = actor_types->second.find(type_name);
+        if (keys == actor_types->second.end()) continue;
+        for (const std::string &key : keys->second) {
+            ComponentRecord *component = FindComponentRecord(candidate_uid, key);
+            if (component == nullptr) continue;
+            if (first_only) return component->instance_table;
+            result_table[lua_index++] = component->instance_table;
         }
-        lua_pop(g_runtime.lua_state, 1);
     }
-
-    return first_only ? MakeNilRef() : result_table;
+    return result_table;
 }
 
 enum class LuaArrayType {
@@ -261,6 +269,13 @@ bool TryReadPropertyValueFromLuaRef(
 std::vector<Actor::ComponentProperty> GetBuiltinComponentDefaultProperties(const std::string &type_name) {
     
     std::vector<Actor::ComponentProperty> properties;
+    if (type_name == "SpriteAnimation") {
+        return {{"enabled", true}, {"animation_resource", std::string{}},
+                {"renderer_key", std::string{"sprite"}}, {"clip", std::string{}}};
+    }
+    if (type_name == "Tilemap") {
+        return {{"enabled", true}, {"map_resource", std::string{}}};
+    }
     if (type_name == "Transform") {
         const Transform defaults;
         properties = {
@@ -371,12 +386,14 @@ std::vector<Actor::ComponentProperty> GetBuiltinComponentDefaultProperties(const
 }
 
 void MergeLiveRuntimePropertyValues(
-    const ComponentRecord &component,
+    const luabridge::LuaRef &reference, Actor::UID uid, const std::string &key,
     std::vector<Actor::ComponentProperty> &properties) {
     for (Actor::ComponentProperty &property : properties) {
         Actor::ComponentPropertyValue live_value;
-        if (!TryReadPropertyValueFromLuaRef(component.instance_table[property.name],
-                                            live_value, &property.value)) {
+        const auto field = ProtectedField(reference, property.name.c_str());
+        if (!IsComponentRefAlive(reference, uid, key))
+            throw std::runtime_error("component removed during property lookup");
+        if (!TryReadPropertyValueFromLuaRef(field, live_value, &property.value)) {
             continue;
         }
         property.value = live_value;
@@ -384,7 +401,7 @@ void MergeLiveRuntimePropertyValues(
 }
 
 void MergeDynamicLuaTableProperties(
-    const ComponentRecord &component,
+    const luabridge::LuaRef &reference,
     std::vector<Actor::ComponentProperty> &properties) {
     if (g_runtime.lua_state == nullptr) return;
 
@@ -394,7 +411,7 @@ void MergeDynamicLuaTableProperties(
         known_names.insert(property.name);
     }
 
-    component.instance_table.push(g_runtime.lua_state);
+    reference.push(g_runtime.lua_state);
     if (!lua_istable(g_runtime.lua_state, -1)) {
         lua_pop(g_runtime.lua_state, 1);
         return;
@@ -525,8 +542,8 @@ luabridge::LuaRef ComponentManager::GetComponentInChildrenByType(
 luabridge::LuaRef ComponentManager::GetComponentsInChildrenByType(
     Actor::UID actor_uid, const std::string &type_name) {
     /*
-    The runtime stores only parent links, so child queries are derived on
-    demand by scanning the live actor order and checking ancestry chains.
+    Child queries memoize ancestry within one query and emit matching
+    components in runtime scene order.
     */
     return BuildComponentsInChildrenResult(actor_uid, type_name, false);
 }
@@ -538,7 +555,7 @@ luabridge::LuaRef ComponentManager::FindActorByName(const std::string &name) {
     if (it == g_runtime.actors_by_name.end() || it->second.empty()) {
         return MakeNilRef();
     }
-    return luabridge::LuaRef(g_runtime.lua_state, it->second[0]);
+    return luabridge::LuaRef(g_runtime.lua_state, ActorHandle(it->second[0]));
 }
 
 // actor-level helpers exposed through Actor static APIs
@@ -550,7 +567,7 @@ luabridge::LuaRef ComponentManager::FindAllActorsByName( const std::string &name
 
     const std::vector<Actor *> &matched_actors = it->second;
     for (size_t i = 0; i < matched_actors.size(); i++) {
-        result_table[static_cast<int>(i + 1)] = luabridge::LuaRef(g_runtime.lua_state, matched_actors[i]);
+        result_table[static_cast<int>(i + 1)] = luabridge::LuaRef(g_runtime.lua_state, ActorHandle(matched_actors[i]));
     }
     return result_table;
 }
@@ -563,6 +580,8 @@ std::vector<std::string> ComponentManager::GetRegisteredComponentTypes() {
     type_names.emplace_back("ParticleSystem");
     type_names.emplace_back("Rigidbody");
     type_names.emplace_back("Transform");
+    type_names.emplace_back("Tilemap");
+    type_names.emplace_back("SpriteAnimation");
 
     for (const auto &entry : g_runtime.component_type_tables) {
         type_names.emplace_back(entry.first);
@@ -653,15 +672,35 @@ ComponentManager::GetRuntimeComponentProperties(Actor::UID actor_uid,
     std::vector<Actor::ComponentProperty> properties;
     ComponentRecord *component = FindComponentRecord(actor_uid, component_key);
     if (component == nullptr) return properties;
+    const auto reference = component->instance_table;
+    const auto type = component->type;
 
-    if (IsBuiltinComponentType(component->type)) {
-        properties = GetBuiltinComponentDefaultProperties(component->type);
+    if (IsBuiltinComponentType(type)) {
+        properties = GetBuiltinComponentDefaultProperties(type);
     } else {
-        properties = GetComponentTypeDefaultProperties(component->type);
+        properties = GetComponentTypeDefaultProperties(type);
     }
 
-    MergeLiveRuntimePropertyValues(*component, properties);
-    MergeDynamicLuaTableProperties(*component, properties);
+    MergeLiveRuntimePropertyValues(reference, actor_uid, component_key, properties);
+    if (!IsComponentRefAlive(reference, actor_uid, component_key))
+        throw std::runtime_error("component removed during property lookup");
+    MergeDynamicLuaTableProperties(reference, properties);
+    if (type == "SpriteAnimation") {
+        auto *animation = LuaBoundary::Cast<SpriteAnimation *>(reference);
+        properties.push_back({"current_clip", animation->GetCurrentClip()});
+        properties.push_back({"frame", animation->GetFrame()});
+        properties.push_back({"elapsed_ticks", animation->GetElapsedTicks()});
+        properties.push_back({"playing", animation->IsPlaying()});
+        properties.push_back({"paused", animation->IsPaused()});
+        properties.push_back({"completed", animation->IsCompleted()});
+    }
+    if (type == "Tilemap") {
+        auto *map = LuaBoundary::Cast<Tilemap *>(reference);
+        properties.push_back({"width", map->GetWidth()});
+        properties.push_back({"height", map->GetHeight()});
+        properties.push_back({"cell_size", static_cast<double>(map->GetCellSize())});
+        properties.push_back({"revision", static_cast<double>(map->GetRevision())});
+    }
 
     std::sort(properties.begin(), properties.end(),
               [](const Actor::ComponentProperty &a,

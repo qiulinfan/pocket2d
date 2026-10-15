@@ -1,0 +1,8 @@
+{
+  "name":"invader",
+  "components":{
+    "body":{"type":"Rigidbody","x":7,"y":4,"gravity_scale":0,"has_trigger":false,"collider_type":"circle","radius":0.25,"friction":0,"bounciness":0},
+    "logic":{"type":"Invader"},
+    "transform":{"type":"Transform","x":7,"y":4}
+  }
+}

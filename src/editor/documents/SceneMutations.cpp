@@ -11,6 +11,10 @@
 #include <sstream>
 #include <type_traits>
 #include <unordered_set>
+#include <unordered_map>
+#include <stdexcept>
+#include <exception>
+#include <limits>
 
 namespace {
 
@@ -220,7 +224,11 @@ Apply one serialized scene mutation to the editor-owned cache. This is the same
 command format later mirrored into runtime, which keeps authoring and play-mode
 mutation logic aligned.
 */
-bool SceneDocument::ApplyMutation(const SceneFormat::SceneMutation &mutation) {
+bool SceneDocument::ApplyMutation(const SceneFormat::SceneMutation &mutation) try {
+    return ApplyEditCommand(SceneFormat::SceneEditCommand::Single(mutation));
+} catch (const std::exception &) { return false; }
+
+bool SceneDocument::ApplyMutationUnchecked(const SceneFormat::SceneMutation &mutation) {
     return std::visit(
         [&](const auto &typed_mutation) -> bool {
             using MutationType = std::decay_t<decltype(typed_mutation)>;
@@ -267,34 +275,53 @@ bool SceneDocument::ApplyMutation(const SceneFormat::SceneMutation &mutation) {
 
 /* Apply one batch edit command atomically to the in-memory scene document. */
 bool SceneDocument::ApplyEditCommand(const SceneFormat::SceneEditCommand &command) {
-    if (command.empty()) return false;
+    command.coordinator_receipt = 0;
+    if (applying_command_ || command.empty()) return false;
+    try {
+        SceneDocument candidate(*this);
+        return ApplyPreparedEditCommand(candidate, command);
+    } catch (const std::exception &) { return false; }
+}
 
-    for (const SceneFormat::SceneMutation &mutation : command.mutations) {
-        if (!ApplyMutation(mutation)) {
-            return false;
-        }
-    }
-    return true;
+bool SceneDocument::ApplyPreparedEditCommand(SceneDocument &candidate,
+    const SceneFormat::SceneEditCommand &command) {
+    command.coordinator_receipt = 0;
+    if (applying_command_ || command.empty()) return false;
+    struct Applying { bool &flag; Applying(bool &value) : flag(value) { flag = true; } ~Applying() { flag = false; } } guard(applying_command_);
+    struct Receipt {
+        const SceneFormat::SceneEditCommand &command;
+        bool accepted = false;
+        ~Receipt() { if (!accepted) command.coordinator_receipt = 0; }
+    } receipt{command};
+    try {
+        for (const auto &mutation : command.mutations)
+            if (!candidate.ApplyMutationUnchecked(mutation)) return false;
+        if (precommit_hook_ && !precommit_hook_(candidate, command)) return false;
+        // No allocation or callback after the runtime hook accepts the candidate.
+        SwapState(candidate);
+        receipt.accepted = true;
+        return true;
+    } catch (const std::exception &) { return false; }
 }
 
 /* Rename one actor through the scene-mutation path. */
 bool SceneDocument::SetActorName(std::size_t actor_index,
                                  const std::string &name,
-                                 SceneFormat::SceneEditCommand *out_command) {
+                                 SceneFormat::SceneEditCommand *out_command) try {
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
 
     SceneFormat::SetActorNameMutation mutation;
     mutation.actor_uid = actor_uid;
     mutation.actor_name = name;
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /*
 Request a reparent operation in scene space. The resulting mutation preserves
@@ -303,7 +330,7 @@ when moved under a new parent.
 */
 bool SceneDocument::SetActorParent(
     std::size_t actor_index, std::optional<std::size_t> parent_actor_index,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
 
@@ -320,30 +347,30 @@ bool SceneDocument::SetActorParent(
         mutation.parent_uid = parent_uid;
     }
 
-    const SceneFormat::SceneEditCommand command = SceneFormat::SceneEditCommand::Single({mutation});
+    SceneFormat::SceneEditCommand command = SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Delete one actor through the same mutation pipeline used by runtime mirroring. */
 bool SceneDocument::DeleteActor(std::size_t actor_index,
-                                SceneFormat::SceneEditCommand *out_command) {
+                                SceneFormat::SceneEditCommand *out_command) try {
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
 
     SceneFormat::DeleteActorMutation mutation;
     mutation.actor_uid = actor_uid;
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /*
 Duplicate one actor record, assign a fresh scene-backed UID, and insert it near
@@ -351,7 +378,9 @@ the source actor so hierarchy ordering stays intuitive for the editor user.
 */
 bool SceneDocument::DuplicateActor(std::size_t actor_index,
                                    std::size_t &out_actor_index,
-                                   SceneFormat::SceneEditCommand *out_command) {
+                                   SceneFormat::SceneEditCommand *out_command) try {
+    if (applying_command_) return false;
+    SceneDocument candidate(*this);
     const ActorRecord *source_record = FindActorRecord(actor_index);
     const ActorUID source_actor_uid = GetActorUID(actor_index);
     if (source_record == nullptr || source_actor_uid == kInvalidActorUID) {
@@ -365,28 +394,28 @@ bool SceneDocument::DuplicateActor(std::size_t actor_index,
                                            actor_uids_.end());
 
     SceneFormat::CreateActorMutation mutation;
-    mutation.actor_uid = AllocateNextSceneBackedActorUID(used_uids);
+    mutation.actor_uid = candidate.AllocateNextSceneBackedActorUID(used_uids);
     mutation.insert_after_actor_uid = source_actor_uid;
     mutation.actor_record = std::move(duplicated_record);
 
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
-    if (!ApplyEditCommand(command)) return false;
+    if (!ApplyPreparedEditCommand(candidate, command)) return false;
 
     const std::optional<std::size_t> inserted_actor_index =
         FindActorIndexByUID(mutation.actor_uid);
     if (!inserted_actor_index.has_value()) return false;
     out_actor_index = *inserted_actor_index;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Change one component's type through the mutation path. */
 bool SceneDocument::SetComponentType(
     std::size_t actor_index, const std::string &component_key,
-    const std::string &type_name, SceneFormat::SceneEditCommand *out_command) {
+    const std::string &type_name, SceneFormat::SceneEditCommand *out_command) try {
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
 
@@ -394,20 +423,20 @@ bool SceneDocument::SetComponentType(
     mutation.actor_uid = actor_uid;
     mutation.component_key = component_key;
     mutation.type_name = type_name;
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Rename one component key through the mutation path. */
 bool SceneDocument::RenameComponent(
     std::size_t actor_index, const std::string &component_key,
     const std::string &new_component_key,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
 
@@ -415,39 +444,39 @@ bool SceneDocument::RenameComponent(
     mutation.actor_uid = actor_uid;
     mutation.component_key = component_key;
     mutation.new_component_key = new_component_key;
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Delete one component through the mutation path. */
 bool SceneDocument::DeleteComponent(
     std::size_t actor_index, const std::string &component_key,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
 
     SceneFormat::DeleteComponentMutation mutation;
     mutation.actor_uid = actor_uid;
     mutation.component_key = component_key;
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Duplicate one effective component into a new raw component override. */
 bool SceneDocument::DuplicateComponent(
     std::size_t actor_index, const std::string &component_key,
     std::string &out_new_component_key,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
     if (component_key.empty()) return false;
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
@@ -466,23 +495,23 @@ bool SceneDocument::DuplicateComponent(
     SceneFormat::AddComponentMutation mutation;
     mutation.actor_uid = actor_uid;
     mutation.component_spec = duplicated_component;
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
 
-    out_new_component_key = duplicated_component.key;
+    out_new_component_key = std::move(duplicated_component.key);
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Set one editable scalar component property through the mutation path. */
 bool SceneDocument::SetComponentProperty(
     std::size_t actor_index, const std::string &component_key,
     const std::string &property_name,
     const Actor::ComponentPropertyValue &value,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
 
@@ -491,14 +520,14 @@ bool SceneDocument::SetComponentProperty(
     mutation.component_key = component_key;
     mutation.property_name = property_name;
     mutation.value = value;
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /*
 Append a brand-new actor into the scene cache and return its index. Empty
@@ -507,29 +536,31 @@ immediately after creation.
 */
 bool SceneDocument::AppendEmptyActor(
     std::size_t &out_actor_index,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
+    if (applying_command_) return false;
+    SceneDocument candidate(*this);
     ActorRecord actor_record;
-    actor_record.name = AllocateNextNewActorName();
+    actor_record.name = candidate.AllocateNextNewActorName();
     SceneFormat::EnsureBuiltinTransformComponent(actor_record.component_specs);
     std::unordered_set<ActorUID> used_uids(actor_uids_.begin(),
                                            actor_uids_.end());
 
     SceneFormat::CreateActorMutation mutation;
-    mutation.actor_uid = AllocateNextSceneBackedActorUID(used_uids);
+    mutation.actor_uid = candidate.AllocateNextSceneBackedActorUID(used_uids);
     mutation.actor_record = std::move(actor_record);
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
-    if (!ApplyEditCommand(command)) return false;
+    if (!ApplyPreparedEditCommand(candidate, command)) return false;
 
     const std::optional<std::size_t> inserted_actor_index =
         FindActorIndexByUID(mutation.actor_uid);
     if (!inserted_actor_index.has_value()) return false;
     out_actor_index = *inserted_actor_index;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /*
 Append one actor that references an existing .template asset. If the template
@@ -538,7 +569,9 @@ new actor still participates in scene parenting and dragging.
 */
 bool SceneDocument::AppendActorFromTemplate(
     const std::string &template_name, std::size_t &out_actor_index,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
+    if (applying_command_) return false;
+    SceneDocument candidate(*this);
     if (template_name.empty()) return false;
 
     const SceneFormat::ActorTemplateAsset template_asset =
@@ -550,7 +583,7 @@ bool SceneDocument::AppendActorFromTemplate(
 
     ActorRecord actor_record;
     actor_record.template_name = template_name;
-    actor_record.name = AllocateNextNewActorName();
+    actor_record.name = candidate.AllocateNextNewActorName();
     if (!SceneFormat::HasComponentType(template_asset.actor.component_specs,
                                        "Transform")) {
         SceneFormat::EnsureBuiltinTransformComponent(actor_record.component_specs);
@@ -559,26 +592,26 @@ bool SceneDocument::AppendActorFromTemplate(
                                            actor_uids_.end());
 
     SceneFormat::CreateActorMutation mutation;
-    mutation.actor_uid = AllocateNextSceneBackedActorUID(used_uids);
+    mutation.actor_uid = candidate.AllocateNextSceneBackedActorUID(used_uids);
     mutation.actor_record = std::move(actor_record);
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
-    if (!ApplyEditCommand(command)) return false;
+    if (!ApplyPreparedEditCommand(candidate, command)) return false;
 
     const std::optional<std::size_t> inserted_actor_index =
         FindActorIndexByUID(mutation.actor_uid);
     if (!inserted_actor_index.has_value()) return false;
     out_actor_index = *inserted_actor_index;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Add one component spec override to an actor in scene cache. */
 bool SceneDocument::AddComponentToActor(
     std::size_t actor_index, const std::string &component_type,
-    SceneFormat::SceneEditCommand *out_command) {
+    SceneFormat::SceneEditCommand *out_command) try {
     if (component_type.empty()) return false;
     const ActorUID actor_uid = GetActorUID(actor_index);
     if (actor_uid == kInvalidActorUID) return false;
@@ -591,14 +624,14 @@ bool SceneDocument::AddComponentToActor(
     SceneFormat::AddComponentMutation mutation;
     mutation.actor_uid = actor_uid;
     mutation.component_spec = std::move(component_spec);
-    const SceneFormat::SceneEditCommand command =
+    SceneFormat::SceneEditCommand command =
         SceneFormat::SceneEditCommand::Single({mutation});
     if (!ApplyEditCommand(command)) return false;
     if (out_command != nullptr) {
-        *out_command = command;
+        *out_command = std::move(command);
     }
     return true;
-}
+} catch (const std::exception &) { return false; }
 
 /* Report whether one component key exists directly in the raw scene cache. */
 bool SceneDocument::HasRawComponent(std::size_t actor_index,
@@ -671,13 +704,19 @@ bool SceneDocument::ApplyDeleteActorMutation(
                               static_cast<std::ptrdiff_t>(*actor_index));
     actor_uids_.erase(actor_uids_.begin() +
                       static_cast<std::ptrdiff_t>(*actor_index));
-    for (ActorRecord &actor_record : scene_asset_.actors) {
+    std::vector<std::size_t> detached_children;
+    for (std::size_t index = 0; index < scene_asset_.actors.size(); ++index) {
+        auto &actor_record = scene_asset_.actors[index];
         if (actor_record.parent_uid == mutation.actor_uid) {
             actor_record.parent_uid = kInvalidActorUID;
+            detached_children.push_back(index);
         }
     }
     SyncActorUIDsIntoSceneAsset();
     InvalidateHierarchyCache();
+    // Keep the existing delete policy (local Transform unchanged), but body
+    // authoring must describe the resulting world pose of each affected subtree.
+    for (const auto child : detached_children) SyncBodyWorldPosesForSubtree(child);
     MarkDirty();
     return true;
 }
@@ -792,13 +831,11 @@ bool SceneDocument::ApplySetActorParentMutation(
             SceneFormat::UpsertComponentProperty(*raw_transform_component, "x", static_cast<double>(local_x));
             SceneFormat::UpsertComponentProperty(*raw_transform_component, "y", static_cast<double>(local_y));
             SceneFormat::UpsertComponentProperty(*raw_transform_component, "rotation", static_cast<double>(local_rotation));
-            SyncPoseLinkedComponentProperty(*actor_index, transform_component_key, "x", static_cast<double>(local_x));
-            SyncPoseLinkedComponentProperty(*actor_index, transform_component_key, "y", static_cast<double>(local_y));
-            SyncPoseLinkedComponentProperty(*actor_index, transform_component_key, "rotation", static_cast<double>(local_rotation));
         }
     }
 
     InvalidateHierarchyCache();
+    SyncBodyWorldPosesForSubtree(*actor_index);
     MarkDirty();
     return true;
 }
@@ -1027,51 +1064,115 @@ bool SceneDocument::ApplySetComponentPropertyMutation(
 SceneDocument private helpers
 -------------------------------------------------------------------------- */
 
+void SceneDocument::SyncBodyWorldPosesForSubtree(std::size_t actor_index) {
+    const auto count = scene_asset_.actors.size();
+    if (actor_index >= count) return;
+    // Build a local linear-time graph instead of rebuilding the document's
+    // general hierarchy cache via repeated UID searches. Only affected nodes
+    // and their ancestor chain have effective component poses evaluated.
+    std::unordered_map<ActorUID, std::size_t> indices;
+    indices.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) indices.emplace(actor_uids_[i], i);
+    std::vector<std::optional<std::size_t>> parents(count);
+    std::vector<std::vector<std::size_t>> children(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto found = indices.find(scene_asset_.actors[i].parent_uid);
+        if (found == indices.end() || found->second == i) continue;
+        parents[i] = found->second; children[found->second].push_back(i);
+    }
+    struct Pose { float x = 0, y = 0, rotation = 0; bool valid = false; unsigned state = 0; };
+    std::vector<Pose> poses(count);
+    std::vector<std::size_t> chain;
+    const auto resolve = [&](std::size_t first) {
+        chain.clear(); auto current = first;
+        while (poses[current].state != 2) {
+            auto &pose = poses[current];
+            if (pose.state == 1) throw std::runtime_error("cyclic affected Transform hierarchy");
+            pose.state = 1;
+            pose.valid = TryGetActorLocalTransform(current, nullptr, pose.x, pose.y, pose.rotation);
+            chain.push_back(current);
+            if (!pose.valid || !parents[current]) break;
+            current = *parents[current];
+        }
+        for (auto iterator = chain.rbegin(); iterator != chain.rend(); ++iterator) {
+            auto &pose = poses[*iterator];
+            if (pose.valid && parents[*iterator]) {
+                const auto &parent = poses[*parents[*iterator]];
+                if (parent.state == 2 && parent.valid) {
+                    float x = 0, y = 0;
+                    RotateClockwise(pose.x, pose.y, parent.rotation, x, y);
+                    pose.x = parent.x + x; pose.y = parent.y + y; pose.rotation += parent.rotation;
+                }
+                // Preserve the existing missing-parent-Transform fallback:
+                // a valid local Transform becomes its own world pose.
+            }
+            pose.state = 2;
+        }
+    };
+    std::vector<std::size_t> pending{actor_index};
+    std::vector<bool> visited(count, false);
+    while (!pending.empty()) {
+        const auto current = pending.back(); pending.pop_back();
+        if (visited[current]) continue;
+        visited[current] = true;
+        pending.insert(pending.end(), children[current].begin(), children[current].end());
+        resolve(current);
+        const auto &pose = poses[current];
+        if (!pose.valid) continue;
+        const Actor effective = BuildEffectiveActor(current);
+        const auto body = std::find_if(effective.component_specs.begin(), effective.component_specs.end(),
+            [](const auto &spec) { return spec.type == "Rigidbody"; });
+        if (body == effective.component_specs.end()) continue;
+        auto *raw = FindOrCreateRawComponentSpec(current, body->key, "Rigidbody");
+        if (!raw) continue;
+        SceneFormat::UpsertComponentProperty(*raw, "x", static_cast<double>(pose.x));
+        SceneFormat::UpsertComponentProperty(*raw, "y", static_cast<double>(pose.y));
+        SceneFormat::UpsertComponentProperty(*raw, "rotation", static_cast<double>(pose.rotation));
+    }
+}
+
 void SceneDocument::SyncPoseLinkedComponentProperty(
     std::size_t actor_index, const std::string &source_component_key,
     const std::string &property_name,
     const Actor::ComponentPropertyValue &value) {
-    if (property_name != "x" && property_name != "y" &&
-        property_name != "rotation") {
-        return;
+    if (property_name != "x" && property_name != "y" && property_name != "rotation") return;
+    double number = 0;
+    if (const auto *scalar = std::get_if<double>(&value)) number = *scalar;
+    else if (const auto *scalar = std::get_if<int>(&value)) number = *scalar;
+    else return; // Preserve invalid drafts for the runtime validation/repair workflow.
+    if (!std::isfinite(number) || std::abs(number) > std::numeric_limits<float>::max()) return;
+    const Actor effective = BuildEffectiveActor(actor_index);
+    const auto *source = SceneFormat::FindComponentSpec(effective.component_specs, source_component_key);
+    if (!source || (source->type != "Transform" && source->type != "Rigidbody")) return;
+    if (source->type == "Rigidbody") {
+        // Body fields are WORLD coordinates. Change just the requested world
+        // axis, taking the other axes from the currently derived Transform pose.
+        float world_x = 0, world_y = 0, world_rotation = 0;
+        std::string transform_key;
+        if (!TryGetActorWorldTransform(actor_index, &transform_key, world_x, world_y, world_rotation)) return;
+        if (property_name == "x") world_x = static_cast<float>(number);
+        else if (property_name == "y") world_y = static_cast<float>(number);
+        else world_rotation = static_cast<float>(number);
+        std::optional<float> parent_x, parent_y, parent_rotation;
+        const auto parent = FindParentActorIndex(actor_index);
+        if (parent) {
+            float x = 0, y = 0, rotation = 0;
+            if (TryGetActorWorldTransform(*parent, nullptr, x, y, rotation)) {
+                parent_x = x; parent_y = y; parent_rotation = rotation;
+            }
+        }
+        float local_x = 0, local_y = 0, local_rotation = 0;
+        ResolveReparentedLocalTransform(world_x, world_y, world_rotation, parent_x, parent_y,
+            parent_rotation, local_x, local_y, local_rotation);
+        auto *transform = FindOrCreateRawComponentSpec(actor_index, transform_key, "Transform");
+        if (!transform) return;
+        SceneFormat::UpsertComponentProperty(*transform, "x", static_cast<double>(local_x));
+        SceneFormat::UpsertComponentProperty(*transform, "y", static_cast<double>(local_y));
+        SceneFormat::UpsertComponentProperty(*transform, "rotation", static_cast<double>(local_rotation));
     }
-
-    /*
-    Transform and Rigidbody share authored pose fields in this editor. When one
-    side changes, we mirror the scalar override into the other so runtime and
-    scene editing do not drift apart before play-mode sync runs.
-    */
-    const Actor effective_actor = BuildEffectiveActor(actor_index);
-    const Actor::ComponentSpec *source_component_spec =
-        SceneFormat::FindComponentSpec(effective_actor.component_specs,
-                                       source_component_key);
-    if (source_component_spec == nullptr) return;
-
-    std::string linked_component_type;
-    if (source_component_spec->type == "Transform") {
-        linked_component_type = "Rigidbody";
-    } else if (source_component_spec->type == "Rigidbody") {
-        linked_component_type = "Transform";
-    } else {
-        return;
-    }
-
-    const Actor::ComponentSpec *linked_component_spec = nullptr;
-    for (const Actor::ComponentSpec &component_spec :
-         effective_actor.component_specs) {
-        if (component_spec.type != linked_component_type) continue;
-        linked_component_spec = &component_spec;
-        break;
-    }
-    if (linked_component_spec == nullptr) return;
-
-    Actor::ComponentSpec *raw_linked_component_spec =
-        FindOrCreateRawComponentSpec(actor_index, linked_component_spec->key,
-                                     linked_component_spec->type);
-    if (raw_linked_component_spec == nullptr) return;
-
-    SceneFormat::UpsertComponentProperty(*raw_linked_component_spec,
-                                         property_name, value);
+    // Transform fields stay LOCAL. Only an explicit pose/hierarchy edit reaches
+    // this synchronization; unrelated legacy authoring is never normalized.
+    SyncBodyWorldPosesForSubtree(actor_index);
 }
 
 std::string SceneDocument::AllocateNextNewActorName() {

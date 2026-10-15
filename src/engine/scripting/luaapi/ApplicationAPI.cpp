@@ -26,7 +26,7 @@ void InjectDebugAPI() {
 }
 
 void CppApplicationQuit() {
-    std::exit(0);
+    if (g_engine != nullptr) g_engine->RequestQuit();
 }
 
 void CppApplicationSleep(int milliseconds) {
@@ -36,6 +36,10 @@ void CppApplicationSleep(int milliseconds) {
 
 int CppApplicationGetFrame() {
     return FrameClock::GetFrameNumber();
+}
+
+float CppApplicationGetDeltaTime() {
+    return FrameClock::GetDeltaTime();
 }
 
 int CppApplicationGetWindowWidth() {
@@ -70,6 +74,7 @@ void InjectApplicationAPI() {
         .addFunction("Quit", &CppApplicationQuit)
         .addFunction("Sleep", &CppApplicationSleep)
         .addFunction("GetFrame", &CppApplicationGetFrame)
+        .addFunction("GetDeltaTime", &CppApplicationGetDeltaTime)
         .addFunction("GetWindowWidth", &CppApplicationGetWindowWidth)
         .addFunction("GetWindowHeight", &CppApplicationGetWindowHeight)
         .addFunction("OpenURL", &CppApplicationOpenURL)

@@ -1,6 +1,7 @@
 #ifndef RIGIDBODY_H
 #define RIGIDBODY_H
 
+#include "scene/ActorHandle.h"
 #include "box2d/box2d.h"
 #include <string>
 
@@ -12,6 +13,7 @@ public:
     Rigidbody(const Rigidbody &) = default;
 
     Actor *actor = nullptr;
+    ActorHandle actor_handle;
     std::string key = "";
     bool enabled = true;
 
@@ -48,6 +50,12 @@ public:
     // 底层 Box2D body 指针
     b2Body *body = nullptr;
 
+    // Full serialized configuration and derived mass/inertia/gravity checks.
+    // Numeric authoring setters validate one field; this validates combinations
+    // before fixtures/body state are created or their effective type changes.
+    void ValidateConfiguration() const;
+    static float ValidateNumericProperty(const char *name, double value);
+
     void OnStart();
     void OnDestroy();
 
@@ -78,6 +86,11 @@ public:
     static void DestroyPhysicsWorld();
     static bool HasPhysicsWorld();
     static void StepPhysicsWorld();
+
+private:
+    bool HasLiveRuntimeBinding() const;
+    b2Vec2 accumulated_force_{0.0f, 0.0f};
+    std::uint64_t force_step_ = 0;
 };
 
 #endif

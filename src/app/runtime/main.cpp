@@ -1,9 +1,7 @@
 #include "app/runtime/RuntimeApp.h"
+#include <SDL3/SDL_main.h>
 
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
-
     RuntimeApp app;
-    return app.Run();
+    return app.Run(argc, argv);
 }

@@ -3,6 +3,7 @@ target_sources(
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SpriteRenderer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SpriteAnimation.cpp"
         "${PROJECT_SOURCE_DIR}/include/engine/rendering/Renderer.h"
         "${PROJECT_SOURCE_DIR}/include/engine/rendering/SpriteRenderer.h"
 )
