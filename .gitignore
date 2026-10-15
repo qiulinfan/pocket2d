@@ -425,12 +425,10 @@ MigrationBackup/
 FodyWeavers.xsd
 
 # VS Code files for those working on multiple tools
-.vscode/*
-!.vscode/settings.json
-!.vscode/c_cpp_properties.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+.vscode/
+.idea/
+.obsidian/
+/compile_commands.json
 *.code-workspace
 
 # Local History for Visual Studio Code
@@ -507,3 +505,14 @@ resources/.pocketengine/
 /Projects/Default/**/*.raw
 /Projects/Default/**/*.mp4
 /Projects/Default/**/*.mov
+
+# Self-authored, reproducible test geometry is part of the runnable fixtures.
+!/tests/fixtures/village_defense/images/**/*.bmp
+!/tests/fixtures/tilemap_farm/images/**/*.bmp
+!/tests/fixtures/sprite_animation/images/**/*.png
+
+!/tests/fixtures/persistent_village/images/**/*.bmp
+!/tests/fixtures/typed_gameplay/images/**/*.png
+
+!tests/fixtures/inventory_village/images/**/*.png
+!tests/fixtures/inventory_village/images/**/*.bmp
