@@ -120,7 +120,7 @@ cmake --build build/modern-debug --parallel
 ctest --test-dir build/modern-debug --output-on-failure
 ```
 
-The option adds two real authoring tests to the 66-test core suite, with explicit
+The option adds two real authoring tests to the 70-test core suite, with explicit
 configuration failure if dependencies are missing. The core runtime does not
 depend on Node. Details and generated-output ownership rules are in
 `typescript-authoring.md`.
@@ -197,9 +197,19 @@ in thirdparty/LuaBridge/UPSTREAM.md. Lua remains 5.4.9. `lua_boundary` exercises
 production checked conversions, result-mode policy, discard-return callbacks,
 nonzero-stack preservation, bounded source/traceback diagnostics and real enabled
 lifecycle/event behavior. `lua_vm` also checks same-thread, coroutine-shared and
-independent-VM identities. Core CTest count is 66; the two optional TypeScript
-checks bring it to 68. `lua_receiver` and `agent_receiver` cover invalid instance
+independent-VM identities. Core CTest count is 70; the two optional TypeScript
+checks bring it to 72. `lua_receiver` and `agent_receiver` cover invalid instance
 receivers, legal nullable arguments and real-worker continuation after caught and
 uncaught script errors. See phase14-checkpoint.md and native-call-receivers.md for
 acceptance and scope, and native-receiver-performance.md for matched costs.
 Earlier binding migration measurements remain in binding-runtime-performance.md.
+
+## Integrated village and body activation
+
+`rigidbody_activation` and `tilemap_activation` verify deferred startup, live
+physics participation, native identity and cross-owner contact mutation guards.
+`agent_two_world_village` runs farming, inventory, combat, portals and checkpoint
+recovery through the supervisor. `two_world_render_software` checks the same
+fixture through real input and pixel readback; its executable also accepts
+`metal` or `opengl` after the fixture path for available local hardware checks.
+See phase15-checkpoint.md and the fixture CONTRACT for scope and final evidence.

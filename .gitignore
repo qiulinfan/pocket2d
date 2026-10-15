@@ -516,3 +516,5 @@ resources/.pocketengine/
 
 !tests/fixtures/inventory_village/images/**/*.png
 !tests/fixtures/inventory_village/images/**/*.bmp
+
+!/tests/fixtures/two_world_village/images/**/*.png

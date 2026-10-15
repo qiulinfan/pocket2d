@@ -18,4 +18,7 @@
 - Keep README owner-authored. Development plans, ADRs, and handoffs belong here
   or in linked development documents. Preserve user work and source licenses.
 - Parallel agents own disjoint files; one coordinator owns build configuration
-  and integration. No commits or pushes without the owner's request.
+  and integration.
+- The owner authorizes local feature commits after review and relevant tests pass.
+  Keep each commit cohesive and exclude unfinished features. Push only on an
+  explicit request.

@@ -1,8 +1,8 @@
 # Pocket2D verified checkpoint
 
-Updated: 2026-10-15. Revision 14. Verified modernization baseline; no push.
-The modernization goal remains active. This checkpoint is a working baseline,
-not SOTA certification or completion of the Village_Rim migration.
+Updated: 2026-10-15. Revision 15. Verified engine/two-world checkpoint; local commits, no push.
+The owner requested autonomous work to stop after this verified round. This checkpoint
+is not SOTA certification or completion of the Village_Rim migration.
 
 ## Owner direction
 
@@ -17,9 +17,9 @@ bounded external-agent development evaluations. Full scope: `roadmap.md`.
   3.4.8, ttf 3.2.2 and mixer 3.2.4; coherent Dear ImGui SDL3 backends. Lua is now
   official 5.4.9, with pinned LuaBridge3 3.0-rc12 integrated. A documented
   local same-state comparison fast path retains distinct coroutine/VM checks.
-- With optional TypeScript checks enabled, all **68 CTest cases pass in Debug and Release**.
-  ASan/UBSan pass all **68 cases**, including software rendering and the actual editor overlay. The
-  core suite has 66 tests and no npm requirement; two frontend tests explicitly
+- With optional TypeScript checks enabled, all **72 CTest cases pass in Debug and Release**.
+  ASan/UBSan pass all **72 cases**, including software rendering and the actual editor overlay. The
+  core suite has 70 tests and no npm requirement; two frontend tests explicitly
   require the pinned local toolchain. The latest matrix includes generated API
   conformance, real TS compilation/replay, map activation reentrancy, numeric preflight
   preservation, reset-startup timeout recovery, native animation and Lua getter
@@ -349,6 +349,28 @@ bounded external-agent development evaluations. Full scope: `roadmap.md`.
   constructor/coroutine/GC certification remain outside this bounded repair.
   See phase14-checkpoint.md and native-call-receivers.md.
 
+- Phase 15 connects farming, native inventory/equipment, real enemy damage/food,
+  paired portals and persistent invasion closure in two resident regions. Crops
+  and invasions continue underground; invaders target crops before the altar.
+  Clearing a wave schedules another; source destruction permanently cancels the
+  route, including active invaders. Checkpoints survive fresh processes and reject
+  busy/corrupt/inconsistent input before live mutation. Keyboard/mouse parity,
+  full bags, seedless planting, failed-world recovery, missing portals and actual
+  incompatible-catalog restore rejection pass through real player input/runtime.
+- Integration exposed stale physics activation caches and consumed-but-unrun
+  startup. Disabled components now retain pending Start, and existing bodies
+  suspend/resume participation without reconstruction. Real cross-owner contact
+  callbacks also reproduced two worker crashes. A shared native mutation scope
+  rejects direct Rigidbody/Tilemap destruction during those traversals while
+  retaining deferred removal and queued cell edits. New activation regressions
+  cover lifetime, collisions, identity and subsequent-frame usability.
+- All 72 tests pass in Debug, Release and ASan/UBSan. Final software, Metal and
+  OpenGL gameplay readbacks pass; village, underground and closure captures were
+  inspected. A 78-file source-visible-only copy also passes Metal launch/readback.
+  The self-authored test geometry and fixed pool are a bounded game workload,
+  with human feel and complete original-game content still unverified. See
+  phase15-checkpoint.md, rigidbody-activation.md and the two_world_village CONTRACT.
+
 ## Measurements and limits
 
 An isolated, matched-compiler comparison of the hierarchy optimization slice at
@@ -422,14 +444,21 @@ Principal p50 ranges overlap; the native-method micro median changes +3.5%, also
 with overlapping ranges. These data establish neither general improvement nor
 zero cost. See native-receiver-performance.md for the full retained variability.
 
-## Next work and remaining gates
+Phase 15 initially measured a 5.02% 10k native animation p50 increase with
+non-overlapping ranges. A no-world early return removes the added activation
+scan in those scenes. Final timing ranges overlap in all four workload groups
+and have substantial outliers; higher medians remain observed, so elimination
+of the earlier regression is not confirmed. All 48 rows across both comparisons
+pass correctness. The full results remain in rigidbody-activation.md and ignored
+phase15 benchmark directories. No performance gain or SOTA conclusion is claimed.
 
-1. Next concrete slice: connect farming, native inventory/equipment, actual
-   combat, paired portals and permanent invasion closure in one runnable
-   two-world village. The commit-pinned original-game rules, proposed modules,
-   explicit checkpoint limits and acceptance cases are in
-   two-world-integration-plan.md. Both regions stay in one scene so village
-   pressure continues underground. This is planned, not yet implemented.
+## Remaining work after an owner-requested resume
+
+1. Profile representative mixed gameplay and agent observation costs; recheck
+   activation overhead under controlled conditions before broader optimization.
+   The two-world fixture now provides a connected workload. Complete scope and
+   source rules are in the integration plan and fixture contract. No next slice
+   has started: the owner requested this round to be the stopping point.
 2. Continue broader world/game migration after that slice. Original item content,
    directional actions, timeline authoring and the complete Unity game remain
    open; see the migration matrix. Lua 5.5 is a separate later experiment;
@@ -467,17 +496,17 @@ commands; `village-defense-playtest.md` describes controls.
 `native-runtime-validation.md` describes direct native input domains and limits.
 `runtime-actor-preparation.md` and ADR 005 cover complete runtime publication.
 `editor-command-transactions.md` and ADR 006 cover coordinated authoring edits.
-`phase2-checkpoint.md` through `phase14-checkpoint.md` link the implementation contracts.
+`phase2-checkpoint.md` through `phase15-checkpoint.md` link the implementation contracts.
 `binding-experiment-results.md` and ADR 007 record the executed isolated comparison
 and the verified integration contract. `binding-runtime-performance.md` records
 matched initial/final costs, the local patch and scope limits.
 Current local build trees
 are `build/sdl3-debug`, `build/sdl3-release` and `build/sdl3-sanitize`; final full-suite
-logs use `build/phase14-*-tests.log` and remain ignored. All three builds pass 68
+logs use `build/phase15-*-tests.log` and remain ignored. All three builds pass 72
 cases, including the 27-case compiler suite and 102+31 exact compiled gameplay
-comparisons. Final suite durations were 51.23 s Debug, 42.55 s Release and
-84.77 s ASan/UBSan; these are check durations, not performance claims. Final Metal fixture captures are under
-`build/phase14-captures`; the earlier editor status capture remains
+comparisons. Final suite durations were 77.83 s Debug, 51.35 s Release and
+162.19 s ASan/UBSan; these are check durations, not performance claims. Final Metal fixture captures are under
+`build/phase15-captures`; the earlier editor status capture remains
 `build/phase11-editor-edit-status.png`. Prior backend/particle measurements
 remain under build/phase9-*. The isolated binding builds use
 build/binding-debug, build/binding-release and build/binding-sanitize; their final
@@ -488,12 +517,13 @@ Phase 13. The final GLM revalidation output is under
 build/agent-authoring/phase13-release-validation. Raw profiles/comparisons stay
 under build/phase13-*. Upstream C++26 deprecation warnings and whitespace are
 preserved; non-vendor diff whitespace checks pass.
-The goal remains active. The owner now authorizes reviewed feature commits after
-appropriate tests; no push was requested.
+Autonomous development stops here at the owner's request. The broader goal is
+unfinished. The owner authorizes reviewed feature commits after appropriate
+tests; no push was requested.
 
 Public-repository hygiene untracks `.vscode` files and the generated root
 compilation database while retaining their local copies and ignoring them.
 Those removals are included in the repository hygiene commit. Village_Rim source,
 its original uncommitted project state and its art experiments remain untouched.
 The fixture BMPs/PNGs have narrow ignore exceptions so their self-authored geometry
-is included in a future reviewed commit. No generated run transcript is tracked.
+is included in reviewed feature commits. No generated run transcript is tracked.

@@ -276,6 +276,16 @@ add_test(NAME agent_receiver COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_receiver_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_receiver PROPERTIES TIMEOUT 100)
 
+# One real gameplay loop combines native inventory, farming, combat and world persistence.
+pocket_runtime_test(two_world_render_test two_world_render_test.cpp)
+add_test(NAME two_world_render_software COMMAND two_world_render_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village" software)
+set_tests_properties(two_world_render_software PROPERTIES TIMEOUT 45)
+add_test(NAME agent_two_world_village COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/agent_two_world_village_test.py" $<TARGET_FILE:game_engine>
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village")
+set_tests_properties(agent_two_world_village PROPERTIES TIMEOUT 180)
+
 pocket_runtime_test(rigidbody_activation_test rigidbody_activation_test.cpp)
 add_test(NAME rigidbody_activation COMMAND rigidbody_activation_test)
 set_tests_properties(rigidbody_activation PROPERTIES TIMEOUT 30)

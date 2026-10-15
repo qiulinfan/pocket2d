@@ -94,10 +94,10 @@ cmake --build build/modern-debug --parallel
 ctest --test-dir build/modern-debug --output-on-failure
 ```
 
-The core suite has 66 tests and needs no npm installation. Explicitly enabling
+The core suite has 70 tests and needs no npm installation. Explicitly enabling
 the option requires the pinned local toolchain at configure time; missing or
 mismatched dependencies are a configuration error. It adds compiler/output checks
-and a freshly compiled real gameplay replay, for 68 tests total. CMake never
+and a freshly compiled real gameplay replay, for 72 tests total. CMake never
 installs/downloads npm dependencies.
 
 The 27-case compiler suite checks real scalar/nullable/native-object/readonly/unknown
