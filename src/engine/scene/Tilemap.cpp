@@ -1,6 +1,7 @@
 #include "scripting/LuaBoundary.h"
 #include "scene/Tilemap.h"
 #include "physics/Rigidbody.h"
+#include "physics/PhysicsMutationGuard.h"
 #include "physics/RayCast.h"
 #include "scripting/ComponentManager.h"
 #include "lua.hpp"
@@ -157,6 +158,7 @@ void Tilemap::AdoptPreparedState(Tilemap &prepared) {
             if (!chunk.body || old_world != RayCast::GetPhysicsWorld()) continue;
             for (auto *fixture = chunk.body->GetFixtureList(); fixture; fixture = fixture->GetNext())
                 RayCast::UnregisterFixture(fixture);
+            PhysicsMutationGuard mutation;
             old_world->DestroyBody(chunk.body);
             chunk.body = nullptr;
         }
@@ -178,6 +180,7 @@ void Tilemap::DestroyBody(b2Body *body) {
     if (body == nullptr || physics_world_ == nullptr || RayCast::GetPhysicsWorld() != physics_world_) return;
     for (auto *fixture = body->GetFixtureList(); fixture != nullptr; fixture = fixture->GetNext())
         RayCast::UnregisterFixture(fixture);
+    PhysicsMutationGuard mutation;
     physics_world_->DestroyBody(body);
 }
 void Tilemap::ClearBodies() {
@@ -190,6 +193,8 @@ void Tilemap::ClearBodies() {
     physics_world_ = nullptr;
 }
 void Tilemap::OnDestroy() {
+    if (PhysicsMutationGuard::IsActive())
+        throw std::runtime_error("Tilemap.OnDestroy cannot run during a native contact mutation callback; use actor:RemoveComponent(map) or Actor.Destroy(actor) for deferred cleanup");
     if (auto *world = RayCast::GetPhysicsWorld(); world != nullptr && world->IsLocked())
         throw std::runtime_error("Tilemap.OnDestroy cannot run during a physics callback; use actor:RemoveComponent(map) or Actor.Destroy(actor) for deferred cleanup");
     if (committing_) throw std::runtime_error("tilemap: cannot destroy during commit");
@@ -382,7 +387,10 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
     committed_enabled_ = next_enabled;
     for (auto &chunk : chunks_) if (chunk.body != nullptr) {
         if (chunk.body->GetPosition() != b2Vec2(x, y)) chunk.body->SetTransform(b2Vec2(x, y), 0);
-        if (chunk.body->IsEnabled() != next_enabled) chunk.body->SetEnabled(next_enabled);
+        if (chunk.body->IsEnabled() != next_enabled) {
+            PhysicsMutationGuard mutation;
+            chunk.body->SetEnabled(next_enabled);
+        }
     }
     committing_ = false;
 }

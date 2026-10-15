@@ -275,3 +275,11 @@ set_tests_properties(lua_receiver PROPERTIES TIMEOUT 30)
 add_test(NAME agent_receiver COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_receiver_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_receiver PROPERTIES TIMEOUT 100)
+
+pocket_runtime_test(rigidbody_activation_test rigidbody_activation_test.cpp)
+add_test(NAME rigidbody_activation COMMAND rigidbody_activation_test)
+set_tests_properties(rigidbody_activation PROPERTIES TIMEOUT 30)
+
+pocket_runtime_test(tilemap_activation_test tilemap_activation_test.cpp)
+add_test(NAME tilemap_activation COMMAND tilemap_activation_test)
+set_tests_properties(tilemap_activation PROPERTIES TIMEOUT 30)

@@ -77,6 +77,11 @@ callbacks directly on the component or on a statically inherited prototype.
 Dispatch of discovered callbacks still uses protected runtime lookup. Dynamic
 data getters and protected runtime lookup of `OnAnimationEvent` remain supported.
 
+An initially disabled component keeps its `OnStart` pending until a frame-start
+boundary observes it enabled. Startup occurs once; disabling and reenabling an
+already-started component does not repeat it. Components enabled after that
+boundary begin on a subsequent tick, before their update callbacks.
+
 ## Authoring defaults vs runtime overrides
 
 A component property can come from three places:
@@ -137,3 +142,11 @@ methods have different effects: changing configuration does not generally rebuil
 live body or resnapshot an emitter. Finish coherent multi-field configuration before
 initialization or emission. See [runtime validation](../development/native-runtime-validation.md)
 for supported domains, particle capacity, preserved color/unset behavior and limits.
+
+`Rigidbody.enabled` and `body_type` have explicit live behavior: changed values
+invalidate hierarchy decisions and are applied at the next safe physics boundary.
+Disabling suspends Box2D participation; reenabling retains the existing body.
+`SetVelocity` before the first native startup remains a no-op. Direct Rigidbody
+or Tilemap destruction from activation/type contact-exit callbacks is rejected;
+use deferred `RemoveComponent` or `Actor.Destroy`. See
+[rigidbody activation](../development/rigidbody-activation.md).

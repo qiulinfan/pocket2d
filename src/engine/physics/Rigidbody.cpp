@@ -1,5 +1,6 @@
 #include "scripting/LuaBoundary.h"
 #include "physics/Rigidbody.h"
+#include "physics/PhysicsMutationGuard.h"
 #include "scene/Actor.h"
 #include "scripting/ComponentManager.h"
 #include "physics/RayCast.h"
@@ -385,6 +386,7 @@ void Rigidbody::OnStart() {
     body_def.gravityScale = gravity_scale;
     body_def.angularDamping = angular_friction;
     body_def.angle = ClockwiseDegreesToBox2DRadians(rotation);
+    body_def.enabled = enabled;
 
     body = RayCast::GetPhysicsWorld()->CreateBody(&body_def);
 
@@ -398,6 +400,8 @@ void Rigidbody::OnStart() {
 void Rigidbody::OnDestroy() {
     b2World *world = RayCast::GetPhysicsWorld();
     if (body == nullptr || world == nullptr) return;
+    if (PhysicsMutationGuard::IsActive())
+        throw std::runtime_error("Rigidbody.OnDestroy cannot run during a native contact mutation callback; use actor:RemoveComponent(body) or Actor.Destroy(actor) for deferred cleanup");
     if (world->IsLocked())
         throw std::runtime_error("Rigidbody.OnDestroy cannot run during a physics callback; use actor:RemoveComponent(body) or Actor.Destroy(actor) for deferred cleanup");
 
@@ -405,6 +409,7 @@ void Rigidbody::OnDestroy() {
          fixture = fixture->GetNext()) {
         RayCast::UnregisterFixture(fixture);
     }
+    PhysicsMutationGuard mutation;
     world->DestroyBody(body);
     body = nullptr;
     accumulated_force_.SetZero();force_step_=g_force_step;
@@ -496,10 +501,19 @@ void Rigidbody::SetEffectiveBodyType(const std::string &type_name) {
     const double angular=requested_type==b2_staticBody?0:body->GetAngularVelocity();
     const auto predicted=Integration(requested_type==b2_dynamicBody?mass.mass:0,body->GetGravityScale(),body->GetWorld()->GetGravity(),0,0,velocity);
     Motion(requested_type==b2_dynamicBody?mass.mass:0,requested_type==b2_dynamicBody?mass.inertia:0,Describe(body),predicted,angular);
+    PhysicsMutationGuard state_change;
     body->SetType(requested_type);
     effective_body_type = type_name;
     accumulated_force_.SetZero();force_step_=g_force_step;
 }
+
+void Rigidbody::ApplyEnabledState() {
+    if (!body || body->IsEnabled() == enabled) return;
+    Unlocked(body);
+    PhysicsMutationGuard state_change;
+    body->SetEnabled(enabled);
+}
+
 
 // runtime physics controls
 void Rigidbody::SetAngularVelocity(float degrees_clockwise) {

@@ -1,4 +1,5 @@
 #include "RegistrationDetail.h"
+#include "core/Engine.h"
 #include "scripting/LuaBoundary.h"
 #include "physics/Rigidbody.h"
 #include "lua.hpp"
@@ -19,7 +20,13 @@ std::string StringInput(const luabridge::LuaRef &input) {
 template<bool Rigidbody::*member> bool Boolean(const Rigidbody *body) { return body->*member; }
 template<bool Rigidbody::*member> void SetBoolean(Rigidbody *body, luabridge::LuaRef input) {
     if (input.type() != LUA_TBOOLEAN) throw std::invalid_argument("Rigidbody flag requires a boolean");
-    body->*member = LuaBoundary::Cast<bool>(input);
+    const bool value = LuaBoundary::Cast<bool>(input);
+    if (body->*member == value) return;
+    body->*member = value;
+    if constexpr (member == &Rigidbody::enabled) {
+        if (APIRegistrationDetail::g_engine)
+            APIRegistrationDetail::g_engine->NotifyRuntimePhysicsConfigurationChanged();
+    }
 }
 template<float Rigidbody::*member> float Number(const Rigidbody *body) { return body->*member; }
 #define NUMERIC_SETTER(field) void Set_##field(Rigidbody *body,luabridge::LuaRef input) { body->field=Rigidbody::ValidateNumericProperty(#field,NumericInput(input)); }
@@ -32,7 +39,10 @@ std::string BodyType(const Rigidbody *body) { return body->body_type; }
 void SetBodyType(Rigidbody *body,luabridge::LuaRef input) {
     const std::string value = StringInput(input);
     if(value!="dynamic"&&value!="static"&&value!="kinematic") throw std::invalid_argument("Rigidbody body_type must be dynamic/static/kinematic");
+    if (body->body_type == value) return;
     body->body_type=value;
+    if (APIRegistrationDetail::g_engine)
+        APIRegistrationDetail::g_engine->NotifyRuntimePhysicsConfigurationChanged();
 }
 std::string ColliderType(const Rigidbody *body) { return body->collider_type; }
 void SetColliderType(Rigidbody *body,luabridge::LuaRef input) {

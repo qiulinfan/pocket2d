@@ -210,12 +210,18 @@ void DestroyRemovedComponents(Actor::UID uid) {
 // -----------------------------------------------------------------------------
 
 void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
-    if (g_engine == nullptr) return;
-
+    // SetType/SetEnabled may dispatch contact-exit callbacks. Keep userdata
+    // alive and never retain a container iterator or record across those calls.
+    std::vector<CallbackTarget> targets;
     for (const auto &actor_components_entry : g_runtime.actor_components) {
-        const Actor::UID actor_uid = actor_components_entry.first;
-        ComponentRecord *rigidbody_component =
-            FindRuntimeRigidbodyComponent(actor_uid);
+        const auto uid = actor_components_entry.first;
+        const auto *component = FindRuntimeRigidbodyComponent(uid);
+        if (component && !component->removed) targets.push_back(Snapshot(uid, *component));
+    }
+    for (const auto &target : targets) {
+        if (g_engine && g_engine->RequiresSceneReset()) return;
+        if (!Alive(target)) continue;
+        auto *rigidbody_component = FindComponentRecord(target.uid, target.key);
         Rigidbody *rigidbody = nullptr;
         if (!TryCastRuntimeRigidbody(rigidbody_component, rigidbody) ||
             rigidbody == nullptr) {
@@ -223,7 +229,8 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
         }
 
         const PhysicsHierarchy::State physics_state =
-            g_engine->GetRuntimePhysicsHierarchyStateByUID(actor_uid);
+            g_engine ? g_engine->GetRuntimePhysicsHierarchyStateByUID(target.uid)
+                     : PhysicsHierarchy::State{};
         const std::string effective_body_type =
             physics_state.has_rigidbody_self
                 ? physics_state.effective_body_type
@@ -234,6 +241,8 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
         before OnStart / physics step consume it.
         */
         rigidbody->SetEffectiveBodyType(effective_body_type);
+        if (!Alive(target)) continue;
+        rigidbody->ApplyEnabledState();
     }
 }
 
@@ -250,9 +259,32 @@ void ComponentManager::ProcessPendingOnStart() {
         if (g_engine && g_engine->RequiresSceneReset()) return;
         auto *component = FindComponentRecord(target.uid, target.key);
         if (!component || !Alive(target) || component->on_start_called) continue;
-        const bool has_callback = component->has_on_start;
-        component->on_start_called = true;
-        if (has_callback) Invoke(target, "OnStart");
+        // Disabled components have not started. Retain their pending entry so
+        // later activation observes the same one-time lifecycle boundary.
+        try {
+            const auto enabled = ProtectedField(target.reference, "enabled");
+            if (!Alive(target)) continue;
+            component = FindComponentRecord(target.uid, target.key);
+            if (!component || component->on_start_called) continue;
+            if (!LuaBoundary::IsEnabled(enabled)) {
+                g_runtime.pending_on_start.emplace_back(target.uid, target.key);
+                continue;
+            }
+            const bool has_callback = component->has_on_start;
+            // Mark before calling user code, but after the enabled getter has
+            // succeeded. Do not read enabled twice (it may be a Lua getter).
+            component->on_start_called = true;
+            if (has_callback) {
+                const auto callback = ProtectedField(target.reference, "OnStart");
+                if (Alive(target) && callback.isFunction())
+                    LuaBoundary::CallDiscard(callback, target.reference);
+            }
+        } catch (const LuaBoundary::Error &error) {
+            ReportError(GetActorNameByUID(target.uid), error);
+            component = FindComponentRecord(target.uid, target.key);
+            if (component && Alive(target) && !component->on_start_called)
+                g_runtime.pending_on_start.emplace_back(target.uid, target.key);
+        }
     }
 }
 
@@ -289,6 +321,15 @@ void ComponentManager::StepPhysics() {
     // Subscribe/Unsubscribe become visible at the very end of the frame,
     // after LateUpdate and before the physics step starts.
     EventBus::ApplyPendingOperations();
+    // Startup and Tilemap commit create worlds before this boundary. With no
+    // world there is no native state to synchronize or step.
+    if (!Rigidbody::HasPhysicsWorld()) return;
+
+    // OnStart/Update/LateUpdate may have changed enabled or body_type after
+    // the frame-start bridge. Apply those requests before this actual step.
+    ApplyEffectiveRigidbodyBodyTypes();
+    FinalizePrePhysicsDestructions();
+    if (g_engine && g_engine->RequiresSceneReset()) return;
 
     if (!Rigidbody::HasPhysicsWorld()) return;
 

@@ -66,6 +66,8 @@ public:
     void SetPosition(const b2Vec2 &position);
     void SetRotation(float degrees_clockwise);
     void SetEffectiveBodyType(const std::string &type_name);
+    // Lifecycle-only: apply the authoring enabled flag at an unlocked boundary.
+    void ApplyEnabledState();
     void SetAngularVelocity(float degrees_clockwise);
     void SetGravityScale(float scale);
     void SetUpDirection(b2Vec2 direction);

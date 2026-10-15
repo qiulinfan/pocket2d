@@ -157,6 +157,9 @@ public:
     const std::string &GetLastRuntimeActorError() const { return last_runtime_actor_error_; }
     // Internal publication hooks; failure after commit requires a fresh runtime.
     void NotifyRuntimeActorPublished(Actor &actor);
+    // Lua authoring flags affect hierarchy decisions immediately; Box2D changes
+    // are applied by the lifecycle bridge at an unlocked simulation boundary.
+    void NotifyRuntimePhysicsConfigurationChanged() { invalidateRuntimePhysicsHierarchyCache(); }
     void ReportRuntimeActorPublicationFailure(const std::string &message);
     std::uint64_t GetSceneLoadAttemptRevision() const { return scene_load_attempt_revision_; }
     bool RequiresSceneReset() const { return scene_reset_required_; }
