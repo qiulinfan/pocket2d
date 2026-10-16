@@ -798,6 +798,47 @@ void Engine::render() {
     }
 }
 
+SDL_Surface *Engine::RenderOffscreen(int width, int height) {
+    WorldScope world_scope(world_);
+    if (window != nullptr || borrows_presenter_ || !runtime_initialized_) {
+        SDL_SetError("offscreen rendering requires an initialized headless engine");
+        return nullptr;
+    }
+    if (width < 1 || height < 1 || width > 4096 || height > 4096) {
+        SDL_SetError("offscreen size must be within 1..4096");
+        return nullptr;
+    }
+    if (offscreen_surface_ == nullptr || offscreen_surface_->w != width || offscreen_surface_->h != height) {
+        // Cached textures belong to the renderer they were created with.
+        if (renderer != nullptr) {
+            Renderer::ClearCache();
+            SDL_DestroyRenderer(renderer);
+            renderer = nullptr;
+        }
+        SDL_DestroySurface(offscreen_surface_);
+        offscreen_surface_ = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA32);
+        if (offscreen_surface_ == nullptr) return nullptr;
+        renderer = SDL_CreateSoftwareRenderer(offscreen_surface_);
+        if (renderer == nullptr) {
+            SDL_DestroySurface(offscreen_surface_);
+            offscreen_surface_ = nullptr;
+            return nullptr;
+        }
+        Renderer::Init();
+    }
+    // render() consumes the queues; the next tick must see the same requests
+    // whether or not anyone looked.
+    auto &queues = world_.State<RenderQueueState>();
+    const RenderQueueState saved = queues;
+    render();
+    SDL_Surface *pixels = SDL_RenderReadPixels(renderer, nullptr);
+    queues = saved;
+    if (pixels == nullptr) return nullptr;
+    SDL_Surface *copy = SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(pixels);
+    return copy;
+}
+
 void Engine::clearFrame() {
     SDL_SetRenderDrawColor(renderer, ClampByteU8(config_.clear_color_r),
                            ClampByteU8(config_.clear_color_g),

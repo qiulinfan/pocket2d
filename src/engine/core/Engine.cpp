@@ -380,6 +380,10 @@ void Engine::ShutdownRuntime() {
         SDL_DestroyWindow(window);
         window = nullptr;
     }
+    if (offscreen_surface_ != nullptr) {
+        SDL_DestroySurface(offscreen_surface_);
+        offscreen_surface_ = nullptr;
+    }
     if (sdl_subsystems_ != 0) {
         SDL_QuitSubSystem(sdl_subsystems_);
         sdl_subsystems_ = 0;
@@ -449,12 +453,14 @@ void Engine::StepSimulation() {
     WorldScope world_scope(world_);
     POCKET_ZONE("Engine::StepSimulation");
     if (!IsRunning() || !runtime_initialized_) return;
+    // Draw requests from the previous tick stay queued until here so a
+    // headless observer can render the frame it just observed.
+    Renderer::DiscardFrameRequests();
     advanceGameplay();
     if(scene_reset_required_)return;
     // The visible path resolves final transforms in render(). Headless observers
     // need the same post-mutation world values even in scenes without physics.
     ComponentManager::ResolveTransformHierarchy();
-    Renderer::DiscardFrameRequests();
     finishGameplayFrame();
 }
 

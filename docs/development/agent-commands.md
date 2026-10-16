@@ -24,6 +24,7 @@ Access: `read`.
 | --- | --- | --- | --- |
 | `tilemaps` | object[] (max items 16) | no | At most 16 queries and 256 cells in total. |
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
+| `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
 
 ## `step`
 
@@ -39,6 +40,7 @@ Access: `simulate`.
 | `events` | boolean \| array (max items 64) | no | Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped. |
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 | `actions` | object | no | Complete set of agent-held semantic actions declared in the project's actions.json (see describe.actions): true/false for buttons, a number in [-1, 1] for axes, [x, y] for 2D axes. Omit to keep the previous values; {} releases all. Combined with any bound key or mouse input. |
+| `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
 
 ## `run_until`
 
@@ -55,6 +57,7 @@ Access: `simulate`.
 | `events` | boolean \| array (max items 64) | no | Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped. |
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 | `actions` | object | no | Complete set of agent-held semantic actions declared in the project's actions.json (see describe.actions): true/false for buttons, a number in [-1, 1] for axes, [x, y] for 2D axes. Omit to keep the previous values; {} releases all. Combined with any bound key or mouse input. |
+| `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
 
 ## `reload_scripts`
 

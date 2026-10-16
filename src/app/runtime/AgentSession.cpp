@@ -16,6 +16,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include <SDL3/SDL.h>
+#include <SDL3_image/SDL_image.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -759,6 +760,65 @@ std::string WithEvents(const std::string &observation, const ReportedEvents &rep
     return buffer.GetString();
 }
 
+struct ImageRequest { int width = 0, height = 0; };
+
+std::optional<ImageRequest> ReadImageRequest(const rapidjson::Value &command) {
+    if (!command.HasMember("image")) return std::nullopt;
+    const auto &image = command["image"];
+    if (!image.IsObject() || !image.HasMember("width") || !image["width"].IsInt() ||
+        !image.HasMember("height") || !image["height"].IsInt() ||
+        image["width"].GetInt() < 1 || image["width"].GetInt() > 1920 ||
+        image["height"].GetInt() < 1 || image["height"].GetInt() > 1080)
+        throw std::invalid_argument("image needs integer width in [1, 1920] and height in [1, 1080]");
+    return ImageRequest{image["width"].GetInt(), image["height"].GetInt()};
+}
+
+std::string Base64(const unsigned char *data, std::size_t size) {
+    static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((size + 2) / 3 * 4);
+    for (std::size_t i = 0; i < size; i += 3) {
+        const std::uint32_t chunk = (std::uint32_t(data[i]) << 16) |
+            (i + 1 < size ? std::uint32_t(data[i + 1]) << 8 : 0) | (i + 2 < size ? data[i + 2] : 0);
+        out += kAlphabet[(chunk >> 18) & 63];
+        out += kAlphabet[(chunk >> 12) & 63];
+        out += i + 1 < size ? kAlphabet[(chunk >> 6) & 63] : '=';
+        out += i + 2 < size ? kAlphabet[chunk & 63] : '=';
+    }
+    return out;
+}
+
+std::string WithImage(Engine &engine, const std::string &observation, const ImageRequest &request) {
+    SDL_Surface *surface = engine.RenderOffscreen(request.width, request.height);
+    if (surface == nullptr) throw std::runtime_error(std::string("offscreen render failed: ") + SDL_GetError());
+    SDL_IOStream *stream = SDL_IOFromDynamicMem();
+    const bool saved = stream != nullptr && IMG_SavePNG_IO(surface, stream, false);
+    SDL_DestroySurface(surface);
+    if (!saved) {
+        if (stream) SDL_CloseIO(stream);
+        throw std::runtime_error(std::string("PNG encoding failed: ") + SDL_GetError());
+    }
+    const auto size = static_cast<std::size_t>(SDL_TellIO(stream));
+    const auto *bytes = static_cast<const unsigned char *>(SDL_GetPointerProperty(
+        SDL_GetIOProperties(stream), SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER, nullptr));
+    const std::string encoded = bytes ? Base64(bytes, size) : std::string();
+    SDL_CloseIO(stream);
+    if (!bytes) throw std::runtime_error("PNG encoding produced no data");
+    rapidjson::Document response;
+    response.Parse(observation.data(), observation.size());
+    auto &allocator = response.GetAllocator();
+    rapidjson::Value image(rapidjson::kObjectType);
+    image.AddMember("width", request.width, allocator);
+    image.AddMember("height", request.height, allocator);
+    image.AddMember("format", "png", allocator);
+    image.AddMember("encoding", "base64", allocator);
+    image.AddMember("data", rapidjson::Value(encoded.c_str(), static_cast<rapidjson::SizeType>(encoded.size()), allocator), allocator);
+    response.AddMember("image", image, allocator);
+    rapidjson::StringBuffer buffer;
+    Writer writer(buffer); response.Accept(writer);
+    return buffer.GetString();
+}
+
 struct RunSummary {
     const char *reason;
     int frames;
@@ -915,6 +975,15 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 }
             }
             const ActorSelection *selected = selection ? &*selection : nullptr;
+            std::optional<ImageRequest> image;
+            if (name == "observe" || name == "step" || name == "run_until") {
+                try {
+                    image = ReadImageRequest(command);
+                } catch (const std::invalid_argument &error) {
+                    EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
+                    continue;
+                }
+            }
             if (name == "reset") {
                 if (command.HasMember("seed")) {
                     if (!command["seed"].IsUint()) throw std::runtime_error("seed must be uint32");
@@ -1017,9 +1086,12 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 throw std::runtime_error(engine->GetLastRuntimeActorError());
             if (name == "observe" && command.HasMember("tilemaps")) {
                 const auto queries = ReadTileQueries(command["tilemaps"]);
-                EmitResponse(responses, Observe(*engine, seed, &queries, selected), request_id);
+                std::string observation = Observe(*engine, seed, &queries, selected);
+                if (image) observation = WithImage(*engine, observation, *image);
+                EmitResponse(responses, observation, request_id);
             } else {
                 std::string observation = Observe(*engine, seed, nullptr, selected);
+                if (image) observation = WithImage(*engine, observation, *image);
                 if (run_summary)
                     observation = WithRunResult(observation, run_summary->reason, run_summary->frames,
                                                 run_summary->condition,

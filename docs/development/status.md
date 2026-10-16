@@ -94,6 +94,16 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   pass in Debug, Release and ASan/UBSan. Not yet done: snapshot/branching,
   SyncTest-style rollback checks, multi-World handles over MCP, and an external
   coding agent completing an authoring task through MCP.
+- Agent observations and actions: `step`/`run_until` can stream published
+  events with bounded payloads; `observe`/`step`/`run_until` can select actors
+  by name, UID, component type and region, and attach a headless PNG rendered
+  by the software renderer that matches graphical mode pixel for pixel.
+  Projects may declare semantic actions in `actions.json`, read in Lua through
+  `Input.GetAction*` and set directly by agents. Scenario files and the
+  standard-library Gymnasium-style Python client run three two_world_village
+  tasks (harvest, defend a wave, close the route) solved by scripted key
+  policies in CTest. Not yet done: vectorized and multi-agent environments,
+  game-declared observation functions, and LLM-player evaluation.
 
 ## Completed and verified in this slice
 

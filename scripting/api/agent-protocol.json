@@ -248,6 +248,26 @@
         ]
       },
       "maxProperties": 256
+    },
+    "image": {
+      "type": "object",
+      "description": "Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:\"png\", encoding:\"base64\", data}. Rendering does not change the simulation.",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1920
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1080
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ]
     }
   },
   "commands": [
@@ -277,6 +297,9 @@
           },
           "select": {
             "$ref": "#/definitions/selection"
+          },
+          "image": {
+            "$ref": "#/definitions/image"
           }
         }
       }
@@ -308,6 +331,9 @@
           },
           "actions": {
             "$ref": "#/definitions/actions"
+          },
+          "image": {
+            "$ref": "#/definitions/image"
           }
         }
       }
@@ -346,6 +372,9 @@
           },
           "actions": {
             "$ref": "#/definitions/actions"
+          },
+          "image": {
+            "$ref": "#/definitions/image"
           }
         },
         "required": [

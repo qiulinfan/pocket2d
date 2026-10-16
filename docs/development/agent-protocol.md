@@ -108,6 +108,14 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   `min_x/min_y/max_x/max_y` box, and the filters combine. `limit` keeps the
   lowest UIDs and `components:false` omits component properties. Selected
   responses add `actors_matched`, the count before `limit`.
+- `observe`, `step` and `run_until` accept `image: {width, height}` (at most
+  1920×1080). The worker renders the current frame with SDL's software renderer
+  into an offscreen surface, from the game camera with the configured window
+  size scaled to the requested size, and adds `image` with `format: "png"`,
+  `encoding: "base64"` and `data`. Lua draw calls from the last tick are
+  included. Rendering never changes the simulation, and at the window size
+  the frame matches graphical mode with the software renderer pixel for pixel
+  (`agent_image_test`).
 - `reload_scripts` takes 1..64 distinct registered Lua component `types` and
   stages their known source files as one batch. Success returns a same-frame
   observation plus `reload.types`, `instances_updated` and empty diagnostics.

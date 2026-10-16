@@ -19,6 +19,7 @@
 struct SDL_Window;
 struct SDL_Renderer;
 struct SDL_Texture;
+struct SDL_Surface;
 union SDL_Event;
 
 class Engine
@@ -35,6 +36,8 @@ private:
     std::uint32_t sdl_subsystems_ = 0;
     // Set by InitializeEmbedded: window and renderer belong to another Engine.
     bool borrows_presenter_ = false;
+    // Headless offscreen rendering: a software renderer drawing into this surface.
+    SDL_Surface *offscreen_surface_ = nullptr;
 
     // runtime actor container for the current scene
     std::list<Actor> actors;
@@ -212,6 +215,11 @@ public:
     int GetRuntimeRenderTargetWidth() const;
     int GetRuntimeRenderTargetHeight() const;
     // Render one editor-only scene preview using an independent camera.
+    // Headless engines only: draws the current world through the software
+    // renderer into a width x height surface and returns an RGBA32 copy the
+    // caller destroys, or nullptr with SDL_GetError(). Draw requests queued by
+    // the last tick are preserved, so observing never changes the next frame.
+    SDL_Surface *RenderOffscreen(int width, int height);
     SDL_Texture *RenderScenePreview(float camera_x, float camera_y,
                                     float zoom_factor, int preview_width,
                                     int preview_height,
