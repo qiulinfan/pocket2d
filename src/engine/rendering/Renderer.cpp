@@ -11,6 +11,8 @@
 #include "glm/glm.hpp"
 #include "SDL3_image/SDL_image.h"
 #include <algorithm>
+#include <mutex>
+#include <deque>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -395,6 +397,59 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
     return &inserted.first->second;
 }
 
+namespace {
+struct ImageNames {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::uint32_t> ids;
+    std::deque<std::string> names; // id - 1 -> name; deque keeps references stable
+};
+ImageNames &InternedImages() {
+    static ImageNames images;
+    return images;
+}
+} // namespace
+
+std::uint32_t Renderer::InternImage(const std::string &image_name) {
+    auto &images = InternedImages();
+    const std::lock_guard lock(images.mutex);
+    const auto [found, inserted] = images.ids.try_emplace(image_name, 0);
+    if (inserted) {
+        images.names.push_back(image_name);
+        found->second = static_cast<std::uint32_t>(images.names.size());
+    }
+    return found->second;
+}
+
+void Renderer::SyncImageCacheRoot() {
+    const auto &resources_root = ResourcePath::MutableResourcesRootPath().native();
+    if (image_cache_resources_root.empty()) {
+        image_cache_resources_root = resources_root;
+    } else if (image_cache_resources_root != resources_root) {
+        ClearImageTextureCache();
+        image_cache_resources_root = resources_root;
+    }
+}
+
+Renderer::CachedImageTexture *Renderer::LoadTextureResource(const ImageDrawRequest &request,
+                                                            SDL_Renderer *renderer) {
+    if (request.image_id == 0) return LoadTextureResource(request.image_name, renderer);
+    const std::size_t index = request.image_id - 1;
+    if (index < image_cache_by_id.size() && image_cache_by_id[index] != nullptr) return image_cache_by_id[index];
+    std::string name;
+    {
+        auto &images = InternedImages();
+        const std::lock_guard lock(images.mutex);
+        if (index >= images.names.size()) return nullptr;
+        name = images.names[index];
+    }
+    CachedImageTexture *cached = LoadTextureResource(name, renderer);
+    if (cached != nullptr) {
+        if (image_cache_by_id.size() <= index) image_cache_by_id.resize(index + 1, nullptr);
+        image_cache_by_id[index] = cached;
+    }
+    return cached;
+}
+
 SDL_Texture *Renderer::LoadTexture(const std::string &image_name,
                                    SDL_Renderer *renderer) {
     CachedImageTexture *cached = LoadTextureResource(image_name, renderer);
@@ -481,6 +536,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
         return;
     }
 
+    SyncImageCacheRoot();
     Queues().scene_draw_requests.erase(
         std::remove_if(Queues().scene_draw_requests.begin(), Queues().scene_draw_requests.end(),
                        ShouldDiscardSceneRequest),
@@ -506,8 +562,9 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
     const auto render_scene_request = [&](const ImageDrawRequest &request) {
         float texture_w = 0.0f;
         float texture_h = 0.0f;
-        SDL_Texture *texture =
-            LoadTexture(request.image_name, renderer, &texture_w, &texture_h);
+        const CachedImageTexture *cached = LoadTextureResource(request, renderer);
+        SDL_Texture *texture = cached == nullptr ? nullptr : cached->texture;
+        if (cached != nullptr) { texture_w = cached->width; texture_h = cached->height; }
         if (texture == nullptr) return;
 
         SDL_FRect source_rect;
@@ -598,8 +655,9 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
         const ImageDrawRequest &request = queues.ui_draw_requests[OrderIndex(key)];
         float texture_w = 0.0f;
         float texture_h = 0.0f;
-        SDL_Texture *texture =
-            LoadTexture(request.image_name, renderer, &texture_w, &texture_h);
+        const CachedImageTexture *cached = LoadTextureResource(request, renderer);
+        SDL_Texture *texture = cached == nullptr ? nullptr : cached->texture;
+        if (cached != nullptr) { texture_w = cached->width; texture_h = cached->height; }
         if (texture == nullptr) continue;
 
         SDL_FRect source_rect;
@@ -718,6 +776,7 @@ void Renderer::RenderAndClearAllPixels(SDL_Renderer *renderer) {
 
 // Clear resource caches and per-frame draw queues.
 void Renderer::ClearImageTextureCache() {
+    image_cache_by_id.clear();
     for (auto &entry : image_cache) {
         if (entry.second.texture != nullptr) {
             SDL_DestroyTexture(entry.second.texture);

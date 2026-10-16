@@ -120,6 +120,12 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   thread CPU p50 about 6.3 ms before both changes, 4.4–4.5 ms after; the
   native tilemap path 0.30 → 0.19–0.21 ms. Wall time stays at the ~8 ms
   display pacing floor.
+- Sprite draw requests carry an interned image id instead of a copied name,
+  textures are found by id, and per-frame spritesheet/scene values are read
+  once per frame. Six interleaved Release runs, 65,536 sprites, `gpu`
+  renderer, main-thread CPU median: fixed 4.03 → 3.74 ms, scrolling 4.65 →
+  4.04 ms. A further attempt to cache actor and component pointers in the
+  per-kind lists showed no measurable gain and was not kept.
 
 ## Completed and verified in this slice
 

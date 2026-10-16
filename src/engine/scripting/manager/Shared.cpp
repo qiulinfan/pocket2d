@@ -343,6 +343,7 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
     // Sorting-order ties must preserve authored scene order, not hash-table
     // iteration order. This also makes overlapping fractional pixel edges
     // deterministic across the SpriteRenderer and Tilemap submission paths.
+    const SpriteRenderer::DrawContext context = SpriteRenderer::CurrentDrawContext();
     for (Actor::UID uid : ActorsWithNative(runtime, NativeKind::SpriteRenderer)) {
         auto components_it = runtime.actor_components.find(uid);
         if (components_it == runtime.actor_components.end()) continue;
@@ -371,7 +372,7 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
                 has_pose = ResolveSpritePose(runtime, uid, x, y, rotation);
                 pose_resolved = true;
             }
-            if (has_pose) sprite_renderer->QueueDraw(x, y, rotation);
+            if (has_pose) sprite_renderer->QueueDraw(x, y, rotation, context);
         }
     }
 }

@@ -35,13 +35,26 @@ void SpriteRenderer::SetSpriteCell(int row, int column) {
     sprite_column = std::max(column, 1);
 }
 
+SpriteRenderer::DrawContext SpriteRenderer::CurrentDrawContext() {
+    return {SpritesheetConfig::Revision(), &Scene::GetActiveSceneSubdirectory()};
+}
+
 void SpriteRenderer::QueueDraw(float world_x, float world_y, float rotation_degrees) const {
+    QueueDraw(world_x, world_y, rotation_degrees, CurrentDrawContext());
+}
+
+void SpriteRenderer::QueueDraw(float world_x, float world_y, float rotation_degrees,
+                               const DrawContext &context) const {
     if (!enabled || actor == nullptr) return;
     const std::string &image = animation_pose_ ? animation_pose_->image : sprite;
     if (image.empty()) return;
+    if (drawn_image_id_ == 0 || drawn_image_ != image) {
+        drawn_image_ = image;
+        drawn_image_id_ = Renderer::InternImage(image);
+    }
 
     ImageDrawRequest request;
-    request.image_name = image;
+    request.image_id = drawn_image_id_;
     request.x = world_x;
     request.y = world_y;
     request.rotation_degrees = rotation_degrees;
@@ -60,13 +73,12 @@ void SpriteRenderer::QueueDraw(float world_x, float world_y, float rotation_degr
         request.sprite_row = animation_pose_->row;
         request.sprite_column = animation_pose_->column;
     } else {
-        const std::uint64_t revision = SpritesheetConfig::Revision();
-        const auto &subdirectory = Scene::GetActiveSceneSubdirectory().native();
-        if (grid_cache_.revision != revision || grid_cache_.sprite != sprite ||
+        const auto &subdirectory = context.scene_subdirectory->native();
+        if (grid_cache_.revision != context.spritesheet_revision || grid_cache_.sprite != sprite ||
             grid_cache_.subdirectory != subdirectory) {
             const SpritesheetGridSpec grid_spec =
-                SpritesheetConfig::ReadForImageResource(sprite, Scene::GetActiveSceneSubdirectory());
-            grid_cache_ = {revision, sprite, subdirectory, std::max(grid_spec.rows, 1),
+                SpritesheetConfig::ReadForImageResource(sprite, *context.scene_subdirectory);
+            grid_cache_ = {context.spritesheet_revision, sprite, subdirectory, std::max(grid_spec.rows, 1),
                            std::max(grid_spec.columns, 1)};
         }
         request.spritesheet_rows = grid_cache_.rows;

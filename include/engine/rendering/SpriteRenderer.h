@@ -53,6 +53,13 @@ public:
     // Rigidbody. This runs during the render phase, so editor frozen frames
     // still show sprites.
     void QueueDraw(float world_x, float world_y, float rotation_degrees) const;
+    // Per-frame values shared by every sprite, read once by the caller.
+    struct DrawContext {
+        std::uint64_t spritesheet_revision = 0;
+        const std::filesystem::path *scene_subdirectory = nullptr;
+    };
+    static DrawContext CurrentDrawContext();
+    void QueueDraw(float world_x, float world_y, float rotation_degrees, const DrawContext &context) const;
 
 private:
     std::optional<AnimationPose> animation_pose_;
@@ -68,6 +75,9 @@ private:
         int columns = 1;
     };
     mutable GridCache grid_cache_;
+    // Interned id of the last drawn image name (sprite or animation pose).
+    mutable std::string drawn_image_;
+    mutable std::uint32_t drawn_image_id_ = 0;
 };
 
 #endif

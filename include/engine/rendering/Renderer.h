@@ -16,6 +16,9 @@ struct ImageDrawRequest {
     // basic image name and world-space transform
     // 基本图片名和世界坐标变换
     std::string image_name;
+    // Renderer::InternImage id; when nonzero it names the image instead of
+    // image_name, so per-frame requests need not copy strings.
+    std::uint32_t image_id = 0;
     float x = 0.0f;
     float y = 0.0f;
     float rotation_degrees = 0.0f;
@@ -87,6 +90,8 @@ public:
 
     // resource loading and draw queue entry points
     // 资源加载和绘制队列入口
+    // A stable, process-wide nonzero id for an image name. Thread-safe.
+    static std::uint32_t InternImage(const std::string &image_name);
     static SDL_Texture *LoadTexture(const std::string &image_name,
                                     SDL_Renderer *renderer);
     static SDL_Texture *LoadTexture(const std::string &image_name,
@@ -121,6 +126,9 @@ private:
 
     static CachedImageTexture *LoadTextureResource(
         const std::string &image_name, SDL_Renderer *renderer);
+    static CachedImageTexture *LoadTextureResource(const ImageDrawRequest &request, SDL_Renderer *renderer);
+    // Clears the texture cache when the project root changed; once per frame.
+    static void SyncImageCacheRoot();
     static void ClearImageTextureCache();
     static TTF_Font *GetFont(const std::string &font_name, int size);
     static void PruneTextCache();
@@ -139,6 +147,8 @@ private:
     static inline bool initialized = false;
     static inline std::filesystem::path::string_type image_cache_resources_root;
     static inline std::unordered_map<std::string, CachedImageTexture> image_cache;
+    // InternImage id -> image_cache entry, filled on first use; render thread only.
+    static inline std::vector<CachedImageTexture *> image_cache_by_id;
     static inline std::unordered_map<std::string, std::unordered_map<int, TTF_Font *>>
         font_cache;
     static inline std::unordered_map<std::string, CachedTextTexture> text_cache;
