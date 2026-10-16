@@ -3,6 +3,7 @@
 #include "scene/Actor.h"
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <map>
 #include <queue>
 #include <set>
@@ -253,6 +254,11 @@ Vector2 MoveCharacter(Rigidbody &body, const Vector2 &delta) {
     return {position.x - start.x, position.y - start.y};
 }
 
+// A step into a clearance cell costs this many times a free step, so a path
+// from or to the margin crosses it by the shortest way instead of running along
+// the obstacle, where a walker wider than a point snags.
+constexpr float kClearanceStepCost = 4.0f;
+
 std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell, int max_nodes, float clearance,
                               const std::function<PathCell(float, float)> &occupancy) {
     Finite(from, "path start must be finite");
@@ -310,7 +316,8 @@ std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell
                 if (!passable(next)) continue;
                 if (dx != 0 && dy != 0 && (!passable({current.cell.first + dx, current.cell.second}) ||
                                            !passable({current.cell.first, current.cell.second + dy}))) continue;
-                const float g = current.g + (dx != 0 && dy != 0 ? 1.41421356f : 1.0f);
+                const float step = dx != 0 && dy != 0 ? 1.41421356f : 1.0f;
+                const float g = current.g + (occupied(next) == PathCell::Clearance ? step * kClearanceStepCost : step);
                 const auto known = cost.find(next);
                 if (known != cost.end() && known->second <= g) continue;
                 cost[next] = g;
@@ -323,6 +330,60 @@ std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell
     std::reverse(path.begin(), path.end());
     if (best == goal && !path.empty()) path.back() = to;
     return path;
+}
+
+std::vector<int> PathRegions(const std::vector<Vector2> &points, float cell, int max_nodes, float clearance,
+                             const std::function<PathCell(float, float)> &occupancy) {
+    Positive(cell, "path cell size must be positive and finite");
+    Require(max_nodes >= 1 && max_nodes <= 1000000, "path max_nodes must be in [1, 1000000]");
+    Require(points.size() <= 1024, "path regions take at most 1024 points");
+    using Cell = std::pair<int, int>;
+    std::vector<Cell> seeds;
+    for (const Vector2 &p : points) {
+        Finite(p, "path region point must be finite");
+        seeds.push_back(Cell{static_cast<int>(std::floor(p.x / cell)), static_cast<int>(std::floor(p.y / cell))});
+    }
+    // Cells within the clearance margin of a point, where clearance cells pass.
+    const int margin = static_cast<int>(std::ceil(std::max(clearance, 0.0f) / cell)) + 1;
+    std::set<Cell> near;
+    for (const Cell &seed : seeds)
+        for (int dy = -margin; dy <= margin; ++dy)
+            for (int dx = -margin; dx <= margin; ++dx) near.insert({seed.first + dx, seed.second + dy});
+    const std::set<Cell> seed_cells(seeds.begin(), seeds.end());
+    std::map<Cell, PathCell> occupancy_cache;
+    const auto passable = [&](const Cell &c) {
+        if (seed_cells.count(c)) return true;
+        auto found = occupancy_cache.find(c);
+        if (found == occupancy_cache.end())
+            found = occupancy_cache.emplace(c, occupancy((c.first + 0.5f) * cell, (c.second + 0.5f) * cell)).first;
+        return found->second == PathCell::Free || (found->second == PathCell::Clearance && near.count(c) > 0);
+    };
+    std::map<Cell, int> label_of;
+    std::vector<int> labels(points.size(), 0);
+    int next_label = 0;
+    for (std::size_t i = 0; i < seeds.size(); ++i) {
+        const auto known = label_of.find(seeds[i]);
+        if (known != label_of.end()) { labels[i] = known->second; continue; }
+        const int label = ++next_label;
+        labels[i] = label;
+        std::deque<Cell> queue{seeds[i]};
+        label_of[seeds[i]] = label;
+        for (int expanded = 0; !queue.empty() && expanded < max_nodes; ++expanded) {
+            const Cell current = queue.front();
+            queue.pop_front();
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if (dx == 0 && dy == 0) continue;
+                    const Cell next{current.first + dx, current.second + dy};
+                    if (label_of.count(next) || !passable(next)) continue;
+                    if (dx != 0 && dy != 0 && (!passable({current.first + dx, current.second}) ||
+                                               !passable({current.first, current.second + dy}))) continue;
+                    label_of[next] = label;
+                    queue.push_back(next);
+                }
+        }
+    }
+    return labels;
 }
 
 } // namespace PhysicsQueries

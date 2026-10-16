@@ -64,7 +64,11 @@ struct Fixture {
           {"uid":8,"name":"mover","components":{"transform":{"type":"Transform","x":28,"y":5},"body":{"type":"Rigidbody","body_type":"kinematic","x":28,"y":5,"has_trigger":false,"collider_type":"circle","radius":0.4}}},
           {"uid":9,"name":"terrain","components":{"map":{"type":"Tilemap","map_resource":"floor.tilemap.json"},"transform":{"type":"Transform"}}},
           {"uid":10,"name":"boxer","components":{"transform":{"type":"Transform","x":5,"y":9.1},"body":{"type":"Rigidbody","body_type":"kinematic","x":5,"y":9.1,"has_trigger":false,"collider_type":"box","width":0.8,"height":1.6}}},
-          {"uid":11,"name":"pillar","components":{"body":{"type":"Rigidbody","body_type":"static","x":10,"y":5,"has_trigger":false,"width":1,"height":6}}}
+          {"uid":11,"name":"pillar","components":{"body":{"type":"Rigidbody","body_type":"static","x":10,"y":5,"has_trigger":false,"width":1,"height":6}}},
+          {"uid":12,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":48,"y":5,"has_trigger":false,"width":2,"height":8}}},
+          {"uid":13,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":52,"y":5,"has_trigger":false,"width":2,"height":8}}},
+          {"uid":14,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":50,"y":2,"has_trigger":false,"width":6,"height":2}}},
+          {"uid":15,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":50,"y":8,"has_trigger":false,"width":6,"height":2}}}
         ]})";
     }
     ~Fixture() { ResourcePath::SetResourcesRootPath(previous); std::error_code error; fs::remove_all(root, error); }
@@ -180,6 +184,24 @@ void Run() {
       for _,p in ipairs(past) do
         assert(not (p.x>9.5 and p.x<10.5 and p.y>2 and p.y<8),'path never enters the pillar')
       end
+      -- from inside the margin the path steps out at once instead of hugging the pillar's face
+      local hug=Physics.FindPath(Vector2(9.2,5),Vector2(9.2,9.5),0.25,0.4,20000)
+      assert(#hug>0 and math.abs(hug[#hug].y-9.5)<1e-5,'path from the margin reaches the goal past the pillar end')
+      local close=0
+      for i=1,#hug-1 do if hug[i].x>9.1 and hug[i].y<8.3 then close=close+1 end end
+      assert(close<=1,'path leaves the clearance margin at once: '..close..' waypoints along the face')
+      -- connected regions: one flood per region instead of a path per pair of points
+      local r=Physics.PathRegions({Vector2(8,5),Vector2(12,5),Vector2(50,5),Vector2(56,5),Vector2(50.4,5.2)},1,0.2,20000)
+      assert(#r==5 and r[1]==1 and r[2]==1,'points around the pillar share a region')
+      assert(r[3]==2 and r[5]==2,'the walled pen is a region of its own')
+      assert(r[4]==1,'outside the pen, past the tile wall, is the first region')
+      local into=Physics.FindPath(Vector2(56,5),Vector2(50,5),1,0.2,20000)
+      assert(#into==0 or into[#into].x~=50,'FindPath agrees: it cannot enter the pen')
+      local cut=Physics.PathRegions({Vector2(8,5),Vector2(12,5)},0.5,0.2,3)
+      assert(cut[1]==1 and cut[2]==2,'a node limit splits a region instead of joining')
+      assert(#Physics.PathRegions({},1,0.2,10)==0,'no points, no labels')
+      ok=pcall(function() Physics.PathRegions({1,2},1,0.2,10) end); assert(not ok,'points must be Vector2 values')
+      ok=pcall(function() Physics.PathRegions({Vector2(0,0)},0,0.2,10) end); assert(not ok,'the cell size must be positive')
       -- slide along the 20-cell floor top
       SLIDER:SetVelocity(Vector2(8,0))
     )");

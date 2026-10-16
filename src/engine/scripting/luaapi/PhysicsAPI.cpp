@@ -10,7 +10,9 @@
 #include "LuaBridge/detail/ClassInfo.h"
 #include "scripting/LuaBoundary.h"
 #include "RawMetamethod.h"
+#include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace {
@@ -184,9 +186,9 @@ Vector2 MoveCharacter(Rigidbody *body, const Vector2 &delta) {
 // Static colliders and solid tilemap cells block; movers and triggers do not.
 // `radius` is the walker's clearance: a cell centre within it of a static
 // collider is a clearance cell, one inside the collider is solid.
-luabridge::LuaRef FindPath(const Vector2 &from, const Vector2 &to, float cell, float radius, int max_nodes) {
+std::function<PhysicsQueries::PathCell(float, float)> PathOccupancy(const char *api, float radius) {
     if (!std::isfinite(radius) || radius < 0.0f || radius > 1e6f)
-        throw std::invalid_argument("Physics.FindPath radius must be finite and nonnegative");
+        throw std::invalid_argument(std::string(api) + " radius must be finite and nonnegative");
     const bool has_world = RayCast::HasPhysicsWorld();
     const auto touches_static = [](float x, float y, float r) {
         struct Hit { bool any = false; } hit;
@@ -202,16 +204,36 @@ luabridge::LuaRef FindPath(const Vector2 &from, const Vector2 &to, float cell, f
             }, &hit);
         return hit.any;
     };
-    const auto occupancy = [&](float x, float y) {
+    return [has_world, touches_static, radius](float x, float y) {
         using PhysicsQueries::PathCell;
         if (ComponentManager::IsSolidTileAt(x, y)) return PathCell::Solid;
         if (!has_world || !touches_static(x, y, std::max(radius, 0.001f))) return PathCell::Free;
         return radius > 0.001f && !touches_static(x, y, 0.001f) ? PathCell::Clearance : PathCell::Solid;
     };
+}
+
+luabridge::LuaRef FindPath(const Vector2 &from, const Vector2 &to, float cell, float radius, int max_nodes) {
+    const auto occupancy = PathOccupancy("Physics.FindPath", radius);
     const auto path = PhysicsQueries::FindPath(from, to, cell, max_nodes, radius, occupancy);
     lua_State *state = LuaState();
     luabridge::LuaRef result = luabridge::newTable(state);
     for (std::size_t i = 0; i < path.size(); ++i) result[static_cast<int>(i + 1)] = path[i];
+    return result;
+}
+
+luabridge::LuaRef PathRegions(const luabridge::LuaRef &points, float cell, float radius, int max_nodes) {
+    if (!points.isTable()) throw std::invalid_argument("Physics.PathRegions points must be an array of Vector2");
+    std::vector<Vector2> values;
+    for (int i = 1;; ++i) {
+        const luabridge::LuaRef point = points[i];
+        if (point.isNil()) break;
+        if (!point.isInstance<Vector2>()) throw std::invalid_argument("Physics.PathRegions points must be Vector2 values");
+        values.push_back(point.cast<Vector2>().value());
+    }
+    const auto labels = PhysicsQueries::PathRegions(values, cell, max_nodes, radius,
+                                                    PathOccupancy("Physics.PathRegions", radius));
+    luabridge::LuaRef result = luabridge::newTable(LuaState());
+    for (std::size_t i = 0; i < labels.size(); ++i) result[static_cast<int>(i + 1)] = labels[i];
     return result;
 }
 
@@ -246,6 +268,7 @@ void InjectPhysicsAPI() {
         .addFunction("SetGravity", &PhysicsQueries::SetGravity)
         .addFunction("MoveCharacter", &MoveCharacter)
         .addFunction("FindPath", &FindPath)
+        .addFunction("PathRegions", &PathRegions)
         .addFunction("ConnectDistance", &ConnectDistance)
         .addFunction("ConnectRevolute", &ConnectRevolute)
         .addFunction("ConnectWeld", &ConnectWeld)

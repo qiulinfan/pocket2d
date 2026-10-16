@@ -43,11 +43,24 @@ enum class PathCell { Free, Clearance, Solid };
 // cell centre. Solid cells never pass. Clearance cells pass only within
 // ceil(clearance / cell) + 1 cells of the start or the goal, so a walker
 // standing closer to a wall than its clearance can step out and a goal beside
-// a wall can be reached; the start cell is always free. Returns the waypoint centres after the start;
+// a wall can be reached; a step into one costs four free steps, so the path
+// leaves the margin at once rather than running along the wall. The start
+// cell is always free. Returns the waypoint centres after the start;
 // when the goal is not reached, the path to the expanded cell nearest the goal
 // (empty when none is nearer).
 std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell, int max_nodes, float clearance,
                               const std::function<PathCell(float, float)> &occupancy);
+
+// Connected walkable regions of `points` under FindPath's cell rules: one
+// 8-way flood (no corner cutting) per region, each expanding at most
+// `max_nodes` cells. Clearance cells pass within ceil(clearance / cell) + 1
+// cells of any point (each may be a path's start or goal); a point's own cell
+// is always free. Returns a 1-based label per point, numbered in order of first
+// appearance; equal labels share a region. A flood stopped by `max_nodes`
+// leaves the points it did not reach to floods of their own, which then stop at
+// its cells, so a node limit can split a region but never joins two.
+std::vector<int> PathRegions(const std::vector<Vector2> &points, float cell, int max_nodes, float clearance,
+                             const std::function<PathCell(float, float)> &occupancy);
 
 } // namespace PhysicsQueries
 

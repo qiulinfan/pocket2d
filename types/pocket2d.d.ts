@@ -357,6 +357,8 @@ declare namespace Physics {
     function MoveCharacter(this: void, body: Rigidbody, delta: Vector2): Vector2;
     /** Grid A* around static colliders and solid tiles; partial path when the goal is not reached. */
     function FindPath(this: void, from: Vector2, to: Vector2, cell: number, radius: number, max_nodes: number): (Vector2)[];
+    /** Labels the walkable region of each point under FindPath's cell rules; equal labels are connected. */
+    function PathRegions(this: void, points: (Vector2)[], cell: number, radius: number, max_nodes: number): (number)[];
     function ConnectDistance(this: void, a: Rigidbody, b: Rigidbody, anchor_a: Vector2, anchor_b: Vector2): Joint;
     function ConnectRevolute(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint;
     function ConnectWeld(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint;

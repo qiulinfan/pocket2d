@@ -2535,6 +2535,34 @@
           "description": "Grid A* around static colliders and solid tiles; partial path when the goal is not reached."
         },
         {
+          "name": "PathRegions",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "points",
+              "type": {
+                "array": "Vector2"
+              }
+            },
+            {
+              "name": "cell",
+              "type": "number"
+            },
+            {
+              "name": "radius",
+              "type": "number"
+            },
+            {
+              "name": "max_nodes",
+              "type": "integer"
+            }
+          ],
+          "returns": {
+            "array": "integer"
+          },
+          "description": "Labels the walkable region of each point under FindPath's cell rules; equal labels are connected."
+        },
+        {
           "name": "ConnectDistance",
           "call": "static",
           "parameters": [

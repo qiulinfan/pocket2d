@@ -471,6 +471,7 @@ Inventory = {}
 ---@field SetGravity fun(gravity: Vector2)
 ---@field MoveCharacter fun(body: Rigidbody, delta: Vector2): Vector2
 ---@field FindPath fun(from: Vector2, to: Vector2, cell: number, radius: number, max_nodes: integer): (Vector2)[]
+---@field PathRegions fun(points: (Vector2)[], cell: number, radius: number, max_nodes: integer): (integer)[]
 ---@field ConnectDistance fun(a: Rigidbody, b: Rigidbody, anchor_a: Vector2, anchor_b: Vector2): Joint
 ---@field ConnectRevolute fun(a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint
 ---@field ConnectWeld fun(a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint
