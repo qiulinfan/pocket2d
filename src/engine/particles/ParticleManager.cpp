@@ -1,5 +1,6 @@
 #include "particles/ParticleManager.h"
 #include "core/TaskExecutor.h"
+#include "core/World.h"
 #include "rendering/Renderer.h"
 #include "rendering/SDLRenderHelper.h"
 #include <algorithm>
@@ -47,6 +48,10 @@ bool IsPivotBoundOutsideViewport(const SDL_FRect &dst, const SDL_FPoint &pivot,
 }
 
 } // namespace
+
+ParticleState &ParticleManager::State() {
+    return World::Current().GetParticleState();
+}
 
 namespace {
 constexpr double kStateLimit = static_cast<double>(std::numeric_limits<float>::max()) / 256.0;
@@ -100,19 +105,19 @@ void ParticleManager::ValidateParticle(const ParticleEmitterConfig &config, cons
 }
 
 void ParticleManager::ValidateSpawnRequest(int emitter_id, const ParticleSpawnRequest &request) {
-    if (IsEmitterAlive(emitter_id)) ValidateParticle(emitters[emitter_id].config, request);
+    if (IsEmitterAlive(emitter_id)) ValidateParticle(State().emitters[emitter_id].config, request);
 }
 
 void ParticleManager::RequireSpawnCapacity(int emitter_id, size_t count) {
     if (!IsEmitterAlive(emitter_id)) return;
-    RequireParticle(count <= kMaxParticlesPerEmitter - emitters[emitter_id].active_count,
+    RequireParticle(count <= kMaxParticlesPerEmitter - State().emitters[emitter_id].active_count,
         "ParticleSystem live particle capacity exceeds 1000000");
 }
 
 void ParticleManager::ReserveSpawnCapacity(int emitter_id, size_t count) {
     if (!IsEmitterAlive(emitter_id)) return;
     RequireSpawnCapacity(emitter_id, count);
-    auto &emitter = emitters[emitter_id];
+    auto &emitter = State().emitters[emitter_id];
     emitter.EnsureParticleCapacity(emitter.active_count + count);
 }
 
@@ -151,19 +156,19 @@ void ParticleManager::EmitterSlot::EnsureParticleCapacity(size_t capacity) {
 // Effect: Create a new emitter and return its ID. Reuse free emitter slots if available.
 // 创建一个新的 emitter 并返回它的 ID. 如果有可用的空闲 emitter槽位, 则 reuse.
 int ParticleManager::CreateEmitter() {
-    if (!free_emitters.empty()) {
-        const int emitter_id = free_emitters.back();
-        free_emitters.pop_back();
-        emitters[emitter_id].active = true;
-        emitters[emitter_id].runtime_enabled = true;
-        emitters[emitter_id].ClearParticles();
+    if (!State().free_emitters.empty()) {
+        const int emitter_id = State().free_emitters.back();
+        State().free_emitters.pop_back();
+        State().emitters[emitter_id].active = true;
+        State().emitters[emitter_id].runtime_enabled = true;
+        State().emitters[emitter_id].ClearParticles();
         return emitter_id;
     }
 
-    emitters.emplace_back();
-    emitters.back().active = true;
-    emitters.back().runtime_enabled = true;
-    return static_cast<int>(emitters.size()) - 1;
+    State().emitters.emplace_back();
+    State().emitters.back().active = true;
+    State().emitters.back().runtime_enabled = true;
+    return static_cast<int>(State().emitters.size()) - 1;
 }
 
 
@@ -206,9 +211,9 @@ void ParticleManager::EmitterSlot::ClearParticles() {
 void ParticleManager::DestroyEmitter(int emitter_id) {
     if (!IsEmitterAlive(emitter_id)) return;
 
-    emitters[emitter_id].active = false;
-    emitters[emitter_id].ClearParticles();
-    free_emitters.push_back(emitter_id);
+    State().emitters[emitter_id].active = false;
+    State().emitters[emitter_id].ClearParticles();
+    State().free_emitters.push_back(emitter_id);
 }
 
 
@@ -217,8 +222,8 @@ void ParticleManager::DestroyEmitter(int emitter_id) {
 // 检查一个 emitter 是否存活
 bool ParticleManager::IsEmitterAlive(int emitter_id) {
     if (emitter_id < 0) return false;
-    if (static_cast<size_t>(emitter_id) >= emitters.size()) return false;
-    return emitters[emitter_id].active;
+    if (static_cast<size_t>(emitter_id) >= State().emitters.size()) return false;
+    return State().emitters[emitter_id].active;
 }
 
 // emitter lifecycle
@@ -226,7 +231,7 @@ void ParticleManager::ConfigureEmitter(int emitter_id,
                                        const ParticleEmitterConfig &config) {
     if (!IsEmitterAlive(emitter_id)) return;
     ValidateEmitterConfig(config);
-    auto &emitter = emitters[emitter_id];
+    auto &emitter = State().emitters[emitter_id];
     // Reconfiguration is uncommon; validate live particles once here, never per update.
     ParticleSpawnRequest particle;
     for (size_t i = 0; i < emitter.is_active.size(); ++i) {
@@ -240,7 +245,7 @@ void ParticleManager::ConfigureEmitter(int emitter_id,
 void ParticleManager::SetEmitterRuntimeEnabled(int emitter_id,
                                                bool runtime_enabled) {
     if (!IsEmitterAlive(emitter_id)) return;
-    emitters[emitter_id].runtime_enabled = runtime_enabled;
+    State().emitters[emitter_id].runtime_enabled = runtime_enabled;
 }
 
 // emitter lifecycle
@@ -257,9 +262,9 @@ void ParticleManager::SpawnParticle(int emitter_id,
 
     RequireSpawnCapacity(emitter_id, 1);
     ValidateSpawnRequest(emitter_id, request);
-    EmitterSlot &emitter = emitters[emitter_id];
+    EmitterSlot &emitter = State().emitters[emitter_id];
     int image_id = request.image_id;
-    if (image_id < 0 || static_cast<size_t>(image_id) >= image_names.size()) {
+    if (image_id < 0 || static_cast<size_t>(image_id) >= State().image_names.size()) {
         image_id = InternImageName(request.image_name);
     }
     if (emitter.active_count == 0) {
@@ -326,7 +331,7 @@ void ParticleManager::SpawnParticle(int emitter_id,
 // spawn, simulate, queue, render
 void ParticleManager::Update(float dt) {
     bool has_large_emitter = false;
-    for (const EmitterSlot &emitter : emitters) {
+    for (const EmitterSlot &emitter : State().emitters) {
         if (emitter.active && emitter.runtime_enabled &&
             emitter.active_count >= kParallelParticleThreshold) {
             has_large_emitter = true;
@@ -340,7 +345,7 @@ void ParticleManager::Update(float dt) {
 
 void ParticleManager::Update(float dt, TaskExecutor *executor) {
     (void)dt;
-    for (EmitterSlot &emitter : emitters) {
+    for (EmitterSlot &emitter : State().emitters) {
         if (!emitter.active) continue;
         if (!emitter.runtime_enabled) continue;
 
@@ -422,8 +427,8 @@ void ParticleManager::Update(float dt, TaskExecutor *executor) {
 // Effect: Queue one particle batch per emitter when particles share render state.
 // Mixed render state falls back to the old per-particle request path.
 void ParticleManager::QueueRenderBatches() {
-    for (size_t emitter_id = 0; emitter_id < emitters.size(); ++emitter_id) {
-        const EmitterSlot &emitter = emitters[emitter_id];
+    for (size_t emitter_id = 0; emitter_id < State().emitters.size(); ++emitter_id) {
+        const EmitterSlot &emitter = State().emitters[emitter_id];
         if (!emitter.active) continue;
         if (!emitter.runtime_enabled) continue;
         if (emitter.active_count == 0) continue;
@@ -440,7 +445,7 @@ void ParticleManager::QueueRenderBatches() {
             if (!emitter.is_active[i]) continue;
 
             ImageDrawRequest request;
-            request.image_name = image_names[emitter.image_ids[i]];
+            request.image_name = State().image_names[emitter.image_ids[i]];
             request.x = emitter.pos_x[i];
             request.y = emitter.pos_y[i];
             request.rotation_degrees = emitter.rotation[i];
@@ -466,14 +471,14 @@ void ParticleManager::RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
     if (renderer == nullptr) return;
     if (!IsEmitterAlive(emitter_id)) return;
 
-    const EmitterSlot &emitter = emitters[static_cast<size_t>(emitter_id)];
+    const EmitterSlot &emitter = State().emitters[static_cast<size_t>(emitter_id)];
     if (!emitter.runtime_enabled) return;
     if (emitter.active_count == 0) return;
 
     float texture_w = 0.0f;
     float texture_h = 0.0f;
     SDL_Texture *texture = Renderer::LoadTexture(
-        image_names[emitter.shared_image_id], renderer, &texture_w, &texture_h);
+        State().image_names[emitter.shared_image_id], renderer, &texture_w, &texture_h);
     if (texture == nullptr) return;
 
     const float safe_zoom = (zoom_factor > 0.0f) ? zoom_factor : 1.0f;
@@ -554,20 +559,20 @@ void ParticleManager::RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
 // 清除所有 emitter 和相关数据. 这可以在切换场景或重置游戏时使用.
 void ParticleManager::Clear() {
     particle_executor.reset();
-    emitters.clear();
-    free_emitters.clear();
-    image_name_to_id.clear();
-    image_names.clear();
+    State().emitters.clear();
+    State().free_emitters.clear();
+    State().image_name_to_id.clear();
+    State().image_names.clear();
 }
 
 size_t ParticleManager::GetActiveParticleCount(int emitter_id) {
-    return IsEmitterAlive(emitter_id) ? emitters[emitter_id].active_count : 0;
+    return IsEmitterAlive(emitter_id) ? State().emitters[emitter_id].active_count : 0;
 }
 
 bool ParticleManager::GetParticleState(int emitter_id, size_t index,
                                        ParticleSpawnRequest &state) {
     if (!IsEmitterAlive(emitter_id)) return false;
-    const EmitterSlot &emitter = emitters[emitter_id];
+    const EmitterSlot &emitter = State().emitters[emitter_id];
     if (index >= emitter.is_active.size() || !emitter.is_active[index]) return false;
     state.x = emitter.pos_x[index];
     state.y = emitter.pos_y[index];
@@ -581,7 +586,7 @@ bool ParticleManager::GetParticleState(int emitter_id, size_t index,
     state.color_b = emitter.color_b[index];
     state.color_a = emitter.color_a[index];
     state.image_id = emitter.image_ids[index];
-    state.image_name = image_names[state.image_id];
+    state.image_name = State().image_names[state.image_id];
     state.sorting_order = emitter.sorting_orders[index];
     return true;
 }
@@ -594,14 +599,14 @@ int ParticleManager::InternImageName(const std::string &image_name) {
     const std::string resolved_name = image_name.empty()
                                           ? std::string(Renderer::kDefaultParticleTextureName)
                                           : image_name;
-    auto it = image_name_to_id.find(resolved_name);
-    if (it != image_name_to_id.end()) {
+    auto it = State().image_name_to_id.find(resolved_name);
+    if (it != State().image_name_to_id.end()) {
         return it->second;
     }
 
-    const int image_id = static_cast<int>(image_names.size());
-    image_names.push_back(resolved_name);
-    image_name_to_id.emplace(resolved_name, image_id);
+    const int image_id = static_cast<int>(State().image_names.size());
+    State().image_names.push_back(resolved_name);
+    State().image_name_to_id.emplace(resolved_name, image_id);
     return image_id;
 }
 

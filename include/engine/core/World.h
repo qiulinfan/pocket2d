@@ -1,6 +1,12 @@
 #ifndef ENGINE_CORE_WORLD_H
 #define ENGINE_CORE_WORLD_H
 
+#include <memory>
+
+struct InputState;
+struct ParticleState;
+struct RenderQueueState;
+
 // A World owns one simulation's mutable runtime state. Engine subsystems keep
 // their static entry points and resolve state through World::Current(), in the
 // same way Dear ImGui resolves its current context.
@@ -23,7 +29,19 @@ public:
     int frame_number = 0;
     bool frame_clock_initialized = false;
 
+    // Whether this World plays through the process audio device. Headless
+    // Worlds turn it off so they never touch the shared mixer.
+    bool audio_output_enabled = true;
+
+    InputState &GetInputState() { return *input_state_; }
+    ParticleState &GetParticleState() { return *particle_state_; }
+    RenderQueueState &GetRenderQueueState() { return *render_queue_state_; }
+
 private:
+    std::unique_ptr<InputState> input_state_;
+    std::unique_ptr<ParticleState> particle_state_;
+    std::unique_ptr<RenderQueueState> render_queue_state_;
+
     friend class WorldScope;
     static thread_local World *bound_;
 };

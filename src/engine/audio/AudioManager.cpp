@@ -1,4 +1,5 @@
 #include "audio/AudioManager.h"
+#include "core/World.h"
 #include "shared/resources/ResourcePath.h"
 #include "scene/Scene.h"
 #include <algorithm>
@@ -7,6 +8,13 @@
 #include <unordered_set>
 
 namespace {
+
+// The audio device and its caches are process-wide. Only Worlds that use audio
+// output touch them; headless Worlds never do, so they cannot stop or race the
+// presenting World's playback.
+bool UsesAudioOutput() {
+    return World::Current().audio_output_enabled;
+}
 
 std::unordered_set<std::string> g_audio_warning_keys;
 int g_audio_resource_warning_count = 0;
@@ -49,6 +57,8 @@ void LogAudioWarningOnce(const std::string &key, const std::string &message) {
 
 // initialize SDL_mixer once and reuse it after that
 bool AudioManager::Init() {
+    if (!UsesAudioOutput()) return false;
+
     if (initialized) return true;
     if (init_attempted) return false;
 
@@ -102,6 +112,8 @@ bool AudioManager::Init() {
 }
 
 void AudioManager::Shutdown() {
+    if (!UsesAudioOutput()) return;
+
     if (initialized) {
         StopAllPlayback();
     }
@@ -160,6 +172,8 @@ std::string AudioManager::ClipNameSansExtension(const std::string &audio_name) {
 
 // load audio by name and cache it
 MIX_Audio *AudioManager::LoadAudioClip(const std::string &audio_name) {
+    if (!UsesAudioOutput()) return nullptr;
+
     auto it = audio_cache.find(audio_name);
     if (it != audio_cache.end()) return it->second;
 
@@ -186,6 +200,8 @@ MIX_Audio *AudioManager::LoadAudioClip(const std::string &audio_name) {
 }
 
 MIX_Audio *AudioManager::LoadMusicTrack(const std::string &audio_name) {
+    if (!UsesAudioOutput()) return nullptr;
+
     auto it = music_cache.find(audio_name);
     if (it != music_cache.end()) return it->second;
 
@@ -212,16 +228,22 @@ MIX_Audio *AudioManager::LoadMusicTrack(const std::string &audio_name) {
 }
 
 bool AudioManager::HasAudioClip(const std::string &audio_name) {
+    if (!UsesAudioOutput()) return !FindAudioFile(audio_name).empty();
+
     if (audio_cache.find(audio_name) != audio_cache.end()) return true;
     return !FindAudioFile(audio_name).empty();
 }
 
 bool AudioManager::HasMusicTrack(const std::string &audio_name) {
+    if (!UsesAudioOutput()) return !FindAudioFile(audio_name).empty();
+
     if (music_cache.find(audio_name) != music_cache.end()) return true;
     return !FindAudioFile(audio_name).empty();
 }
 
 bool AudioManager::PreloadAudioClip(const std::string &audio_name) {
+    if (!UsesAudioOutput()) return false;
+
     if (!Init()) return false;
     if (audio_cache.find(audio_name) != audio_cache.end()) return true;
 
@@ -236,6 +258,8 @@ bool AudioManager::PreloadAudioClip(const std::string &audio_name) {
 }
 
 bool AudioManager::PreloadMusicTrack(const std::string &audio_name) {
+    if (!UsesAudioOutput()) return false;
+
     if (!Init()) return false;
     if (music_cache.find(audio_name) != music_cache.end()) return true;
 
@@ -252,6 +276,7 @@ bool AudioManager::PreloadMusicTrack(const std::string &audio_name) {
 // Play one named clip on the requested channel using the cached chunk.
 void AudioManager::PlayAudioClip(const std::string &audio_name, int channel,
                                  int loops) {
+    if (!UsesAudioOutput()) return;
     if (!initialized || !playback_enabled) return;
     MIX_Audio *chunk = LoadAudioClip(audio_name);
     if (chunk == nullptr) {
@@ -273,6 +298,7 @@ void AudioManager::PlayAudioClip(const std::string &audio_name, int channel,
 }
 
 void AudioManager::PlayMusicTrack(const std::string &audio_name, int loops) {
+    if (!UsesAudioOutput()) return;
     if (!initialized || !playback_enabled) return;
     if (IsMusicPlaying() && current_music_name == audio_name &&
         current_music_loops == loops) {
@@ -294,6 +320,8 @@ void AudioManager::PlayMusicTrack(const std::string &audio_name, int loops) {
 
 // Stop playback on one mixer channel, or all channels when channel == -1.
 void AudioManager::HaltChannel(int channel) {
+    if (!UsesAudioOutput()) return;
+
     if (!initialized) return;
     if (channel == -1) {
         for (MIX_Track *track : channels) MIX_StopTrack(track, 0);
@@ -304,6 +332,8 @@ void AudioManager::HaltChannel(int channel) {
 
 // Update mixer volume for one channel without touching the cached clip data.
 void AudioManager::SetVolume(int channel, int volume) {
+    if (!UsesAudioOutput()) return;
+
     if (!initialized) return;
     if (volume < 0) return; // The legacy negative-volume query never changed gain.
     const float gain = static_cast<float>(std::clamp(volume, 0, 128)) / 128.0f;
@@ -315,6 +345,8 @@ void AudioManager::SetVolume(int channel, int volume) {
 }
 
 bool AudioManager::IsChannelPlaying(int channel) {
+    if (!UsesAudioOutput()) return false;
+
     if (!initialized) return false;
     if (channel == -1) {
         return std::any_of(channels.begin(), channels.end(),
@@ -325,6 +357,8 @@ bool AudioManager::IsChannelPlaying(int channel) {
 }
 
 void AudioManager::HaltMusic() {
+    if (!UsesAudioOutput()) return;
+
     if (!initialized) return;
     MIX_StopTrack(music_track, 0);
     current_music_name.clear();
@@ -332,6 +366,8 @@ void AudioManager::HaltMusic() {
 }
 
 void AudioManager::SetMusicVolume(int volume) {
+    if (!UsesAudioOutput()) return;
+
     if (!initialized) return;
     if (volume < 0) return;
     MIX_SetTrackGain(music_track,
@@ -339,11 +375,15 @@ void AudioManager::SetMusicVolume(int volume) {
 }
 
 bool AudioManager::IsMusicPlaying() {
+    if (!UsesAudioOutput()) return false;
+
     if (!initialized) return false;
     return MIX_TrackPlaying(music_track);
 }
 
 void AudioManager::StopAllPlayback() {
+    if (!UsesAudioOutput()) return;
+
     if (!initialized) return;
     HaltChannel(-1);
     MIX_StopTrack(music_track, 0);
@@ -352,6 +392,8 @@ void AudioManager::StopAllPlayback() {
 }
 
 void AudioManager::SetPlaybackEnabled(bool enabled) {
+    if (!UsesAudioOutput()) return;
+
     playback_enabled = enabled;
     if (!playback_enabled) {
         StopAllPlayback();
@@ -359,14 +401,20 @@ void AudioManager::SetPlaybackEnabled(bool enabled) {
 }
 
 bool AudioManager::IsPlaybackEnabled() {
+    if (!UsesAudioOutput()) return false;
+
     return playback_enabled;
 }
 
 int AudioManager::GetAudioPlayFailureCount() {
+    if (!UsesAudioOutput()) return 0;
+
     return audio_play_failure_count;
 }
 
 int AudioManager::GetMusicPlayFailureCount() {
+    if (!UsesAudioOutput()) return 0;
+
     return music_play_failure_count;
 }
 

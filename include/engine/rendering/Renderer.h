@@ -71,6 +71,8 @@ struct ParticleBatchRequest {
     int sorting_order = 0;
 };
 
+struct RenderQueueState;
+
 class Renderer {
 public:
     // used when particles do not specify an image
@@ -139,11 +141,19 @@ private:
     static inline std::unordered_map<std::string, std::unordered_map<int, TTF_Font *>>
         font_cache;
     static inline std::unordered_map<std::string, CachedTextTexture> text_cache;
-    static inline std::vector<ImageDrawRequest> scene_draw_requests;
-    static inline std::vector<ParticleBatchRequest> scene_particle_batches;
-    static inline std::vector<ImageDrawRequest> ui_draw_requests;
-    static inline std::vector<PixelDrawRequest> pixel_draw_requests;
-    static inline std::vector<TextDrawRequest> text_draw_requests;
+    // Per-World draw queues; see RenderQueueState below. The resource caches
+    // above are process-wide and used only on the thread owning the renderer.
+    static RenderQueueState &Queues();
+};
+
+// Draw requests queued by one World's gameplay during a frame. Renderer's
+// static API reads and writes the queues of World::Current().
+struct RenderQueueState {
+    std::vector<ImageDrawRequest> scene_draw_requests;
+    std::vector<ParticleBatchRequest> scene_particle_batches;
+    std::vector<ImageDrawRequest> ui_draw_requests;
+    std::vector<PixelDrawRequest> pixel_draw_requests;
+    std::vector<TextDrawRequest> text_draw_requests;
 };
 
 #endif

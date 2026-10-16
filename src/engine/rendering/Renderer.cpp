@@ -1,4 +1,5 @@
 #include "rendering/Renderer.h"
+#include "core/World.h"
 #include "core/Engine.h"
 #include "rendering/SDLRenderHelper.h"
 #include "scripting/ComponentManager.h"
@@ -193,6 +194,10 @@ SDL_Texture *CreateMissingTexture(SDL_Renderer *renderer) {
 
 } // namespace
 
+RenderQueueState &Renderer::Queues() {
+    return World::Current().GetRenderQueueState();
+}
+
 void Renderer::PruneTextCache() {
     const Uint32 now = SDL_GetTicks();
 
@@ -254,7 +259,7 @@ void Renderer::Shutdown() {
         }
     }
     text_cache.clear();
-    text_draw_requests.clear();
+    Queues().text_draw_requests.clear();
 
     ClearCache();
 
@@ -399,24 +404,24 @@ SDL_Texture *Renderer::LoadTexture(const std::string &image_name,
 // resource loading and draw queue entry points
 void Renderer::QueueSceneImageDraw(const ImageDrawRequest &request) {
     if (ShouldDiscardSceneRequest(request)) return;
-    scene_draw_requests.push_back(request);
+    Queues().scene_draw_requests.push_back(request);
 }
 
 // resource loading and draw queue entry points
 void Renderer::QueueSceneParticleBatch(const ParticleBatchRequest &request) {
     if (request.emitter_id < 0) return;
-    scene_particle_batches.push_back(request);
+    Queues().scene_particle_batches.push_back(request);
 }
 
 // resource loading and draw queue entry points
 void Renderer::QueueUIImageDraw(const ImageDrawRequest &request) {
     if (ShouldDiscardUIRequest(request)) return;
-    ui_draw_requests.push_back(request);
+    Queues().ui_draw_requests.push_back(request);
 }
 
 // resource loading and draw queue entry points
 void Renderer::QueuePixelDraw(const PixelDrawRequest &request) {
-    pixel_draw_requests.push_back(request);
+    Queues().pixel_draw_requests.push_back(request);
 }
 
 // text draw helpers
@@ -424,15 +429,15 @@ void Renderer::DrawText(const std::string &text_content,
                         const std::string &font_name, int font_size,
                         SDL_Color font_color, int x, int y) {
     if (font_name.empty()) return;
-    text_draw_requests.push_back( {text_content, font_name, font_size, font_color, x, y});
+    Queues().text_draw_requests.push_back( {text_content, font_name, font_size, font_color, x, y});
 }
 
 void Renderer::DiscardFrameRequests() {
-    scene_draw_requests.clear();
-    scene_particle_batches.clear();
-    ui_draw_requests.clear();
-    pixel_draw_requests.clear();
-    text_draw_requests.clear();
+    Queues().scene_draw_requests.clear();
+    Queues().scene_particle_batches.clear();
+    Queues().ui_draw_requests.clear();
+    Queues().pixel_draw_requests.clear();
+    Queues().text_draw_requests.clear();
 }
 
 // Render one frame by flushing queued scene images, particles, text, and pixels.
@@ -459,32 +464,32 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                                        float output_scale_x,
                                        float output_scale_y) {
     if (renderer == nullptr) {
-        scene_draw_requests.clear();
-        scene_particle_batches.clear();
-        ui_draw_requests.clear();
+        Queues().scene_draw_requests.clear();
+        Queues().scene_particle_batches.clear();
+        Queues().ui_draw_requests.clear();
         return;
     }
 
-    scene_draw_requests.erase(
-        std::remove_if(scene_draw_requests.begin(), scene_draw_requests.end(),
+    Queues().scene_draw_requests.erase(
+        std::remove_if(Queues().scene_draw_requests.begin(), Queues().scene_draw_requests.end(),
                        ShouldDiscardSceneRequest),
-        scene_draw_requests.end());
-    ui_draw_requests.erase(
-        std::remove_if(ui_draw_requests.begin(), ui_draw_requests.end(),
+        Queues().scene_draw_requests.end());
+    Queues().ui_draw_requests.erase(
+        std::remove_if(Queues().ui_draw_requests.begin(), Queues().ui_draw_requests.end(),
                        ShouldDiscardUIRequest),
-        ui_draw_requests.end());
+        Queues().ui_draw_requests.end());
 
-    if (scene_draw_requests.size() > 1) {
-        std::stable_sort(scene_draw_requests.begin(), scene_draw_requests.end(),
+    if (Queues().scene_draw_requests.size() > 1) {
+        std::stable_sort(Queues().scene_draw_requests.begin(), Queues().scene_draw_requests.end(),
                          CompareImageRequests);
     }
-    if (scene_particle_batches.size() > 1) {
-        std::stable_sort(scene_particle_batches.begin(),
-                         scene_particle_batches.end(),
+    if (Queues().scene_particle_batches.size() > 1) {
+        std::stable_sort(Queues().scene_particle_batches.begin(),
+                         Queues().scene_particle_batches.end(),
                          CompareParticleBatchRequests);
     }
-    if (ui_draw_requests.size() > 1) {
-        std::stable_sort(ui_draw_requests.begin(), ui_draw_requests.end(),
+    if (Queues().ui_draw_requests.size() > 1) {
+        std::stable_sort(Queues().ui_draw_requests.begin(), Queues().ui_draw_requests.end(),
                          CompareImageRequests);
     }
 
@@ -559,28 +564,28 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                       safe_zoom * output_scale_y);
     size_t scene_request_index = 0;
     size_t particle_batch_index = 0;
-    while (scene_request_index < scene_draw_requests.size() ||
-           particle_batch_index < scene_particle_batches.size()) {
+    while (scene_request_index < Queues().scene_draw_requests.size() ||
+           particle_batch_index < Queues().scene_particle_batches.size()) {
         const bool should_render_scene_request =
-            (particle_batch_index >= scene_particle_batches.size()) ||
-            (scene_request_index < scene_draw_requests.size() &&
-             scene_draw_requests[scene_request_index].sorting_order <=
-                 scene_particle_batches[particle_batch_index].sorting_order);
+            (particle_batch_index >= Queues().scene_particle_batches.size()) ||
+            (scene_request_index < Queues().scene_draw_requests.size() &&
+             Queues().scene_draw_requests[scene_request_index].sorting_order <=
+                 Queues().scene_particle_batches[particle_batch_index].sorting_order);
 
         if (should_render_scene_request) {
-            render_scene_request(scene_draw_requests[scene_request_index]);
+            render_scene_request(Queues().scene_draw_requests[scene_request_index]);
             ++scene_request_index;
             continue;
         }
 
         ParticleManager::RenderEmitterBatch(
-            scene_particle_batches[particle_batch_index].emitter_id, renderer,
+            Queues().scene_particle_batches[particle_batch_index].emitter_id, renderer,
             camera_x, camera_y, zoom_factor, camera_width, camera_height);
         ++particle_batch_index;
     }
     SDL_SetRenderScale(renderer, output_scale_x, output_scale_y);
 
-    for (const ImageDrawRequest &request : ui_draw_requests) {
+    for (const ImageDrawRequest &request : Queues().ui_draw_requests) {
         float texture_w = 0.0f;
         float texture_h = 0.0f;
         SDL_Texture *texture =
@@ -612,9 +617,9 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
         SDL_SetTextureAlphaMod(texture, 255);
     }
 
-    scene_draw_requests.clear();
-    scene_particle_batches.clear();
-    ui_draw_requests.clear();
+    Queues().scene_draw_requests.clear();
+    Queues().scene_particle_batches.clear();
+    Queues().ui_draw_requests.clear();
 }
 
 // Flush queued text draw requests and reuse cached text textures when possible.
@@ -627,7 +632,7 @@ void Renderer::RenderAndClearAllText(SDL_Renderer *renderer,
         std::max(safe_output_scale_x, safe_output_scale_y);
     SDL_SetRenderScale(renderer, safe_output_scale_x, safe_output_scale_y);
 
-    for (const TextDrawRequest &req : text_draw_requests) {
+    for (const TextDrawRequest &req : Queues().text_draw_requests) {
         if (req.font_size <= 0 || req.text.empty()) continue;
 
         const int raster_font_size =
@@ -679,26 +684,26 @@ void Renderer::RenderAndClearAllText(SDL_Renderer *renderer,
                           0.0, nullptr, SDL_FLIP_NONE);
     }
 
-    text_draw_requests.clear();
+    Queues().text_draw_requests.clear();
 }
 
 // Flush queued pixel draw requests for debug/overlay rendering.
 void Renderer::RenderAndClearAllPixels(SDL_Renderer *renderer) {
     if (renderer == nullptr) {
-        pixel_draw_requests.clear();
+        Queues().pixel_draw_requests.clear();
         return;
     }
-    if (pixel_draw_requests.empty()) return;
+    if (Queues().pixel_draw_requests.empty()) return;
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    for (const PixelDrawRequest &request : pixel_draw_requests) {
+    for (const PixelDrawRequest &request : Queues().pixel_draw_requests) {
         SDL_SetRenderDrawColor(renderer, ClampByteU8(request.r),
                                ClampByteU8(request.g), ClampByteU8(request.b),
                                ClampByteU8(request.a));
         SDL_RenderPoint(renderer, request.x, request.y);
     }
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-    pixel_draw_requests.clear();
+    Queues().pixel_draw_requests.clear();
 }
 
 // Clear resource caches and per-frame draw queues.
@@ -714,10 +719,10 @@ void Renderer::ClearImageTextureCache() {
 void Renderer::ClearCache() {
     ClearImageTextureCache();
     image_cache_resources_root.clear();
-    scene_draw_requests.clear();
-    scene_particle_batches.clear();
-    ui_draw_requests.clear();
-    pixel_draw_requests.clear();
+    Queues().scene_draw_requests.clear();
+    Queues().scene_particle_batches.clear();
+    Queues().ui_draw_requests.clear();
+    Queues().pixel_draw_requests.clear();
 }
 
 int Renderer::GetResourceWarningCount() {

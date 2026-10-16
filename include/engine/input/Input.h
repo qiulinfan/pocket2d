@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
+struct InputState;
+
 class Input {
 public:
     // initialize input state caches
@@ -91,29 +93,37 @@ private:
     static bool IsKeycodeHeldInSnapshot(SDL_Keycode keycode);
     static void ResetKeyboardStates();
 
+    // Per-World state; see InputState below.
+    static InputState &State();
+    friend struct InputState;
+};
+
+// Keyboard/mouse state for one World. Input's static API reads and writes the
+// state of World::Current().
+struct InputState {
     // keyboard state cache and per-frame transition lists
     // 键盘状态缓存和本帧状态变更列表
-    static std::unordered_map<SDL_Scancode, INPUT_STATE, SDLScancodeHash> keyboard_states_;
-    static std::vector<SDL_Scancode> just_became_down_scancodes_;
-    static std::vector<SDL_Scancode> just_became_up_scancodes_;
-    static std::unordered_map<SDL_Keycode, INPUT_STATE, SDLKeycodeHash> keycode_states_;
-    static std::vector<SDL_Keycode> just_became_down_keycodes_;
-    static std::vector<SDL_Keycode> just_became_up_keycodes_;
-    static std::array<bool, SDL_SCANCODE_COUNT> keyboard_held_snapshot_;
-    static bool keyboard_held_snapshot_valid_;
-    static int keyboard_held_snapshot_frame_;
-    static bool external_input_enabled_;
+    std::unordered_map<SDL_Scancode, Input::INPUT_STATE, Input::SDLScancodeHash> keyboard_states_;
+    std::vector<SDL_Scancode> just_became_down_scancodes_;
+    std::vector<SDL_Scancode> just_became_up_scancodes_;
+    std::unordered_map<SDL_Keycode, Input::INPUT_STATE, Input::SDLKeycodeHash> keycode_states_;
+    std::vector<SDL_Keycode> just_became_down_keycodes_;
+    std::vector<SDL_Keycode> just_became_up_keycodes_;
+    std::array<bool, SDL_SCANCODE_COUNT> keyboard_held_snapshot_{};
+    bool keyboard_held_snapshot_valid_ = false;
+    int keyboard_held_snapshot_frame_ = -1;
+    bool external_input_enabled_ = false;
 
     // mouse button held / down / up caches
     // 鼠标按住 / 本帧按下 / 本帧松开缓存
-    static std::array<bool, 4> mouse_button_held_;
-    static std::array<bool, 4> mouse_button_down_;
-    static std::array<bool, 4> mouse_button_up_;
+    std::array<bool, 4> mouse_button_held_{};
+    std::array<bool, 4> mouse_button_down_{};
+    std::array<bool, 4> mouse_button_up_{};
 
     // latest mouse position and wheel delta for this frame
     // 当前帧鼠标位置和滚轮增量
-    static glm::vec2 mouse_position_;
-    static float mouse_scroll_delta_;
+    glm::vec2 mouse_position_ = glm::vec2(0.0f, 0.0f);
+    float mouse_scroll_delta_ = 0.0f;
 };
 
 #endif

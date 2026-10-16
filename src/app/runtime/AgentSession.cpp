@@ -1,8 +1,8 @@
 #include "app/runtime/AgentSession.h"
 #include "engine/core/Engine.h"
+#include "engine/core/World.h"
 #include "engine/core/FrameClock.h"
 #include "engine/input/Input.h"
-#include "engine/audio/AudioManager.h"
 #include "engine/scripting/ComponentManager.h"
 #include "engine/scripting/ScriptBudget.h"
 #include "engine/scripting/ScriptAPIContract.h"
@@ -452,7 +452,7 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
         held.clear();
         mouse = {};
         ComponentManager::SetRandomSeed(seed);
-        AudioManager::SetPlaybackEnabled(false);
+        World::Current().audio_output_enabled = false;
         auto candidate = std::make_unique<Engine>();
         candidate->InitializeHeadless();
         if (!candidate->GetLastSceneLoadError().empty())

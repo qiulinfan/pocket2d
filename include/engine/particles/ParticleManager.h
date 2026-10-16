@@ -62,6 +62,8 @@ struct ParticleSpawnRequest {
     int sorting_order = 9999;
 };
 
+struct ParticleState;
+
 class ParticleManager {
 public:
     static constexpr size_t kMaxParticlesPerEmitter = 1000000;
@@ -153,10 +155,18 @@ private:
     static int InternImageName(const std::string &image_name);
     static int ClampByte(int value);
 
-    static inline std::vector<EmitterSlot> emitters;
-    static inline std::vector<int> free_emitters;
-    static inline std::unordered_map<std::string, int> image_name_to_id;
-    static inline std::vector<std::string> image_names;
+    // Per-World state; see ParticleState below.
+    static ParticleState &State();
+    friend struct ParticleState;
+};
+
+// Emitters and interned image names for one World. ParticleManager's static
+// API reads and writes the state of World::Current().
+struct ParticleState {
+    std::vector<ParticleManager::EmitterSlot> emitters;
+    std::vector<int> free_emitters;
+    std::unordered_map<std::string, int> image_name_to_id;
+    std::vector<std::string> image_names;
 };
 
 #endif

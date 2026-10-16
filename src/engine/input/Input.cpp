@@ -1,5 +1,6 @@
 #include "input/Input.h"
 #include "core/FrameClock.h"
+#include "core/World.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -7,21 +8,6 @@
 #include <string>
 #include <unordered_map>
 
-std::unordered_map<SDL_Scancode, Input::INPUT_STATE, Input::SDLScancodeHash> Input::keyboard_states_ = {};
-std::vector<SDL_Scancode> Input::just_became_down_scancodes_ = {};
-std::vector<SDL_Scancode> Input::just_became_up_scancodes_ = {};
-std::unordered_map<SDL_Keycode, Input::INPUT_STATE, Input::SDLKeycodeHash> Input::keycode_states_ = {};
-std::vector<SDL_Keycode> Input::just_became_down_keycodes_ = {};
-std::vector<SDL_Keycode> Input::just_became_up_keycodes_ = {};
-std::array<bool, SDL_SCANCODE_COUNT> Input::keyboard_held_snapshot_ = {};
-bool Input::keyboard_held_snapshot_valid_ = false;
-int Input::keyboard_held_snapshot_frame_ = -1;
-bool Input::external_input_enabled_ = false;
-std::array<bool, 4> Input::mouse_button_held_ = {};
-std::array<bool, 4> Input::mouse_button_down_ = {};
-std::array<bool, 4> Input::mouse_button_up_ = {};
-glm::vec2 Input::mouse_position_ = glm::vec2(0.0f, 0.0f);
-float Input::mouse_scroll_delta_ = 0.0f;
 
 namespace {
 
@@ -93,42 +79,46 @@ void LogWindowFocusEvent(const SDL_WindowEvent &event) {
 }
 } // namespace
 
+InputState &Input::State() {
+    return World::Current().GetInputState();
+}
+
 // initialize input state caches
 void Input::Init() {
-    keyboard_states_.clear();
-    keyboard_states_.reserve(SDL_SCANCODE_COUNT);
+    State().keyboard_states_.clear();
+    State().keyboard_states_.reserve(SDL_SCANCODE_COUNT);
     for (int code = SDL_SCANCODE_UNKNOWN; code < SDL_SCANCODE_COUNT; ++code) {
-        keyboard_states_[static_cast<SDL_Scancode>(code)] = INPUT_STATE_UP;
+        State().keyboard_states_[static_cast<SDL_Scancode>(code)] = INPUT_STATE_UP;
     }
-    keycode_states_.clear();
+    State().keycode_states_.clear();
 
-    just_became_down_scancodes_.clear();
-    just_became_up_scancodes_.clear();
-    just_became_down_keycodes_.clear();
-    just_became_up_keycodes_.clear();
-    keyboard_held_snapshot_.fill(false);
-    keyboard_held_snapshot_valid_ = false;
-    keyboard_held_snapshot_frame_ = -1;
-    mouse_button_held_.fill(false);
-    mouse_button_down_.fill(false);
-    mouse_button_up_.fill(false);
-    mouse_position_ = glm::vec2(0.0f, 0.0f);
-    mouse_scroll_delta_ = 0.0f;
+    State().just_became_down_scancodes_.clear();
+    State().just_became_up_scancodes_.clear();
+    State().just_became_down_keycodes_.clear();
+    State().just_became_up_keycodes_.clear();
+    State().keyboard_held_snapshot_.fill(false);
+    State().keyboard_held_snapshot_valid_ = false;
+    State().keyboard_held_snapshot_frame_ = -1;
+    State().mouse_button_held_.fill(false);
+    State().mouse_button_down_.fill(false);
+    State().mouse_button_up_.fill(false);
+    State().mouse_position_ = glm::vec2(0.0f, 0.0f);
+    State().mouse_scroll_delta_ = 0.0f;
 }
 
 void Input::SetExternalInputEnabled(bool enabled) {
-    if (external_input_enabled_ == enabled) return;
+    if (State().external_input_enabled_ == enabled) return;
     // Switching owners must not carry a physically held key into an agent turn.
     ResetKeyboardStates();
-    mouse_button_held_.fill(false);
-    mouse_button_down_.fill(false);
-    mouse_button_up_.fill(false);
-    mouse_scroll_delta_ = 0.0f;
-    external_input_enabled_ = enabled;
+    State().mouse_button_held_.fill(false);
+    State().mouse_button_down_.fill(false);
+    State().mouse_button_up_.fill(false);
+    State().mouse_scroll_delta_ = 0.0f;
+    State().external_input_enabled_ = enabled;
 }
 
 void Input::ResetForSceneChange() {
-    if (external_input_enabled_) {
+    if (State().external_input_enabled_) {
         LateUpdate();
     } else {
         Init();
@@ -136,46 +126,46 @@ void Input::ResetForSceneChange() {
 }
 
 void Input::ResetKeyboardStates() {
-    for (auto &entry : keyboard_states_) {
+    for (auto &entry : State().keyboard_states_) {
         entry.second = INPUT_STATE_UP;
     }
-    keycode_states_.clear();
-    just_became_down_scancodes_.clear();
-    just_became_up_scancodes_.clear();
-    just_became_down_keycodes_.clear();
-    just_became_up_keycodes_.clear();
-    keyboard_held_snapshot_.fill(false);
-    keyboard_held_snapshot_valid_ = false;
-    keyboard_held_snapshot_frame_ = -1;
+    State().keycode_states_.clear();
+    State().just_became_down_scancodes_.clear();
+    State().just_became_up_scancodes_.clear();
+    State().just_became_down_keycodes_.clear();
+    State().just_became_up_keycodes_.clear();
+    State().keyboard_held_snapshot_.fill(false);
+    State().keyboard_held_snapshot_valid_ = false;
+    State().keyboard_held_snapshot_frame_ = -1;
 }
 
 void Input::BeginFrame() {
-    if (external_input_enabled_) {
-        keyboard_held_snapshot_.fill(false);
-        keyboard_held_snapshot_valid_ = true;
-        keyboard_held_snapshot_frame_ = FrameClock::GetFrameNumber();
+    if (State().external_input_enabled_) {
+        State().keyboard_held_snapshot_.fill(false);
+        State().keyboard_held_snapshot_valid_ = true;
+        State().keyboard_held_snapshot_frame_ = FrameClock::GetFrameNumber();
         return;
     }
     SDL_PumpEvents();
 
-    keyboard_held_snapshot_.fill(false);
+    State().keyboard_held_snapshot_.fill(false);
     int key_count = 0;
     const bool *keyboard_state = SDL_GetKeyboardState(&key_count);
     if (keyboard_state != nullptr) {
         const int snapshot_count =
             std::min(key_count, static_cast<int>(SDL_SCANCODE_COUNT));
         for (int code = 0; code < snapshot_count; ++code) {
-            keyboard_held_snapshot_[code] = keyboard_state[code] != 0;
+            State().keyboard_held_snapshot_[code] = keyboard_state[code] != 0;
         }
     }
 
-    keyboard_held_snapshot_valid_ = true;
-    keyboard_held_snapshot_frame_ = FrameClock::GetFrameNumber();
+    State().keyboard_held_snapshot_valid_ = true;
+    State().keyboard_held_snapshot_frame_ = FrameClock::GetFrameNumber();
 }
 
 void Input::EnsureKeyboardSnapshotForCurrentFrame() {
-    if (keyboard_held_snapshot_valid_ &&
-        keyboard_held_snapshot_frame_ == FrameClock::GetFrameNumber()) {
+    if (State().keyboard_held_snapshot_valid_ &&
+        State().keyboard_held_snapshot_frame_ == FrameClock::GetFrameNumber()) {
         return;
     }
     BeginFrame();
@@ -184,7 +174,7 @@ void Input::EnsureKeyboardSnapshotForCurrentFrame() {
 bool Input::IsScancodeHeldInSnapshot(SDL_Scancode key) {
     if (!IsValidScancode(key)) return false;
     EnsureKeyboardSnapshotForCurrentFrame();
-    return keyboard_held_snapshot_[static_cast<int>(key)];
+    return State().keyboard_held_snapshot_[static_cast<int>(key)];
 }
 
 bool Input::IsKeycodeHeldInSnapshot(SDL_Keycode keycode) {
@@ -192,7 +182,7 @@ bool Input::IsKeycodeHeldInSnapshot(SDL_Keycode keycode) {
     EnsureKeyboardSnapshotForCurrentFrame();
 
     for (int code = 0; code < SDL_SCANCODE_COUNT; ++code) {
-        if (!keyboard_held_snapshot_[code]) continue;
+        if (!State().keyboard_held_snapshot_[code]) continue;
         const SDL_Scancode scancode = static_cast<SDL_Scancode>(code);
         if (SDL_GetKeyFromScancode(scancode, SDL_KMOD_NONE, false) == keycode) {
             return true;
@@ -209,17 +199,17 @@ void Input::ProcessEvent(const SDL_Event &event) {
         const SDL_Keycode keycode = event.key.key;
 
         if (IsValidScancode(key)) {
-            INPUT_STATE &state = keyboard_states_[key];
+            INPUT_STATE &state = State().keyboard_states_[key];
             if (state != INPUT_STATE_DOWN && state != INPUT_STATE_JUST_BECAME_DOWN) {
                 state = INPUT_STATE_JUST_BECAME_DOWN;
-                just_became_down_scancodes_.push_back(key);
+                State().just_became_down_scancodes_.push_back(key);
             }
         }
         if (IsValidKeycode(keycode)) {
-            INPUT_STATE &state = keycode_states_[keycode];
+            INPUT_STATE &state = State().keycode_states_[keycode];
             if (state != INPUT_STATE_DOWN && state != INPUT_STATE_JUST_BECAME_DOWN) {
                 state = INPUT_STATE_JUST_BECAME_DOWN;
-                just_became_down_keycodes_.push_back(keycode);
+                State().just_became_down_keycodes_.push_back(keycode);
             }
         }
     } 
@@ -229,109 +219,109 @@ void Input::ProcessEvent(const SDL_Event &event) {
         const SDL_Keycode keycode = event.key.key;
 
         if (IsValidScancode(key)) {
-            INPUT_STATE &state = keyboard_states_[key];
+            INPUT_STATE &state = State().keyboard_states_[key];
             state = INPUT_STATE_JUST_BECAME_UP;
-            just_became_up_scancodes_.push_back(key);
+            State().just_became_up_scancodes_.push_back(key);
         }
         if (IsValidKeycode(keycode)) {
-            INPUT_STATE &state = keycode_states_[keycode];
+            INPUT_STATE &state = State().keycode_states_[keycode];
             state = INPUT_STATE_JUST_BECAME_UP;
-            just_became_up_keycodes_.push_back(keycode);
+            State().just_became_up_keycodes_.push_back(keycode);
         }
     } 
     else if (event.type == SDL_EVENT_MOUSE_MOTION) {
-        mouse_position_.x = static_cast<float>(event.motion.x);
-        mouse_position_.y = static_cast<float>(event.motion.y);
+        State().mouse_position_.x = static_cast<float>(event.motion.x);
+        State().mouse_position_.y = static_cast<float>(event.motion.y);
     } 
     else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         const int button = static_cast<int>(event.button.button);
-        mouse_position_.x = static_cast<float>(event.button.x);
-        mouse_position_.y = static_cast<float>(event.button.y);
+        State().mouse_position_.x = static_cast<float>(event.button.x);
+        State().mouse_position_.y = static_cast<float>(event.button.y);
         if (IsSupportedMouseButton(button)) {
-            if (!mouse_button_held_[button]) {
-                mouse_button_down_[button] = true;
-                mouse_button_up_[button] = false;
+            if (!State().mouse_button_held_[button]) {
+                State().mouse_button_down_[button] = true;
+                State().mouse_button_up_[button] = false;
             }
-            mouse_button_held_[button] = true;
+            State().mouse_button_held_[button] = true;
         }
     } 
     else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         const int button = static_cast<int>(event.button.button);
-        mouse_position_.x = static_cast<float>(event.button.x);
-        mouse_position_.y = static_cast<float>(event.button.y);
+        State().mouse_position_.x = static_cast<float>(event.button.x);
+        State().mouse_position_.y = static_cast<float>(event.button.y);
         if (IsSupportedMouseButton(button)) {
-            if (mouse_button_held_[button]) {
-                mouse_button_up_[button] = true;
-                mouse_button_down_[button] = false;
+            if (State().mouse_button_held_[button]) {
+                State().mouse_button_up_[button] = true;
+                State().mouse_button_down_[button] = false;
             }
-            mouse_button_held_[button] = false;
+            State().mouse_button_held_[button] = false;
         }
     } 
     else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-        mouse_scroll_delta_ += event.wheel.y;
+        State().mouse_scroll_delta_ += event.wheel.y;
     }
     else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
              event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         LogWindowFocusEvent(event.window);
         if (event.window.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
             ResetKeyboardStates();
-            mouse_button_held_.fill(false);
-            mouse_button_down_.fill(false);
-            mouse_button_up_.fill(false);
-            mouse_scroll_delta_ = 0.0f;
+            State().mouse_button_held_.fill(false);
+            State().mouse_button_down_.fill(false);
+            State().mouse_button_up_.fill(false);
+            State().mouse_scroll_delta_ = 0.0f;
         }
     }
 }
 
 // advance transient just-down / just-up states at frame end
 void Input::LateUpdate() {
-    for (SDL_Scancode code : just_became_down_scancodes_) {
-        if (keyboard_states_[code] == INPUT_STATE_JUST_BECAME_DOWN) {
-            keyboard_states_[code] = INPUT_STATE_DOWN;
+    for (SDL_Scancode code : State().just_became_down_scancodes_) {
+        if (State().keyboard_states_[code] == INPUT_STATE_JUST_BECAME_DOWN) {
+            State().keyboard_states_[code] = INPUT_STATE_DOWN;
         }
     }
 
-    for (SDL_Scancode code : just_became_up_scancodes_) {
-        if (keyboard_states_[code] == INPUT_STATE_JUST_BECAME_UP) {
-            keyboard_states_[code] = INPUT_STATE_UP;
+    for (SDL_Scancode code : State().just_became_up_scancodes_) {
+        if (State().keyboard_states_[code] == INPUT_STATE_JUST_BECAME_UP) {
+            State().keyboard_states_[code] = INPUT_STATE_UP;
         }
     }
-    for (SDL_Keycode code : just_became_down_keycodes_) {
-        if (keycode_states_[code] == INPUT_STATE_JUST_BECAME_DOWN) {
-            keycode_states_[code] = INPUT_STATE_DOWN;
-        }
-    }
-
-    for (SDL_Keycode code : just_became_up_keycodes_) {
-        if (keycode_states_[code] == INPUT_STATE_JUST_BECAME_UP) {
-            keycode_states_[code] = INPUT_STATE_UP;
+    for (SDL_Keycode code : State().just_became_down_keycodes_) {
+        if (State().keycode_states_[code] == INPUT_STATE_JUST_BECAME_DOWN) {
+            State().keycode_states_[code] = INPUT_STATE_DOWN;
         }
     }
 
-    just_became_down_scancodes_.clear();
-    just_became_up_scancodes_.clear();
-    just_became_down_keycodes_.clear();
-    just_became_up_keycodes_.clear();
-    mouse_button_down_.fill(false);
-    mouse_button_up_.fill(false);
-    mouse_scroll_delta_ = 0.0f;
+    for (SDL_Keycode code : State().just_became_up_keycodes_) {
+        if (State().keycode_states_[code] == INPUT_STATE_JUST_BECAME_UP) {
+            State().keycode_states_[code] = INPUT_STATE_UP;
+        }
+    }
+
+    State().just_became_down_scancodes_.clear();
+    State().just_became_up_scancodes_.clear();
+    State().just_became_down_keycodes_.clear();
+    State().just_became_up_keycodes_.clear();
+    State().mouse_button_down_.fill(false);
+    State().mouse_button_up_.fill(false);
+    State().mouse_scroll_delta_ = 0.0f;
 }
 
 bool Input::GetKey(SDL_Scancode key) {
     if (!IsValidScancode(key)) return false;
     if (IsScancodeHeldInSnapshot(key)) return true;
-    const INPUT_STATE state = keyboard_states_[key];
+    const INPUT_STATE state = State().keyboard_states_[key];
     return state == INPUT_STATE_DOWN || state == INPUT_STATE_JUST_BECAME_DOWN;
 }
 
 bool Input::GetKeyDown(SDL_Scancode key) {
     if (!IsValidScancode(key)) return false;
-    return keyboard_states_[key] == INPUT_STATE_JUST_BECAME_DOWN;
+    return State().keyboard_states_[key] == INPUT_STATE_JUST_BECAME_DOWN;
 }
 
 bool Input::GetKeyUp(SDL_Scancode key) {
     if (!IsValidScancode(key)) return false;
-    return keyboard_states_[key] == INPUT_STATE_JUST_BECAME_UP;
+    return State().keyboard_states_[key] == INPUT_STATE_JUST_BECAME_UP;
 }
 
 // parse a string key name into SDL scancode
@@ -439,8 +429,8 @@ bool Input::GetKey(const std::string &keycode) {
     const KeyBinding binding = ParseKeyBinding(keycode);
     if (GetKey(binding.scancode)) return true;
     if (!IsValidKeycode(binding.keycode)) return false;
-    const auto found = keycode_states_.find(binding.keycode);
-    if (found != keycode_states_.end() &&
+    const auto found = State().keycode_states_.find(binding.keycode);
+    if (found != State().keycode_states_.end() &&
         (found->second == INPUT_STATE_DOWN ||
          found->second == INPUT_STATE_JUST_BECAME_DOWN)) {
         return true;
@@ -453,8 +443,8 @@ bool Input::GetKeyDown(const std::string &keycode) {
     const KeyBinding binding = ParseKeyBinding(keycode);
     if (GetKeyDown(binding.scancode)) return true;
     if (!IsValidKeycode(binding.keycode)) return false;
-    const auto found = keycode_states_.find(binding.keycode);
-    return found != keycode_states_.end() &&
+    const auto found = State().keycode_states_.find(binding.keycode);
+    return found != State().keycode_states_.end() &&
            found->second == INPUT_STATE_JUST_BECAME_DOWN;
 }
 
@@ -463,8 +453,8 @@ bool Input::GetKeyUp(const std::string &keycode) {
     const KeyBinding binding = ParseKeyBinding(keycode);
     if (GetKeyUp(binding.scancode)) return true;
     if (!IsValidKeycode(binding.keycode)) return false;
-    const auto found = keycode_states_.find(binding.keycode);
-    return found != keycode_states_.end() &&
+    const auto found = State().keycode_states_.find(binding.keycode);
+    return found != State().keycode_states_.end() &&
            found->second == INPUT_STATE_JUST_BECAME_UP;
 }
 
@@ -474,27 +464,27 @@ bool Input::IsSupportedMouseButton(int button_num) {
 }
 
 glm::vec2 Input::GetMousePosition() {
-    return mouse_position_;
+    return State().mouse_position_;
 }
 
 bool Input::GetMouseButton(int button_num) {
     if (!IsSupportedMouseButton(button_num)) return false;
-    return mouse_button_held_[button_num];
+    return State().mouse_button_held_[button_num];
 }
 
 bool Input::GetMouseButtonDown(int button_num) {
     if (!IsSupportedMouseButton(button_num)) return false;
-    return mouse_button_down_[button_num];
+    return State().mouse_button_down_[button_num];
 }
 
 
 bool Input::GetMouseButtonUp(int button_num) {
     if (!IsSupportedMouseButton(button_num)) return false;
-    return mouse_button_up_[button_num];
+    return State().mouse_button_up_[button_num];
 }
 
 float Input::GetMouseScrollDelta() {
-    return mouse_scroll_delta_;
+    return State().mouse_scroll_delta_;
 }
 
 void Input::HideCursor() {

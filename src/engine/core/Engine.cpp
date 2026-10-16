@@ -306,7 +306,7 @@ void Engine::InitializeHeadless() {
     FrameClock::Reset();
     ::Input::Init();
     ::Input::SetExternalInputEnabled(true);
-    AudioManager::SetPlaybackEnabled(false);
+    world_.audio_output_enabled = false;
     runtime_zoom_factor = (config_.zoom_factor > 0.0f)
                               ? std::clamp(config_.zoom_factor, kMinZoomFactor,
                                            kMaxZoomFactor)
@@ -350,6 +350,7 @@ void Engine::ShutdownRuntime() {
     SDLRenderHelper::Reset();
     ::Input::Init();
     ::Input::SetExternalInputEnabled(false);
+    world_.audio_output_enabled = true;
     runtime_initialized_ = false;
 }
 
