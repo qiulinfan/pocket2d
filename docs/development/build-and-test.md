@@ -26,8 +26,9 @@ Run the graphical editor or runtime from the repository root:
 ./build/modern-debug/game --project Projects/Default
 ```
 
-`POCKET_RENDER_DRIVER=metal`, `opengl`, or `software` selects the native SDL3
-renderer. Empty/`auto` lets SDL choose. An unavailable explicit driver is an
+`POCKET_RENDER_DRIVER=metal`, `opengl`, `gpu` or `software` selects the
+native SDL3 renderer; `gpu` is SDL 3.4's renderer on SDL_GPU (Metal on macOS,
+Vulkan or Direct3D 12 elsewhere). Empty/`auto` lets SDL choose. An unavailable explicit driver is an
 error; it does not silently substitute another backend. Available backends are
 platform-dependent. `POCKET_RENDER_VSYNC=1` enables synchronization; gameplay
 cadence remains 60 Hz.
@@ -36,7 +37,12 @@ cadence remains 60 Hz.
 ./build/modern-debug/tests/render_backend_test software
 ./build/modern-debug/tests/render_backend_test metal
 ./build/modern-debug/tests/render_backend_test opengl
+./build/modern-debug/tests/render_backend_test gpu
 ```
+
+`POCKET_ENABLE_GPU_RENDER_TESTS` (default on for Apple platforms) adds CTest
+runs of the backend, inventory and two-world pixel tests on the `gpu`
+renderer; enable it elsewhere when a GPU driver is available.
 
 Optional backend tests return 77 only when backend initialization is unavailable;
 a rendering mismatch is a failure. The final optional argument writes a PNG of

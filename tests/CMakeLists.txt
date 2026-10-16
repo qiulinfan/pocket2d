@@ -48,6 +48,18 @@ pocket_runtime_test(render_backend_test render_backend_test.cpp)
 add_test(NAME render_software COMMAND render_backend_test software)
 set_tests_properties(render_software PROPERTIES TIMEOUT 30)
 
+if(APPLE)
+    set(POCKET_GPU_RENDER_TESTS_DEFAULT ON)
+else()
+    set(POCKET_GPU_RENDER_TESTS_DEFAULT OFF)
+endif()
+option(POCKET_ENABLE_GPU_RENDER_TESTS "Run pixel tests on SDL's GPU renderer (needs a GPU driver)"
+    ${POCKET_GPU_RENDER_TESTS_DEFAULT})
+if(POCKET_ENABLE_GPU_RENDER_TESTS)
+    add_test(NAME render_gpu COMMAND render_backend_test gpu)
+    set_tests_properties(render_gpu PROPERTIES TIMEOUT 30)
+endif()
+
 pocket_runtime_test(audio_runtime_test audio_runtime_test.cpp)
 add_test(NAME audio_runtime COMMAND audio_runtime_test)
 set_tests_properties(audio_runtime PROPERTIES TIMEOUT 30)
@@ -214,6 +226,11 @@ pocket_runtime_test(inventory_render_test inventory_render_test.cpp)
 add_test(NAME inventory_render_software COMMAND inventory_render_test
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/inventory_village" software)
 set_tests_properties(inventory_render_software PROPERTIES TIMEOUT 30)
+if(POCKET_ENABLE_GPU_RENDER_TESTS)
+    add_test(NAME inventory_render_gpu COMMAND inventory_render_test
+        "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/inventory_village" gpu)
+    set_tests_properties(inventory_render_gpu PROPERTIES TIMEOUT 30)
+endif()
 add_test(NAME agent_inventory COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_inventory_test.py" $<TARGET_FILE:game_engine>
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/inventory_village")
@@ -321,6 +338,11 @@ pocket_runtime_test(two_world_render_test two_world_render_test.cpp)
 add_test(NAME two_world_render_software COMMAND two_world_render_test
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village" software)
 set_tests_properties(two_world_render_software PROPERTIES TIMEOUT 45)
+if(POCKET_ENABLE_GPU_RENDER_TESTS)
+    add_test(NAME two_world_render_gpu COMMAND two_world_render_test
+        "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village" gpu)
+    set_tests_properties(two_world_render_gpu PROPERTIES TIMEOUT 45)
+endif()
 add_test(NAME agent_two_world_village COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_two_world_village_test.py" $<TARGET_FILE:game_engine>
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village")
