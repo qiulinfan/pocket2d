@@ -1,11 +1,9 @@
 #ifndef ENGINE_CORE_WORLD_H
 #define ENGINE_CORE_WORLD_H
 
+#include <cstddef>
 #include <memory>
-
-struct InputState;
-struct ParticleState;
-struct RenderQueueState;
+#include <vector>
 
 // A World owns one simulation's mutable runtime state. Engine subsystems keep
 // their static entry points and resolve state through World::Current(), in the
@@ -23,7 +21,12 @@ public:
     World &operator=(const World &) = delete;
 
     // The World bound on this thread, or this thread's default World.
-    static World &Current();
+    static World &Current() { return bound_ != nullptr ? *bound_ : ThreadDefault(); }
+
+    // This World's instance of a subsystem's state type, default-constructed on
+    // first use. Subsystems define T privately, so World does not depend on
+    // them. States are destroyed in reverse order of creation.
+    template <class T> T &State();
 
     // Gameplay tick counter, advanced once per completed simulation step.
     int frame_number = 0;
@@ -33,18 +36,41 @@ public:
     // Worlds turn it off so they never touch the shared mixer.
     bool audio_output_enabled = true;
 
-    InputState &GetInputState() { return *input_state_; }
-    ParticleState &GetParticleState() { return *particle_state_; }
-    RenderQueueState &GetRenderQueueState() { return *render_queue_state_; }
-
 private:
-    std::unique_ptr<InputState> input_state_;
-    std::unique_ptr<ParticleState> particle_state_;
-    std::unique_ptr<RenderQueueState> render_queue_state_;
+    struct SlotBase {
+        virtual ~SlotBase() = default;
+    };
+    template <class T> struct Slot final : SlotBase {
+        T value;
+    };
+
+    static World &ThreadDefault();
+    static std::size_t NextSlotIndex();
+    // Assigned during static initialization, so lookups need no guard.
+    template <class T> static inline const std::size_t slot_index_ = NextSlotIndex();
+    template <class T> [[gnu::noinline]] T &CreateState();
+
+    std::vector<std::unique_ptr<SlotBase>> slots_;
+    std::vector<std::size_t> creation_order_;
 
     friend class WorldScope;
     static thread_local World *bound_;
 };
+
+template <class T> T &World::State() {
+    const std::size_t index = slot_index_<T>;
+    if (index < slots_.size() && slots_[index]) [[likely]]
+        return static_cast<Slot<T> &>(*slots_[index]).value;
+    return CreateState<T>();
+}
+
+template <class T> T &World::CreateState() {
+    const std::size_t index = slot_index_<T>;
+    if (index >= slots_.size()) slots_.resize(index + 1);
+    slots_[index] = std::make_unique<Slot<T>>();
+    creation_order_.push_back(index);
+    return static_cast<Slot<T> &>(*slots_[index]).value;
+}
 
 // Binds a World as current for the enclosing scope and restores the previous
 // binding on exit. Scopes nest.

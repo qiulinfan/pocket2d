@@ -11,26 +11,27 @@
 #include <iostream>
 
 namespace {
-int runtime_error_count = 0;
-std::string last_runtime_error;
+struct RuntimeErrors {
+    int runtime_error_count = 0;
+    std::string last_runtime_error;
+};
+RuntimeErrors &Errors() { return World::Current().State<RuntimeErrors>(); }
 } // namespace
 
 namespace ManagerDetail {
-
-RuntimeState g_runtime;
 
 bool IsBuiltinComponentType(const std::string &type_name) {
     return type_name == "Rigidbody" || type_name == "ParticleSystem" ||
            type_name == "Transform" || type_name == "SpriteRenderer" || type_name == "Tilemap" || type_name == "SpriteAnimation";
 }
 
-ComponentRecord *FindComponentRecord(Actor::UID actor_uid,
+ComponentRecord *FindComponentRecord(RuntimeState &runtime, Actor::UID actor_uid,
                                      const std::string &component_key) {
-    auto actor_it = g_runtime.actor_components.find(actor_uid);
-    if (actor_it == g_runtime.actor_components.end()) return nullptr;
+    auto actor_it = runtime.actor_components.find(actor_uid);
+    if (actor_it == runtime.actor_components.end()) return nullptr;
 
-    auto index_it = g_runtime.component_index_by_key.find(actor_uid);
-    if (index_it != g_runtime.component_index_by_key.end()) {
+    auto index_it = runtime.component_index_by_key.find(actor_uid);
+    if (index_it != runtime.component_index_by_key.end()) {
         auto key_it = index_it->second.find(component_key);
         if (key_it != index_it->second.end()) {
             const size_t index = key_it->second;
@@ -49,21 +50,21 @@ ComponentRecord *FindComponentRecord(Actor::UID actor_uid,
         ComponentRecord &component = *components[i];
         if (component.removed) continue;
         if (component.key != component_key) continue;
-        g_runtime.component_index_by_key[actor_uid][component_key] = i;
+        runtime.component_index_by_key[actor_uid][component_key] = i;
         return &component;
     }
     return nullptr;
 }
 
 void RebuildComponentIndexForActor(Actor::UID actor_uid) {
-    auto actor_it = g_runtime.actor_components.find(actor_uid);
-    if (actor_it == g_runtime.actor_components.end()) {
-        g_runtime.component_index_by_key.erase(actor_uid);
+    auto actor_it = Runtime().actor_components.find(actor_uid);
+    if (actor_it == Runtime().actor_components.end()) {
+        Runtime().component_index_by_key.erase(actor_uid);
         return;
     }
 
     std::unordered_map<std::string, size_t> &key_index =
-        g_runtime.component_index_by_key[actor_uid];
+        Runtime().component_index_by_key[actor_uid];
     key_index.clear();
     key_index.reserve(actor_it->second.size());
     for (size_t i = 0; i < actor_it->second.size(); i++) {
@@ -74,17 +75,17 @@ void RebuildComponentIndexForActor(Actor::UID actor_uid) {
 }
 
 void RebuildTypeIndexForActor(Actor::UID actor_uid) {
-    auto actor_it = g_runtime.actor_components.find(actor_uid);
-    if (actor_it == g_runtime.actor_components.end()) {
-        g_runtime.component_first_key_by_type.erase(actor_uid);
-        g_runtime.component_keys_by_type.erase(actor_uid);
+    auto actor_it = Runtime().actor_components.find(actor_uid);
+    if (actor_it == Runtime().actor_components.end()) {
+        Runtime().component_first_key_by_type.erase(actor_uid);
+        Runtime().component_keys_by_type.erase(actor_uid);
         return;
     }
 
     std::unordered_map<std::string, std::string> &first_key_map =
-        g_runtime.component_first_key_by_type[actor_uid];
+        Runtime().component_first_key_by_type[actor_uid];
     std::unordered_map<std::string, std::vector<std::string>> &keys_by_type =
-        g_runtime.component_keys_by_type[actor_uid];
+        Runtime().component_keys_by_type[actor_uid];
     first_key_map.clear();
     keys_by_type.clear();
 
@@ -103,14 +104,14 @@ void RebuildTypeIndexForActor(Actor::UID actor_uid) {
 
 bool CompareLifecycleComponentRef(const LifecycleComponentRef &a,
                                   const LifecycleComponentRef &b) {
-    const auto a_order_it = g_runtime.actor_order_by_uid.find(a.actor_uid);
-    const auto b_order_it = g_runtime.actor_order_by_uid.find(b.actor_uid);
+    const auto a_order_it = Runtime().actor_order_by_uid.find(a.actor_uid);
+    const auto b_order_it = Runtime().actor_order_by_uid.find(b.actor_uid);
     const size_t a_order =
-        (a_order_it == g_runtime.actor_order_by_uid.end())
+        (a_order_it == Runtime().actor_order_by_uid.end())
             ? static_cast<size_t>(a.actor_uid)
             : a_order_it->second;
     const size_t b_order =
-        (b_order_it == g_runtime.actor_order_by_uid.end())
+        (b_order_it == Runtime().actor_order_by_uid.end())
             ? static_cast<size_t>(b.actor_uid)
             : b_order_it->second;
     if (a_order != b_order) return a_order < b_order;
@@ -131,46 +132,46 @@ void RebuildLifecycleListsForDirtyActors(
     };
 
     // 先把 dirty actors 的旧 entry 从生命周期列表剔除
-    g_runtime.on_update_components.erase(
-        std::remove_if(g_runtime.on_update_components.begin(),
-                       g_runtime.on_update_components.end(), is_dirty_actor),
-        g_runtime.on_update_components.end());
-    g_runtime.on_late_update_components.erase(
-        std::remove_if(g_runtime.on_late_update_components.begin(),
-                       g_runtime.on_late_update_components.end(), is_dirty_actor),
-        g_runtime.on_late_update_components.end());
+    Runtime().on_update_components.erase(
+        std::remove_if(Runtime().on_update_components.begin(),
+                       Runtime().on_update_components.end(), is_dirty_actor),
+        Runtime().on_update_components.end());
+    Runtime().on_late_update_components.erase(
+        std::remove_if(Runtime().on_late_update_components.begin(),
+                       Runtime().on_late_update_components.end(), is_dirty_actor),
+        Runtime().on_late_update_components.end());
 
     // 再按当前组件状态重建 dirty actors 的 entry
     for (Actor::UID actor_uid : dirty_actor_uids) {
-        if (g_runtime.pending_destroy_actor_uids.find(actor_uid) !=
-            g_runtime.pending_destroy_actor_uids.end()) {
+        if (Runtime().pending_destroy_actor_uids.find(actor_uid) !=
+            Runtime().pending_destroy_actor_uids.end()) {
             continue;
         }
 
-        auto actor_it = g_runtime.actor_components.find(actor_uid);
-        if (actor_it == g_runtime.actor_components.end()) continue;
+        auto actor_it = Runtime().actor_components.find(actor_uid);
+        if (actor_it == Runtime().actor_components.end()) continue;
 
         for (std::unique_ptr<ComponentRecord> &component_ptr :
              actor_it->second) {
             ComponentRecord &component = *component_ptr;
             if (component.removed) continue;
             if (component.has_on_update) {
-                g_runtime.on_update_components.emplace_back(actor_uid,
+                Runtime().on_update_components.emplace_back(actor_uid,
                                                            &component);
             }
             if (component.has_on_late_update) {
-                g_runtime.on_late_update_components.emplace_back(actor_uid,
+                Runtime().on_late_update_components.emplace_back(actor_uid,
                                                                  &component);
             }
         }
     }
 
     // 保证执行顺序: actor_uid -> component_key
-    std::sort(g_runtime.on_update_components.begin(),
-              g_runtime.on_update_components.end(),
+    std::sort(Runtime().on_update_components.begin(),
+              Runtime().on_update_components.end(),
               CompareLifecycleComponentRef);
-    std::sort(g_runtime.on_late_update_components.begin(),
-              g_runtime.on_late_update_components.end(),
+    std::sort(Runtime().on_late_update_components.begin(),
+              Runtime().on_late_update_components.end(),
               CompareLifecycleComponentRef);
 }
 
@@ -184,7 +185,7 @@ int ReadField(lua_State *state) { lua_settop(state, 2); lua_gettable(state, 1); 
 int WriteField(lua_State *state) { lua_settop(state, 3); lua_settable(state, 1); return 0; }
 }
 luabridge::LuaRef ProtectedField(const luabridge::LuaRef &object, const char *name) {
-    auto *state = g_runtime.lua_state;
+    auto *state = Runtime().lua_state;
     const LuaStackScope stack{state, lua_gettop(state)};
     // Ordinary prototype inheritance is a chain of raw table reads, not user
     // code. Resolve that common case without a protected Lua call. Keep one
@@ -213,14 +214,14 @@ luabridge::LuaRef ProtectedField(const luabridge::LuaRef &object, const char *na
     return luabridge::LuaRef::fromStack(state);
 }
 void ProtectedSetField(const luabridge::LuaRef &object, const char *name, const luabridge::LuaRef &value) {
-    auto *state = g_runtime.lua_state;
+    auto *state = Runtime().lua_state;
     const LuaStackScope stack{state, lua_gettop(state)};
     lua_pushcfunction(state, WriteField); object.push(state); lua_pushstring(state, name); value.push(state);
     LuaBoundary::ProtectedCall(state, 3, 0);
 }
 void SetSystemField(const luabridge::LuaRef &object, const char *name, const luabridge::LuaRef &value) {
     if (!object.isTable()) { ProtectedSetField(object, name, value); return; }
-    auto *state = g_runtime.lua_state;
+    auto *state = Runtime().lua_state;
     const LuaStackScope stack{state, lua_gettop(state)};
     // Engine identity/disable writes must not call script __newindex during
     // container maintenance. User-facing property edits retain setter behavior.
@@ -240,13 +241,13 @@ void SyncBuiltinParticleSystemState(ComponentRecord &component) {
     system->SyncRuntimeState();
 }
 
-ComponentRecord *FindPrimaryComponentByType(Actor::UID actor_uid,
+ComponentRecord *FindPrimaryComponentByType(RuntimeState &runtime, Actor::UID actor_uid,
                                             const std::string &type_name) {
-    auto type_it = g_runtime.component_first_key_by_type.find(actor_uid);
-    if (type_it == g_runtime.component_first_key_by_type.end()) return nullptr;
+    auto type_it = runtime.component_first_key_by_type.find(actor_uid);
+    if (type_it == runtime.component_first_key_by_type.end()) return nullptr;
     auto key_it = type_it->second.find(type_name);
     if (key_it == type_it->second.end()) return nullptr;
-    return FindComponentRecord(actor_uid, key_it->second);
+    return FindComponentRecord(runtime, actor_uid, key_it->second);
 }
 
 void RotateClockwise(float x, float y, float rotation_degrees, float &out_x,
@@ -259,16 +260,17 @@ void RotateClockwise(float x, float y, float rotation_degrees, float &out_x,
 }
 
 void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
+    ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     // Built-in render components draw during the render phase itself so they
     // still appear in editor frozen frames where gameplay updates are paused.
     // Sorting-order ties must preserve authored scene order, not hash-table
     // iteration order. This also makes overlapping fractional pixel edges
     // deterministic across the SpriteRenderer and Tilemap submission paths.
-    for (Actor::UID uid : g_runtime.actor_uids_sorted) {
-        auto components_it = g_runtime.actor_components.find(uid);
-        if (components_it == g_runtime.actor_components.end()) continue;
-        auto actor_it = g_runtime.actor_by_uid.find(uid);
-        Actor *actor = (actor_it != g_runtime.actor_by_uid.end())
+    for (Actor::UID uid : runtime.actor_uids_sorted) {
+        auto components_it = runtime.actor_components.find(uid);
+        if (components_it == runtime.actor_components.end()) continue;
+        auto actor_it = runtime.actor_by_uid.find(uid);
+        Actor *actor = (actor_it != runtime.actor_by_uid.end())
                            ? actor_it->second
                            : nullptr;
         if (scene_backed_only &&
@@ -292,8 +294,8 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
 // Keep component order deterministic for all key-based lifecycle rules.
 void SortComponentsForActor(Actor::UID actor_uid) {
     // 生命周期顺序要求按 key 字典序
-    auto actor_it = g_runtime.actor_components.find(actor_uid);
-    if (actor_it == g_runtime.actor_components.end()) return;
+    auto actor_it = Runtime().actor_components.find(actor_uid);
+    if (actor_it == Runtime().actor_components.end()) return;
     std::sort(actor_it->second.begin(), actor_it->second.end(),
               [](const std::unique_ptr<ComponentRecord> &a,
                  const std::unique_ptr<ComponentRecord> &b) {
@@ -305,33 +307,34 @@ void SortComponentsForActor(Actor::UID actor_uid) {
 
 void RemoveActorFromNameIndex(Actor *actor_ptr) {
     if (actor_ptr == nullptr) return;
-    auto name_it = g_runtime.actors_by_name.find(actor_ptr->actor_name);
-    if (name_it == g_runtime.actors_by_name.end()) return;
+    auto name_it = Runtime().actors_by_name.find(actor_ptr->actor_name);
+    if (name_it == Runtime().actors_by_name.end()) return;
     std::vector<Actor *> &bucket = name_it->second;
     bucket.erase(std::remove(bucket.begin(), bucket.end(), actor_ptr),
                  bucket.end());
     if (bucket.empty()) {
-        g_runtime.actors_by_name.erase(name_it);
+        Runtime().actors_by_name.erase(name_it);
     }
 }
 
-bool AreSameLuaRef(const luabridge::LuaRef &a, const luabridge::LuaRef &b) {
+bool AreSameLuaRef(lua_State *state, const luabridge::LuaRef &a,
+                   const luabridge::LuaRef &b) {
     // 用 raw lua_rawequal 比较两个 Lua table 是否同一对象
-    if (g_runtime.lua_state == nullptr) return false;
+    if (state == nullptr) return false;
     if (a.isNil() || b.isNil()) return false;
-    a.push(g_runtime.lua_state);
-    b.push(g_runtime.lua_state);
-    const bool equal = lua_rawequal(g_runtime.lua_state, -1, -2) != 0;
-    lua_pop(g_runtime.lua_state, 2);
+    a.push(state);
+    b.push(state);
+    const bool equal = lua_rawequal(state, -1, -2) != 0;
+    lua_pop(state, 2);
     return equal;
 }
 
 luabridge::LuaRef MakeNilRef() {
-    return luabridge::LuaRef(g_runtime.lua_state);
+    return luabridge::LuaRef(Runtime().lua_state);
 }
 
 luabridge::LuaRef MakeEmptyArrayTable() {
-    return luabridge::newTable(g_runtime.lua_state);
+    return luabridge::newTable(Runtime().lua_state);
 }
 
 bool TryExtractComponentIdentity(const luabridge::LuaRef &component_ref,
@@ -348,17 +351,18 @@ bool TryExtractComponentIdentity(const luabridge::LuaRef &component_ref,
     return IsComponentRefAlive(component_ref, actor_uid, component_key);
 }
 
-bool IsComponentRefAlive(const luabridge::LuaRef &component_ref,
+bool IsComponentRefAlive(RuntimeState &runtime,
+                         const luabridge::LuaRef &component_ref,
                          Actor::UID actor_uid,
                          const std::string &component_key) {
-    ComponentRecord *component = FindComponentRecord(actor_uid, component_key);
+    ComponentRecord *component = FindComponentRecord(runtime, actor_uid, component_key);
     if (component == nullptr) return false;
-    return AreSameLuaRef(component->instance_table, component_ref);
+    return AreSameLuaRef(runtime.lua_state, component->instance_table, component_ref);
 }
 
 std::string GetActorNameByUID(Actor::UID actor_uid) {
-    auto actor_it = g_runtime.actor_by_uid.find(actor_uid);
-    if (actor_it == g_runtime.actor_by_uid.end() ||
+    auto actor_it = Runtime().actor_by_uid.find(actor_uid);
+    if (actor_it == Runtime().actor_by_uid.end() ||
         actor_it->second == nullptr) {
         return "";
     }
@@ -370,9 +374,9 @@ void ReportError(const std::string &actor_name,
     std::string error_message = e.what();
     std::replace(error_message.begin(), error_message.end(), '\\', '/');
     const LuaBoundary::Error bounded(actor_name + " : " + error_message);
-    ++runtime_error_count;
-    last_runtime_error = bounded.what();
-    std::cout << "\033[31m" << last_runtime_error << "\033[0m" << std::endl;
+    ++Errors().runtime_error_count;
+    Errors().last_runtime_error = bounded.what();
+    std::cout << "\033[31m" << Errors().last_runtime_error << "\033[0m" << std::endl;
 }
 
 void ReportEventBusError(Actor::UID actor_uid,
@@ -388,7 +392,7 @@ void RunComponentOnDestroyIfNeeded(ComponentRecord &component, Actor::UID actor_
     const bool has_callback = component.has_on_destroy;
     const auto reference = component.instance_table;
     const auto key = component.key;
-    const int top = lua_gettop(g_runtime.lua_state);
+    const int top = lua_gettop(Runtime().lua_state);
     if (has_callback) {
         try {
             const auto callback = ProtectedField(reference, "OnDestroy");
@@ -397,21 +401,21 @@ void RunComponentOnDestroyIfNeeded(ComponentRecord &component, Actor::UID actor_
             ReportError(GetActorNameByUID(actor_uid), error);
         }
     }
-    lua_settop(g_runtime.lua_state, top);
+    lua_settop(Runtime().lua_state, top);
     EventBus::RemoveSubscriptionsForComponent(reference, actor_uid, key);
 }
 
 } // namespace ManagerDetail
 
-int ComponentManager::GetRuntimeErrorCount() { return runtime_error_count; }
+int ComponentManager::GetRuntimeErrorCount() { return Errors().runtime_error_count; }
 
 const std::string &ComponentManager::GetLastRuntimeError() {
-    return last_runtime_error;
+    return Errors().last_runtime_error;
 }
 
 void ComponentManager::ClearRuntimeErrors() {
-    runtime_error_count = 0;
-    last_runtime_error.clear();
+    Errors().runtime_error_count = 0;
+    Errors().last_runtime_error.clear();
 }
 
 void ComponentManager::QueueBuiltinRenderers(bool scene_backed_only) {
@@ -428,10 +432,10 @@ public:
     void Resolve(Actor::UID actor_uid) {
         while (resolved_.find(actor_uid) == resolved_.end() &&
                resolving_.insert(actor_uid).second) {
-            auto actor_it = ManagerDetail::g_runtime.actor_by_uid.find(actor_uid);
-            Actor *actor = actor_it == ManagerDetail::g_runtime.actor_by_uid.end()
+            auto actor_it = runtime_.actor_by_uid.find(actor_uid);
+            Actor *actor = actor_it == runtime_.actor_by_uid.end()
                                ? nullptr : actor_it->second;
-            auto *component = ManagerDetail::FindPrimaryComponentByType(actor_uid, "Transform");
+            auto *component = ManagerDetail::FindPrimaryComponentByType(runtime_, actor_uid, "Transform");
             Transform *transform = component == nullptr
                                        ? nullptr : LuaBoundary::Cast<Transform *>(component->instance_table);
             const Actor::UID parent_uid = actor == nullptr
@@ -455,7 +459,7 @@ public:
                 if (entry.parent_uid != Actor::kInvalidUID &&
                     entry.parent_uid != entry.uid) {
                     auto *component = ManagerDetail::FindPrimaryComponentByType(
-                        entry.parent_uid, "Transform");
+                        runtime_, entry.parent_uid, "Transform");
                     if (component != nullptr) {
                         parent = LuaBoundary::Cast<Transform *>(component->instance_table);
                     }
@@ -486,6 +490,7 @@ private:
         Actor::UID parent_uid;
         Transform *transform;
     };
+    ManagerDetail::RuntimeState &runtime_ = ManagerDetail::Runtime();
     std::unordered_set<Actor::UID> resolved_;
     std::unordered_set<Actor::UID> resolving_;
     std::vector<Entry> path_;
@@ -495,7 +500,7 @@ private:
 
 void ComponentManager::ResolveTransformHierarchy() {
     WorldTransformResolver resolver;
-    for (const auto &entry : ManagerDetail::g_runtime.actor_by_uid) {
+    for (const auto &entry : ManagerDetail::Runtime().actor_by_uid) {
         if (entry.second == nullptr || entry.second->runtime_destroyed) continue;
         resolver.Resolve(entry.first);
     }
@@ -526,8 +531,8 @@ bool ComponentManager::TryGetRuntimeTransformWorld(
 bool ComponentManager::SetRuntimeTransformWorldPosition(Actor::UID actor_uid,
                                                         float world_x,
                                                         float world_y) {
-    auto actor_it = ManagerDetail::g_runtime.actor_by_uid.find(actor_uid);
-    if (actor_it == ManagerDetail::g_runtime.actor_by_uid.end() ||
+    auto actor_it = ManagerDetail::Runtime().actor_by_uid.find(actor_uid);
+    if (actor_it == ManagerDetail::Runtime().actor_by_uid.end() ||
         actor_it->second == nullptr) {
         return false;
     }

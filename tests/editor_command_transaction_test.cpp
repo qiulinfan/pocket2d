@@ -51,7 +51,7 @@ Good={health=100,updates=0,state={value=7},
         std::error_code error; fs::remove_all(root, error); }
 };
 void Lua(const std::string &code) {
-    auto *state = g_runtime.lua_state;
+    auto *state = Runtime().lua_state;
     const int top = lua_gettop(state);
     if (luaL_dostring(state, code.c_str()) != LUA_OK) {
         std::string error = lua_tostring(state, -1); lua_settop(state, top); throw std::runtime_error(error);
@@ -60,17 +60,17 @@ void Lua(const std::string &code) {
 }
 auto Queues(const Engine &engine) {
     std::size_t records = 0;
-    for (const auto &[uid, values] : g_runtime.actor_components) records += values.size();
+    for (const auto &[uid, values] : Runtime().actor_components) records += values.size();
     return std::tuple{engine.GetRuntimeActors().size(), records,
-        g_runtime.actor_by_uid.size(), g_runtime.actor_components.size(),
-        g_runtime.pending_on_start.size(), g_runtime.pending_actor_uids_to_activate.size(),
-        g_runtime.pending_destroy_actor_uids.size(), g_runtime.dirty_component_actor_uids.size()};
+        Runtime().actor_by_uid.size(), Runtime().actor_components.size(),
+        Runtime().pending_on_start.size(), Runtime().pending_actor_uids_to_activate.size(),
+        Runtime().pending_destroy_actor_uids.size(), Runtime().dirty_component_actor_uids.size()};
 }
 struct Identity {
     luabridge::LuaRef good = ComponentManager::GetComponentByKey(1, "good");
     luabridge::LuaRef nested = good["state"];
     luabridge::LuaRef body = ComponentManager::GetComponentByKey(1, "body");
-    ActorHandle actor{g_runtime.actor_by_uid.at(1)};
+    ActorHandle actor{Runtime().actor_by_uid.at(1)};
     b2Body *native_body = body.cast<Rigidbody *>().value()->body;
     void AssertRetained(const Engine &engine) const {
         Check(actor.IsValid() && actor.Resolve() == engine.GetRuntimeActorByUID(1), "original Actor identity changed");
@@ -127,13 +127,13 @@ void TestHostAtomicCommands() {
     Check(identity.body.cast<Rigidbody *>().value()->width == width && engine.GetRuntimeActorByUID(1)->actor_name == "source",
           "invalid native property batch partially changed configuration/name");
     identity.AssertRetained(engine);
-    const int starts = luabridge::getGlobal(g_runtime.lua_state, "AUDIT")["starts"].cast<int>().value();
+    const int starts = luabridge::getGlobal(Runtime().lua_state, "AUDIT")["starts"].cast<int>().value();
     Check(engine.ApplySceneEditCommand(SceneFormat::SceneEditCommand::Single({Rename("accepted")})),
           "valid command rejected after failed transactions");
     identity.AssertRetained(engine);
     Check(!ComponentManager::FindActorByName("accepted").isNil() && ComponentManager::FindActorByName("source").isNil(),
           "valid in-place rename did not update name index");
-    Check(luabridge::getGlobal(g_runtime.lua_state, "AUDIT")["starts"].cast<int>().value() == starts,
+    Check(luabridge::getGlobal(Runtime().lua_state, "AUDIT")["starts"].cast<int>().value() == starts,
           "valid rename restarted lifecycle");
     Check(ComponentManager::GetRuntimeErrorCount() == 0, "handled host rejection poisoned runtime");
 }
@@ -184,7 +184,7 @@ void TestSessionCoordinator() {
     Check(!document.SetComponentProperty(0, "body", "width", 0.0), "bound invalid native value accepted");
     Check(Queues(engine) == before_queues, "invalid native edit changed lifecycle queues");
     identity.AssertRetained(engine);
-    auto audit = luabridge::getGlobal(g_runtime.lua_state, "AUDIT");
+    auto audit = luabridge::getGlobal(Runtime().lua_state, "AUDIT");
     const int starts = audit["starts"].cast<int>().value(), destroys = audit["destroys"].cast<int>().value();
     engine.StepSimulation();
     Check(audit["starts"].cast<int>().value() == starts && audit["destroys"].cast<int>().value() == destroys,

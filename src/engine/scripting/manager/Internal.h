@@ -1,6 +1,7 @@
 #ifndef MANAGER_INTERNAL_H
 #define MANAGER_INTERNAL_H
 
+#include "core/World.h"
 #include "physics/Collision.h"
 #include "scene/Actor.h"
 #include "lua.hpp"
@@ -140,7 +141,8 @@ struct RuntimeState {
     uint64_t runtime_add_component_counter = 0;
 };
 
-extern RuntimeState g_runtime;
+// The scripting runtime of World::Current().
+inline RuntimeState &Runtime() { return World::Current().State<RuntimeState>(); }
 
 // Owner-thread nested GC pause shared by scene plans and detached component
 // tokens. Release all owned LuaRefs before Resume; never outlive Lua Shutdown.
@@ -180,10 +182,19 @@ bool AssignPropertyValueToLuaField(luabridge::LuaRef &instance_table,
 // Component / actor indexing helpers
 // -----------------------------------------------------------------------------
 
-ComponentRecord *FindComponentRecord(Actor::UID actor_uid,
+// Overloads taking RuntimeState let hot loops look up the current World once.
+ComponentRecord *FindComponentRecord(RuntimeState &runtime, Actor::UID actor_uid,
                                      const std::string &component_key);
-ComponentRecord *FindPrimaryComponentByType(Actor::UID actor_uid,
+inline ComponentRecord *FindComponentRecord(Actor::UID actor_uid,
+                                            const std::string &component_key) {
+    return FindComponentRecord(Runtime(), actor_uid, component_key);
+}
+ComponentRecord *FindPrimaryComponentByType(RuntimeState &runtime, Actor::UID actor_uid,
                                             const std::string &type_name);
+inline ComponentRecord *FindPrimaryComponentByType(Actor::UID actor_uid,
+                                                   const std::string &type_name) {
+    return FindPrimaryComponentByType(Runtime(), actor_uid, type_name);
+}
 void RebuildComponentIndexForActor(Actor::UID actor_uid);
 void RebuildTypeIndexForActor(Actor::UID actor_uid);
 bool CompareLifecycleComponentRef(const LifecycleComponentRef &a,
@@ -203,15 +214,25 @@ void SyncBuiltinParticleSystemState(ComponentRecord &component);
 void SortComponentsForActor(Actor::UID actor_uid);
 void RemoveActorFromNameIndex(Actor *actor_ptr);
 
-bool AreSameLuaRef(const luabridge::LuaRef &a, const luabridge::LuaRef &b);
+bool AreSameLuaRef(lua_State *state, const luabridge::LuaRef &a,
+                   const luabridge::LuaRef &b);
+inline bool AreSameLuaRef(const luabridge::LuaRef &a, const luabridge::LuaRef &b) {
+    return AreSameLuaRef(Runtime().lua_state, a, b);
+}
 luabridge::LuaRef MakeNilRef();
 luabridge::LuaRef MakeEmptyArrayTable();
 bool TryExtractComponentIdentity(const luabridge::LuaRef &component_ref,
                                  Actor::UID &actor_uid,
                                  std::string &component_key);
-bool IsComponentRefAlive(const luabridge::LuaRef &component_ref,
+bool IsComponentRefAlive(RuntimeState &runtime,
+                         const luabridge::LuaRef &component_ref,
                          Actor::UID actor_uid,
                          const std::string &component_key);
+inline bool IsComponentRefAlive(const luabridge::LuaRef &component_ref,
+                                Actor::UID actor_uid,
+                                const std::string &component_key) {
+    return IsComponentRefAlive(Runtime(), component_ref, actor_uid, component_key);
+}
 
 // -----------------------------------------------------------------------------
 // Error handling and lifecycle dispatch helpers

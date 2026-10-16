@@ -15,7 +15,12 @@ namespace {
 constexpr float kPixelsPerUnit = 100.0f;
 constexpr size_t kParallelParticleThreshold = 8192;
 constexpr size_t kParticleChunkSize = 1024;
-std::unique_ptr<TaskExecutor> particle_executor;
+// One pool for the process, shared by all Worlds. TaskExecutor accepts
+// concurrent submitters; it lives until process exit.
+TaskExecutor &ParticleExecutor() {
+    static TaskExecutor executor;
+    return executor;
+}
 
 // 线性插值: 用于在粒子生命周期内平滑过渡属性值
 float Lerp(float start, float end, float t) {
@@ -50,7 +55,7 @@ bool IsPivotBoundOutsideViewport(const SDL_FRect &dst, const SDL_FPoint &pivot,
 } // namespace
 
 ParticleState &ParticleManager::State() {
-    return World::Current().GetParticleState();
+    return World::Current().State<ParticleState>();
 }
 
 namespace {
@@ -338,9 +343,7 @@ void ParticleManager::Update(float dt) {
             break;
         }
     }
-    if (has_large_emitter && !particle_executor)
-        particle_executor = std::make_unique<TaskExecutor>();
-    Update(dt, has_large_emitter ? particle_executor.get() : nullptr);
+    Update(dt, has_large_emitter ? &ParticleExecutor() : nullptr);
 }
 
 void ParticleManager::Update(float dt, TaskExecutor *executor) {
@@ -558,7 +561,6 @@ void ParticleManager::RenderEmitterBatch(int emitter_id, SDL_Renderer *renderer,
 // Used when changing scenes or resetting the game.
 // 清除所有 emitter 和相关数据. 这可以在切换场景或重置游戏时使用.
 void ParticleManager::Clear() {
-    particle_executor.reset();
     State().emitters.clear();
     State().free_emitters.clear();
     State().image_name_to_id.clear();

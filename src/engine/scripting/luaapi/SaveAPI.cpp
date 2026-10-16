@@ -1,4 +1,5 @@
 #include "RegistrationDetail.h"
+#include "core/World.h"
 #include "scripting/GameSave.h"
 #include "shared/persistence/SaveStore.h"
 #include "SDL3/SDL.h"
@@ -15,7 +16,8 @@
 #include <vector>
 
 namespace {
-std::string active_namespace;
+struct SaveNamespace { std::string active_namespace; };
+std::string &ActiveNamespace() { return World::Current().State<SaveNamespace>().active_namespace; }
 using Allocator = rapidjson::Document::AllocatorType;
 struct InvalidData : std::runtime_error { using std::runtime_error::runtime_error; };
 struct Conversion {
@@ -139,17 +141,17 @@ int StatusResult(lua_State *state, bool ok, const std::string &code = {}, const 
     return 1;
 }
 std::filesystem::path Directory() {
-    if (!SaveStore::IsValidIdentifier(active_namespace)) throw std::runtime_error("game.config save_namespace is not configured");
+    if (!SaveStore::IsValidIdentifier(ActiveNamespace())) throw std::runtime_error("game.config save_namespace is not configured");
     if (const char *override_root = SDL_getenv("POCKET_SAVE_ROOT"); override_root && *override_root) {
         const std::string text(override_root);
         const auto root = std::filesystem::weakly_canonical(std::filesystem::absolute(
             std::filesystem::path(std::u8string(text.begin(), text.end()))));
-        const auto directory = root / active_namespace;
+        const auto directory = root / ActiveNamespace();
         if (std::filesystem::is_symlink(std::filesystem::symlink_status(directory)))
             throw std::runtime_error("save namespace directory must not be a symbolic link");
         return directory;
     }
-    char *raw = SDL_GetPrefPath("Pocket2D", active_namespace.c_str());
+    char *raw = SDL_GetPrefPath("Pocket2D", ActiveNamespace().c_str());
     if (!raw) throw std::runtime_error(std::string("cannot resolve save directory: ") + SDL_GetError());
     const std::string text(raw); SDL_free(raw);
     return std::filesystem::path(std::u8string(text.begin(), text.end()));
@@ -162,7 +164,7 @@ int Write(lua_State *state) {
     const int top = lua_gettop(state);
     if (top != 3 || lua_type(state, 1) != LUA_TSTRING || !lua_isinteger(state, 2) || !lua_istable(state, 3))
         return StatusResult(state, false, "invalid_argument", "Save.Write expects slot, positive integer schema version and data table");
-    if (active_namespace.empty()) return StatusResult(state, false, "not_configured", "game.config save_namespace is required");
+    if (ActiveNamespace().empty()) return StatusResult(state, false, "not_configured", "game.config save_namespace is required");
     const auto version = lua_tointeger(state, 2);
     if (version <= 0 || version > std::numeric_limits<int>::max())
         return StatusResult(state, false, "invalid_argument", "schema_version must be a positive int");
@@ -182,7 +184,7 @@ int Read(lua_State *state) {
     const int top = lua_gettop(state);
     if (top != 1 || lua_type(state, 1) != LUA_TSTRING)
         return StatusResult(state, false, "invalid_argument", "Save.Read expects one slot string");
-    if (active_namespace.empty()) return StatusResult(state, false, "not_configured", "game.config save_namespace is required");
+    if (ActiveNamespace().empty()) return StatusResult(state, false, "not_configured", "game.config save_namespace is required");
     try {
         const auto result = SaveStore::Read(Directory(), Slot(state));
         if (!result.status.ok) return StatusResult(state, false, result.status.code, result.status.message);
@@ -199,15 +201,15 @@ int Read(lua_State *state) {
 }
 namespace GameSave {
 void Configure(const std::string &save_namespace) {
-    active_namespace.clear();
+    ActiveNamespace().clear();
     if (!save_namespace.empty() && !SaveStore::IsValidIdentifier(save_namespace))
         throw std::runtime_error("game.config save_namespace must be 1..64 ASCII letters/digits/underscore/hyphen, starting with a letter or digit");
-    active_namespace = save_namespace;
+    ActiveNamespace() = save_namespace;
 }
 }
 namespace APIRegistrationDetail {
 void RegisterSaveAPI() {
-    luabridge::getGlobalNamespace(g_lua_state).beginNamespace("Save")
+    luabridge::getGlobalNamespace(LuaState()).beginNamespace("Save")
         .addFunction("Write", &Write).addFunction("Read", &Read).endNamespace();
 }
 }

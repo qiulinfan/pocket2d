@@ -7,7 +7,7 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 
 bool CppInputGetKey(const std::string &keycode) {
     return Input::GetKey(keycode);
@@ -50,13 +50,13 @@ void CppInputShowCursor() {
 }
 
 void InjectInputAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<glm::vec2>("vec2")
         .addPropertyReadWrite("x", &glm::vec2::x)
         .addPropertyReadWrite("y", &glm::vec2::y)
         .endClass();
 
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Input")
         .addFunction("GetKey", &CppInputGetKey)
         .addFunction("GetKeyDown", &CppInputGetKeyDown)

@@ -21,7 +21,7 @@ void Put(const fs::path &path, const std::string &text) {
     fs::create_directories(path.parent_path()); std::ofstream(path) << text;
 }
 void Lua(const std::string &text) {
-    auto *state = g_runtime.lua_state;
+    auto *state = Runtime().lua_state;
     const int top = lua_gettop(state);
     if (luaL_dostring(state, text.c_str()) != LUA_OK) {
         std::string error = lua_tostring(state, -1); lua_settop(state, top);
@@ -80,14 +80,14 @@ Good={health=100,starts=0,updates=0,
 };
 auto State(const Engine &engine) {
     std::size_t records = 0;
-    for (const auto &[uid, list] : g_runtime.actor_components) records += list.size();
+    for (const auto &[uid, list] : Runtime().actor_components) records += list.size();
     return std::tuple{engine.GetRuntimeActors().size(), records,
-        g_runtime.actor_components.size(), g_runtime.actor_by_uid.size(),
-        g_runtime.actors_by_name.size(), g_runtime.component_index_by_key.size(),
-        g_runtime.actor_order_by_uid.size(), g_runtime.actor_uids_sorted.size(),
-        g_runtime.pending_on_start.size(), g_runtime.pending_actor_uids_to_activate.size(),
-        g_runtime.pending_destroy_actor_uids.size(), g_runtime.dirty_component_actor_uids.size(),
-        g_runtime.on_update_components.size(), g_runtime.on_late_update_components.size()};
+        Runtime().actor_components.size(), Runtime().actor_by_uid.size(),
+        Runtime().actors_by_name.size(), Runtime().component_index_by_key.size(),
+        Runtime().actor_order_by_uid.size(), Runtime().actor_uids_sorted.size(),
+        Runtime().pending_on_start.size(), Runtime().pending_actor_uids_to_activate.size(),
+        Runtime().pending_destroy_actor_uids.size(), Runtime().dirty_component_actor_uids.size(),
+        Runtime().on_update_components.size(), Runtime().on_late_update_components.size()};
 }
 void Rejection() {
     Fixture fixture; Engine engine; engine.InitializeHeadless(); engine.StepSimulation();

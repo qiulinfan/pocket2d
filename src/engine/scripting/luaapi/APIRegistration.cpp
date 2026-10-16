@@ -1,10 +1,19 @@
 #include "scripting/APIRegistration.h"
 #include "RegistrationDetail.h"
+#include "core/World.h"
 
 namespace APIRegistrationDetail {
 
-lua_State *g_lua_state = nullptr;
-Engine *g_engine = nullptr;
+namespace {
+struct RegistrationState {
+    lua_State *lua_state = nullptr;
+    Engine *engine = nullptr;
+};
+RegistrationState &Registration() { return World::Current().State<RegistrationState>(); }
+} // namespace
+
+lua_State *&LuaState() { return Registration().lua_state; }
+Engine *&BoundEngine() { return Registration().engine; }
 
 } // namespace APIRegistrationDetail
 
@@ -14,7 +23,7 @@ namespace APIRegistration {
 void Initialize(lua_State *lua_state) {
     using namespace APIRegistrationDetail;
 
-    g_lua_state = lua_state;
+    LuaState() = lua_state;
     RegisterApplicationAndDebugAPI();
     RegisterSceneAndCameraAPI();
     RegisterAudioAPI();
@@ -30,7 +39,7 @@ void Initialize(lua_State *lua_state) {
 
 // update the current engine pointer used by Lua APIs
 void BindEngine(Engine *engine) {
-    APIRegistrationDetail::g_engine = engine;
+    APIRegistrationDetail::BoundEngine() = engine;
 }
 
 } // namespace APIRegistration

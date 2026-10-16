@@ -17,7 +17,7 @@ using namespace ManagerDetail;
 using namespace SceneFormat;
 namespace fs=std::filesystem;
 void Check(bool value,const std::string &message){if(!value)throw std::runtime_error(message);}
-void Lua(const char *code){const auto top=lua_gettop(g_runtime.lua_state);const int status=luaL_dostring(g_runtime.lua_state,code);const std::string error=status==LUA_OK?"":lua_tostring(g_runtime.lua_state,-1);lua_settop(g_runtime.lua_state,top);Check(status==LUA_OK,error);}
+void Lua(const char *code){const auto top=lua_gettop(Runtime().lua_state);const int status=luaL_dostring(Runtime().lua_state,code);const std::string error=status==LUA_OK?"":lua_tostring(Runtime().lua_state,-1);lua_settop(Runtime().lua_state,top);Check(status==LUA_OK,error);}
 void Put(const fs::path &path,const std::string &value){fs::create_directories(path.parent_path());std::ofstream(path)<<value;}
 struct Fixture {
     fs::path previous=ResourcePath::ResourcesRootPath();
@@ -38,7 +38,7 @@ struct Snapshot {
     std::size_t actors,components,starts,activate,destroy,update,late;
     bool operator==(const Snapshot &)const=default;
 };
-Snapshot State(const Engine &engine){std::size_t components=0;for(const auto &[uid,records]:g_runtime.actor_components)components+=records.size();return {engine.GetRuntimeActors().size(),components,g_runtime.pending_on_start.size(),g_runtime.pending_actor_uids_to_activate.size(),g_runtime.pending_destroy_actor_uids.size(),g_runtime.on_update_components.size(),g_runtime.on_late_update_components.size()};}
+Snapshot State(const Engine &engine){std::size_t components=0;for(const auto &[uid,records]:Runtime().actor_components)components+=records.size();return {engine.GetRuntimeActors().size(),components,Runtime().pending_on_start.size(),Runtime().pending_actor_uids_to_activate.size(),Runtime().pending_destroy_actor_uids.size(),Runtime().on_update_components.size(),Runtime().on_late_update_components.size()};}
 void RejectionsHaveNoResidue(){
     Fixture fixture;Engine engine;engine.InitializeHeadless();engine.StepSimulation();
     auto *original=engine.GetRuntimeActorByUID(1);const auto generation=original->runtime_generation;
@@ -189,7 +189,7 @@ void PendingParentDoesNotBlockIndependentReparent(){
         if(!during_destroy) {
             Lua("ReparentSucceeded=Actor.Find('otherChild'):SetParent(nil)");
             Lua("assert(ReparentSucceeded and DestroyCalls==0)");
-            Check(g_runtime.pending_destroy_actor_uids.contains(1),"independent reparent prematurely finalized pending destruction");
+            Check(Runtime().pending_destroy_actor_uids.contains(1),"independent reparent prematurely finalized pending destruction");
         }
         engine.StepSimulation();
         Lua("assert(ReparentSucceeded and DestroyCalls==1)");
@@ -254,7 +254,7 @@ void RenameKeepsTeardownOperationsAndRejectsDispatch(){
     }
     {
         Fixture fixture;Engine engine;engine.InitializeHeadless();engine.StepSimulation();event_rename_engine=&engine;
-        luabridge::getGlobalNamespace(g_runtime.lua_state).addFunction("AttemptEventRename",&RenameDuringPublish);
+        luabridge::getGlobalNamespace(Runtime().lua_state).addFunction("AttemptEventRename",&RenameDuringPublish);
         Lua(R"(
             target=Actor.Find('source'):GetComponentByKey('logic');target.hits=0
             function callback(self,event)assert(not AttemptEventRename());self.hits=self.hits+1 end

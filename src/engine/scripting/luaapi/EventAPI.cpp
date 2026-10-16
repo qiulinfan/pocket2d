@@ -6,7 +6,7 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 
 void CppEventPublish(const std::string &event_type,
                      luabridge::LuaRef event_object) {
@@ -26,7 +26,7 @@ void CppEventUnsubscribe(const std::string &event_type,
 }
 
 void InjectEventAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Event")
         .addFunction("Publish", &CppEventPublish)
         .addFunction("Subscribe", &CppEventSubscribe)

@@ -80,7 +80,7 @@ void LogWindowFocusEvent(const SDL_WindowEvent &event) {
 } // namespace
 
 InputState &Input::State() {
-    return World::Current().GetInputState();
+    return World::Current().State<InputState>();
 }
 
 // initialize input state caches

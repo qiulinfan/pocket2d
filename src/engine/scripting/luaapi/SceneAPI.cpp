@@ -7,26 +7,26 @@
 
 namespace {
 
-using APIRegistrationDetail::g_engine;
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::BoundEngine;
+using APIRegistrationDetail::LuaState;
 
 void CppSceneLoad(const std::string &scene_name) {
-    if (g_engine == nullptr) return;
-    g_engine->RequestSceneLoad(scene_name);
+    if (BoundEngine() == nullptr) return;
+    BoundEngine()->RequestSceneLoad(scene_name);
 }
 
 std::string CppSceneGetCurrent() {
-    if (g_engine == nullptr) return "";
-    return g_engine->GetCurrentSceneName();
+    if (BoundEngine() == nullptr) return "";
+    return BoundEngine()->GetCurrentSceneName();
 }
 
 void CppSceneDontDestroy(const ActorHandle *actor) {
-    if (g_engine == nullptr || actor == nullptr) return;
-    g_engine->MarkActorDontDestroy(actor->Resolve());
+    if (BoundEngine() == nullptr || actor == nullptr) return;
+    BoundEngine()->MarkActorDontDestroy(actor->Resolve());
 }
 
 void InjectSceneAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Scene")
         .addFunction("Load", &CppSceneLoad)
         .addFunction("GetCurrent", &CppSceneGetCurrent)
@@ -35,32 +35,32 @@ void InjectSceneAPI() {
 }
 
 void CppCameraSetPosition(float x, float y) {
-    if (g_engine == nullptr) return;
-    g_engine->SetCameraPosition(x, y);
+    if (BoundEngine() == nullptr) return;
+    BoundEngine()->SetCameraPosition(x, y);
 }
 
 float CppCameraGetPositionX() {
-    if (g_engine == nullptr) return 0.0f;
-    return g_engine->GetCameraPositionX();
+    if (BoundEngine() == nullptr) return 0.0f;
+    return BoundEngine()->GetCameraPositionX();
 }
 
 float CppCameraGetPositionY() {
-    if (g_engine == nullptr) return 0.0f;
-    return g_engine->GetCameraPositionY();
+    if (BoundEngine() == nullptr) return 0.0f;
+    return BoundEngine()->GetCameraPositionY();
 }
 
 void CppCameraSetZoom(float zoom_factor) {
-    if (g_engine == nullptr) return;
-    g_engine->SetCameraZoom(zoom_factor);
+    if (BoundEngine() == nullptr) return;
+    BoundEngine()->SetCameraZoom(zoom_factor);
 }
 
 float CppCameraGetZoom() {
-    if (g_engine == nullptr) return 1.0f;
-    return g_engine->GetCameraZoom();
+    if (BoundEngine() == nullptr) return 1.0f;
+    return BoundEngine()->GetCameraZoom();
 }
 
 void InjectCameraAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Camera")
         .addFunction("SetPosition", &CppCameraSetPosition)
         .addFunction("GetPositionX", &CppCameraGetPositionX)

@@ -10,7 +10,7 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 
 template <typename Component>
 ActorHandle GetComponentActor(const Component *component) {
@@ -32,7 +32,7 @@ void SetTransformRotation(Transform *value, float rotation) {
 }
 
 void InjectTransformAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<Transform>("Transform")
         .addConstructor<void (*)()>()
         .addProperty("actor", &GetComponentActor<Transform>, &SetComponentActor<Transform>)
@@ -45,7 +45,7 @@ void InjectTransformAPI() {
 }
 
 void InjectSpriteRendererAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<SpriteRenderer>("SpriteRenderer")
         .addConstructor<void (*)()>()
         .addProperty("actor", &GetComponentActor<SpriteRenderer>, &SetComponentActor<SpriteRenderer>)
@@ -70,7 +70,7 @@ void InjectSpriteRendererAPI() {
 
 luabridge::LuaRef GetTileCell(Tilemap *map, const std::string &layer, double x, double y) {
     const auto value = map->GetCell(layer, x, y);
-    return value ? luabridge::LuaRef(g_lua_state, *value) : luabridge::LuaRef(g_lua_state);
+    return value ? luabridge::LuaRef(LuaState(), *value) : luabridge::LuaRef(LuaState());
 }
 
 std::string GetMapResource(const Tilemap *map) { return map->map_resource; }
@@ -80,7 +80,7 @@ std::string AnimationResource(const SpriteAnimation *animation) { return animati
 std::string AnimationTarget(const SpriteAnimation *animation) { return animation->renderer_key; }
 std::string AnimationInitialClip(const SpriteAnimation *animation) { return animation->clip; }
 void InjectSpriteAnimationAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<SpriteAnimation>("SpriteAnimation")
         .addProperty("actor", &GetComponentActor<SpriteAnimation>, &SetComponentActor<SpriteAnimation>)
         .addPropertyReadWrite("key", &SpriteAnimation::key)
@@ -105,7 +105,7 @@ void InjectSpriteAnimationAPI() {
 }
 
 void InjectTilemapAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<Tilemap>("Tilemap")
         .addProperty("actor", &GetComponentActor<Tilemap>, &SetComponentActor<Tilemap>)
         .addPropertyReadWrite("key", &Tilemap::key)

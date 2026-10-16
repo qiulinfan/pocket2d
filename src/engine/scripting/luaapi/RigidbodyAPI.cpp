@@ -24,8 +24,8 @@ template<bool Rigidbody::*member> void SetBoolean(Rigidbody *body, luabridge::Lu
     if (body->*member == value) return;
     body->*member = value;
     if constexpr (member == &Rigidbody::enabled) {
-        if (APIRegistrationDetail::g_engine)
-            APIRegistrationDetail::g_engine->NotifyRuntimePhysicsConfigurationChanged();
+        if (APIRegistrationDetail::BoundEngine())
+            APIRegistrationDetail::BoundEngine()->NotifyRuntimePhysicsConfigurationChanged();
     }
 }
 template<float Rigidbody::*member> float Number(const Rigidbody *body) { return body->*member; }
@@ -41,8 +41,8 @@ void SetBodyType(Rigidbody *body,luabridge::LuaRef input) {
     if(value!="dynamic"&&value!="static"&&value!="kinematic") throw std::invalid_argument("Rigidbody body_type must be dynamic/static/kinematic");
     if (body->body_type == value) return;
     body->body_type=value;
-    if (APIRegistrationDetail::g_engine)
-        APIRegistrationDetail::g_engine->NotifyRuntimePhysicsConfigurationChanged();
+    if (APIRegistrationDetail::BoundEngine())
+        APIRegistrationDetail::BoundEngine()->NotifyRuntimePhysicsConfigurationChanged();
 }
 std::string ColliderType(const Rigidbody *body) { return body->collider_type; }
 void SetColliderType(Rigidbody *body,luabridge::LuaRef input) {
@@ -62,7 +62,7 @@ void GravityScale(Rigidbody *body,luabridge::LuaRef input) { const double value 
 }
 namespace APIRegistrationDetail {
 void RegisterRigidbodyAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<Rigidbody>("Rigidbody")
         .addConstructor<void (*)()>()
         .addProperty("actor",&ActorOf,&SetActor)

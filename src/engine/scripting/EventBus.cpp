@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/World.h"
 #include "scripting/EventBus.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
@@ -52,19 +53,22 @@ struct PendingEventOperation {
           component_key(std::move(component_key_in)) {}
 };
 
-EventBus::Hooks g_hooks;
-std::unordered_map<std::string, std::vector<EventSubscription>>
-    g_event_subscriptions;
-std::vector<PendingEventOperation> g_pending_event_operations;
-unsigned g_dispatch_depth = 0;
+struct EventBusState {
+    EventBus::Hooks hooks;
+    std::unordered_map<std::string, std::vector<EventSubscription>>
+        event_subscriptions;
+    std::vector<PendingEventOperation> pending_event_operations;
+    unsigned dispatch_depth = 0;
+};
+EventBusState &Bus() { return World::Current().State<EventBusState>(); }
 struct DispatchScope {
-    DispatchScope() { ++g_dispatch_depth; }
-    ~DispatchScope() { --g_dispatch_depth; }
+    DispatchScope() { ++Bus().dispatch_depth; }
+    ~DispatchScope() { --Bus().dispatch_depth; }
 };
 const void *RawIdentity(const luabridge::LuaRef &value) {
-    value.push(g_hooks.lua_state);
-    const void *identity = lua_topointer(g_hooks.lua_state, -1);
-    lua_pop(g_hooks.lua_state, 1);
+    value.push(Bus().hooks.lua_state);
+    const void *identity = lua_topointer(Bus().hooks.lua_state, -1);
+    lua_pop(Bus().hooks.lua_state, 1);
     return identity;
 }
 struct CallbackIdentity {
@@ -87,16 +91,16 @@ struct CallbackHash {
 
 
 bool AreSameRef(const luabridge::LuaRef &a, const luabridge::LuaRef &b) {
-    if (g_hooks.are_same_ref == nullptr) return false;
-    return g_hooks.are_same_ref(a, b);
+    if (Bus().hooks.are_same_ref == nullptr) return false;
+    return Bus().hooks.are_same_ref(a, b);
 }
 
 // 把一个 component LuaRef 解析为稳定身份: actor_uid + component_key
 bool TryExtractComponentIdentity(const luabridge::LuaRef &component_ref,
                                  Actor::UID &actor_uid,
                                  std::string &component_key) {
-    if (g_hooks.try_extract_component_identity == nullptr) return false;
-    return g_hooks.try_extract_component_identity(component_ref, actor_uid,
+    if (Bus().hooks.try_extract_component_identity == nullptr) return false;
+    return Bus().hooks.try_extract_component_identity(component_ref, actor_uid,
                                                   component_key);
 }
 
@@ -104,15 +108,15 @@ bool TryExtractComponentIdentity(const luabridge::LuaRef &component_ref,
 bool IsComponentRefAlive(const luabridge::LuaRef &component_ref,
                          Actor::UID actor_uid,
                          const std::string &component_key) {
-    if (g_hooks.is_component_ref_alive == nullptr) return false;
-    return g_hooks.is_component_ref_alive(component_ref, actor_uid,
+    if (Bus().hooks.is_component_ref_alive == nullptr) return false;
+    return Bus().hooks.is_component_ref_alive(component_ref, actor_uid,
                                           component_key);
 }
 
 // EventBus 统一捕获 Lua 回调异常, 并交回宿主侧格式化输出
 void ReportError(Actor::UID actor_uid, const LuaBoundary::Error &e) {
-    if (g_hooks.report_error != nullptr) {
-        g_hooks.report_error(actor_uid, e);
+    if (Bus().hooks.report_error != nullptr) {
+        Bus().hooks.report_error(actor_uid, e);
     }
 }
 
@@ -133,36 +137,36 @@ bool DoesSubscriptionMatch(const EventSubscription &subscription,
 namespace EventBus {
 
 struct ReloadPlan::State {
-    decltype(g_event_subscriptions) active;
-    decltype(g_pending_event_operations) pending;
+    decltype(Bus().event_subscriptions) active;
+    decltype(Bus().pending_event_operations) pending;
 };
 ReloadPlan::ReloadPlan() = default;
 ReloadPlan::~ReloadPlan() = default;
 ReloadPlan::ReloadPlan(ReloadPlan &&) noexcept = default;
 ReloadPlan &ReloadPlan::operator=(ReloadPlan &&) noexcept = default;
-bool IsDispatching() { return g_dispatch_depth != 0; }
+bool IsDispatching() { return Bus().dispatch_depth != 0; }
 
 bool PrepareReload(const std::vector<ComponentReload> &components, ReloadPlan &plan, std::string &error) {
     plan.state_.reset();
     error.clear();
     if (IsDispatching()) { error = "EventBus reload requires an idle dispatch boundary"; return false; }
-    if (!g_hooks.lua_state) { error = "EventBus is not initialized"; return false; }
+    if (!Bus().hooks.lua_state) { error = "EventBus is not initialized"; return false; }
     struct StackScope {
         lua_State *state;
         int top;
         ~StackScope() { lua_settop(state, top); }
-    } stack{g_hooks.lua_state, lua_gettop(g_hooks.lua_state)};
+    } stack{Bus().hooks.lua_state, lua_gettop(Bus().hooks.lua_state)};
     try {
         using FunctionMap = std::unordered_map<const void *, luabridge::LuaRef>;
         std::unordered_map<const void *, FunctionMap> mappings;
         for (const auto &component : components) {
-            if (component.component.state() != g_hooks.lua_state ||
+            if (component.component.state() != Bus().hooks.lua_state ||
                 (!component.component.isTable() && !component.component.isUserdata()))
                 throw std::invalid_argument("reload requires a component object from the active Lua VM");
             const auto [entry, inserted] = mappings.try_emplace(RawIdentity(component.component));
             if (!inserted) throw std::invalid_argument("duplicate component reload entry");
             for (const auto &replacement : component.functions) {
-                if (replacement.before.state() != g_hooks.lua_state || replacement.after.state() != g_hooks.lua_state ||
+                if (replacement.before.state() != Bus().hooks.lua_state || replacement.after.state() != Bus().hooks.lua_state ||
                     !replacement.before.isFunction() || (!replacement.after.isNil() && !replacement.after.isFunction()))
                     throw std::invalid_argument("reload callback replacement must be a function to function/nil in the active VM");
                 const auto [mapping, fresh] = entry->second.emplace(RawIdentity(replacement.before), replacement.after);
@@ -174,8 +178,8 @@ bool PrepareReload(const std::vector<ComponentReload> &components, ReloadPlan &p
             }
         }
         auto candidate = std::make_unique<ReloadPlan::State>();
-        candidate->active = g_event_subscriptions;
-        candidate->pending = g_pending_event_operations;
+        candidate->active = Bus().event_subscriptions;
+        candidate->pending = Bus().pending_event_operations;
         const auto remap = [&](auto &entry) {
             const auto owner = mappings.find(RawIdentity(entry.component_ref));
             if (owner == mappings.end()) return true;
@@ -213,8 +217,8 @@ bool PrepareReload(const std::vector<ComponentReload> &components, ReloadPlan &p
 void CommitReload(ReloadPlan &&plan) noexcept {
     assert(!IsDispatching()); // caller commits immediately at the idle boundary
     if (!plan.state_) return;
-    g_event_subscriptions.swap(plan.state_->active);
-    g_pending_event_operations.swap(plan.state_->pending);
+    Bus().event_subscriptions.swap(plan.state_->active);
+    Bus().pending_event_operations.swap(plan.state_->pending);
     plan.state_.reset();
 }
 
@@ -229,13 +233,13 @@ KeyRemapPlan &KeyRemapPlan::operator=(KeyRemapPlan &&) noexcept=default;
 bool PrepareKeyRemap(const std::vector<ComponentKeyRemap> &components,KeyRemapPlan &plan,std::string &error) {
     plan.state_.reset();error.clear();
     if(IsDispatching()){error="EventBus key remap requires an idle dispatch boundary";return false;}
-    if(!g_hooks.lua_state){error="EventBus is not initialized";return false;}
-    const int top=lua_gettop(g_hooks.lua_state);
+    if(!Bus().hooks.lua_state){error="EventBus is not initialized";return false;}
+    const int top=lua_gettop(Bus().hooks.lua_state);
     try {
-        auto candidate=std::make_unique<KeyRemapPlan::State>();candidate->vm=g_hooks.lua_state;
+        auto candidate=std::make_unique<KeyRemapPlan::State>();candidate->vm=Bus().hooks.lua_state;
         std::set<std::pair<Actor::UID,std::string>> targets;
         for(const auto &component:components) {
-            if(component.component.state()!=g_hooks.lua_state||(!component.component.isTable()&&!component.component.isUserdata()))
+            if(component.component.state()!=Bus().hooks.lua_state||(!component.component.isTable()&&!component.component.isUserdata()))
                 throw std::invalid_argument("key remap requires a component object from the active Lua VM");
             if(component.actor_uid==Actor::kInvalidUID||component.before.empty()||component.after.empty()||
                component.before.size()>256||component.after.size()>256||component.before.find('\0')!=std::string::npos||component.after.find('\0')!=std::string::npos||component.before==component.after)
@@ -247,47 +251,47 @@ bool PrepareKeyRemap(const std::vector<ComponentKeyRemap> &components,KeyRemapPl
             if(!candidate->components.emplace(RawIdentity(component.component),component).second)
                 throw std::invalid_argument("key remap contains a duplicate component");
         }
-        plan.state_=std::move(candidate);lua_settop(g_hooks.lua_state,top);return true;
-    }catch(const std::exception &failure){lua_settop(g_hooks.lua_state,top);error=failure.what();return false;}
+        plan.state_=std::move(candidate);lua_settop(Bus().hooks.lua_state,top);return true;
+    }catch(const std::exception &failure){lua_settop(Bus().hooks.lua_state,top);error=failure.what();return false;}
 }
 void CommitKeyRemap(KeyRemapPlan &&plan) {
     if(!plan.state_)return;
-    if(IsDispatching()||g_hooks.lua_state!=plan.state_->vm)
+    if(IsDispatching()||Bus().hooks.lua_state!=plan.state_->vm)
         throw std::runtime_error("EventBus key remap lost its idle Lua lifetime boundary");
     const auto remap=[&](auto &entry) {
         const auto found=plan.state_->components.find(RawIdentity(entry.component_ref));
         if(found!=plan.state_->components.end()&&entry.actor_uid==found->second.actor_uid&&entry.component_key==found->second.before)
             entry.component_key=found->second.after;
     };
-    for(auto &[event,entries]:g_event_subscriptions)for(auto &entry:entries)remap(entry);
-    for(auto &entry:g_pending_event_operations)remap(entry);
+    for(auto &[event,entries]:Bus().event_subscriptions)for(auto &entry:entries)remap(entry);
+    for(auto &entry:Bus().pending_event_operations)remap(entry);
     plan.state_.reset();
 }
 
 // initialize hooks and clear old subscription state
 void Initialize(const Hooks &hooks) {
-    g_hooks = hooks;
+    Bus().hooks = hooks;
     Clear();
 }
 
 // clear subscriptions and pending operations, but keep hooks
 void Clear() {
-    g_event_subscriptions.clear();
-    g_pending_event_operations.clear();
+    Bus().event_subscriptions.clear();
+    Bus().pending_event_operations.clear();
 }
 
 // fully reset EventBus, including hooks
 void Shutdown() {
     Clear();
-    g_hooks = Hooks();
+    Bus().hooks = Hooks();
 }
 
 // publish immediately to current active subscribers
 void Publish(const std::string &event_type, luabridge::LuaRef event_object) {
     const DispatchScope dispatch;
     // Publish 是立即分发的: 只读取“当前已生效”的订阅表
-    auto subscriptions_it = g_event_subscriptions.find(event_type);
-    if (subscriptions_it == g_event_subscriptions.end()) return;
+    auto subscriptions_it = Bus().event_subscriptions.find(event_type);
+    if (subscriptions_it == Bus().event_subscriptions.end()) return;
 
     std::vector<EventSubscription> &subscriptions = subscriptions_it->second;
     // 先顺手清掉已经失效的订阅, 避免把事件投给被销毁的 component
@@ -301,7 +305,7 @@ void Publish(const std::string &event_type, luabridge::LuaRef event_object) {
         subscriptions.end());
 
     if (subscriptions.empty()) {
-        g_event_subscriptions.erase(subscriptions_it);
+        Bus().event_subscriptions.erase(subscriptions_it);
         return;
     }
 
@@ -314,13 +318,13 @@ void Publish(const std::string &event_type, luabridge::LuaRef event_object) {
             continue;
         }
 
-        const int top = lua_gettop(g_hooks.lua_state);
+        const int top = lua_gettop(Bus().hooks.lua_state);
         try {
             LuaBoundary::CallDiscard(subscription.function_ref, subscription.component_ref, event_object);
         } catch (const LuaBoundary::Error &e) {
             ReportError(subscription.actor_uid, e);
         }
-        lua_settop(g_hooks.lua_state, top);
+        lua_settop(Bus().hooks.lua_state, top);
     }
 }
 
@@ -336,7 +340,7 @@ void Subscribe(const std::string &event_type, luabridge::LuaRef component_ref,
         return;
     }
 
-    g_pending_event_operations.emplace_back(true, event_type, component_ref,
+    Bus().pending_event_operations.emplace_back(true, event_type, component_ref,
                                             function_ref, actor_uid,
                                             component_key);
 }
@@ -352,7 +356,7 @@ void Unsubscribe(const std::string &event_type, luabridge::LuaRef component_ref,
         return;
     }
 
-    g_pending_event_operations.emplace_back(false, event_type, component_ref,
+    Bus().pending_event_operations.emplace_back(false, event_type, component_ref,
                                             function_ref, actor_uid,
                                             component_key);
 }
@@ -361,8 +365,8 @@ void Unsubscribe(const std::string &event_type, luabridge::LuaRef component_ref,
 void RemoveSubscriptionsForComponent(const luabridge::LuaRef &component_ref,
                                      Actor::UID actor_uid,
                                      const std::string &component_key) {
-    for (auto subscriptions_it = g_event_subscriptions.begin();
-         subscriptions_it != g_event_subscriptions.end();) {
+    for (auto subscriptions_it = Bus().event_subscriptions.begin();
+         subscriptions_it != Bus().event_subscriptions.end();) {
         std::vector<EventSubscription> &subscriptions = subscriptions_it->second;
         subscriptions.erase(
             std::remove_if(subscriptions.begin(), subscriptions.end(),
@@ -375,36 +379,36 @@ void RemoveSubscriptionsForComponent(const luabridge::LuaRef &component_ref,
             subscriptions.end());
 
         if (subscriptions.empty()) {
-            subscriptions_it = g_event_subscriptions.erase(subscriptions_it);
+            subscriptions_it = Bus().event_subscriptions.erase(subscriptions_it);
         } else {
             ++subscriptions_it;
         }
     }
 
-    g_pending_event_operations.erase(
+    Bus().pending_event_operations.erase(
         std::remove_if(
-            g_pending_event_operations.begin(), g_pending_event_operations.end(),
+            Bus().pending_event_operations.begin(), Bus().pending_event_operations.end(),
             [&](const PendingEventOperation &operation) {
                 return operation.actor_uid == actor_uid &&
                        operation.component_key == component_key &&
                        AreSameRef(operation.component_ref, component_ref);
             }),
-        g_pending_event_operations.end());
+        Bus().pending_event_operations.end());
 }
 
 // apply queued subscribe / unsubscribe operations
 void ApplyPendingOperations() {
-    if (g_pending_event_operations.empty()) return;
+    if (Bus().pending_event_operations.empty()) return;
 
-    std::vector<PendingEventOperation> pending_operations = std::move(g_pending_event_operations);
-    g_pending_event_operations.clear();
+    std::vector<PendingEventOperation> pending_operations = std::move(Bus().pending_event_operations);
+    Bus().pending_event_operations.clear();
 
     for (const PendingEventOperation &operation : pending_operations) {
         if (operation.event_type.empty()) continue;
 
-        auto subscriptions_it = g_event_subscriptions.find(operation.event_type);
+        auto subscriptions_it = Bus().event_subscriptions.find(operation.event_type);
         if (!operation.is_subscribe) {
-            if (subscriptions_it == g_event_subscriptions.end()) continue;
+            if (subscriptions_it == Bus().event_subscriptions.end()) continue;
 
             std::vector<EventSubscription> &subscriptions = subscriptions_it->second;
             subscriptions.erase(
@@ -419,7 +423,7 @@ void ApplyPendingOperations() {
                 subscriptions.end());
 
             if (subscriptions.empty()) {
-                g_event_subscriptions.erase(subscriptions_it);
+                Bus().event_subscriptions.erase(subscriptions_it);
             }
             continue;
         }
@@ -431,7 +435,7 @@ void ApplyPendingOperations() {
             continue;
         }
 
-        std::vector<EventSubscription> &subscriptions = g_event_subscriptions[operation.event_type];
+        std::vector<EventSubscription> &subscriptions = Bus().event_subscriptions[operation.event_type];
         // 同一个 component-function pair 只保留一份正式订阅
         const bool already_subscribed = std::any_of(
             subscriptions.begin(), subscriptions.end(),

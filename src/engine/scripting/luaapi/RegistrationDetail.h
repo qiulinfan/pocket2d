@@ -6,8 +6,9 @@ class Engine;
 
 namespace APIRegistrationDetail {
 
-extern lua_State *g_lua_state;
-extern Engine *g_engine;
+// The Lua state and Engine registered for World::Current().
+lua_State *&LuaState();
+Engine *&BoundEngine();
 
 void RegisterApplicationAndDebugAPI();
 void RegisterSceneAndCameraAPI();

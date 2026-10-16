@@ -9,7 +9,7 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 
 void DestroyActorHandle(const ActorHandle *actor) {
     if (actor != nullptr) ComponentManager::DestroyActor(actor->Resolve());
@@ -34,7 +34,7 @@ int EqualActorHandles(lua_State *state) {
 }
 
 void InjectActorAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<ActorHandle>("Actor")
         .addFunction("IsValid", &ActorHandle::IsValid)
         .addProperty("is_valid", &ActorHandle::IsValid)
@@ -53,14 +53,14 @@ void InjectActorAPI() {
                      &ActorHandle::GetComponentsInChildren)
         .endClass();
 
-    lua_rawgetp(g_lua_state, LUA_REGISTRYINDEX,
+    lua_rawgetp(LuaState(), LUA_REGISTRYINDEX,
                 luabridge::detail::getClassRegistryKey<ActorHandle>());
-    lua_pushstring(g_lua_state, "__eq");
-    lua_pushcfunction(g_lua_state, APIRegistrationDetail::CheckedRawMetamethod<EqualActorHandles>);
-    lua_rawset(g_lua_state, -3);
-    lua_pop(g_lua_state, 1);
+    lua_pushstring(LuaState(), "__eq");
+    lua_pushcfunction(LuaState(), APIRegistrationDetail::CheckedRawMetamethod<EqualActorHandles>);
+    lua_rawset(LuaState(), -3);
+    lua_pop(LuaState(), 1);
 
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Actor")
         .addFunction("Instantiate", &Actor::Instantiate)
         .addFunction("Destroy", &DestroyActorHandle)

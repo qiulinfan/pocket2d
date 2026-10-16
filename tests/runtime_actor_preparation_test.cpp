@@ -19,7 +19,7 @@ using namespace ManagerDetail;
 namespace fs=std::filesystem;
 void Check(bool value,const std::string &message) { if(!value) throw std::runtime_error(message); }
 void Lua(const char *code) {
-    auto *state=g_runtime.lua_state;const int top=lua_gettop(state);
+    auto *state=Runtime().lua_state;const int top=lua_gettop(state);
     const int result=luaL_dostring(state,code);
     const auto error=result==LUA_OK?std::string():std::string(lua_tostring(state,-1));
     lua_settop(state,top);Check(result==LUA_OK,error);
@@ -60,9 +60,9 @@ struct Snapshot {
     bool operator==(const Snapshot &) const=default;
 };
 Snapshot State(const Engine &engine) {
-    return {engine.GetRuntimeActors().size(),g_runtime.actor_by_uid.size(),g_runtime.actor_components.size(),
-        g_runtime.pending_on_start.size(),g_runtime.pending_actor_uids_to_activate.size(),g_runtime.pending_destroy_actor_uids.size(),
-        g_runtime.on_update_components.size(),g_runtime.on_late_update_components.size(),g_runtime.runtime_add_component_counter};
+    return {engine.GetRuntimeActors().size(),Runtime().actor_by_uid.size(),Runtime().actor_components.size(),
+        Runtime().pending_on_start.size(),Runtime().pending_actor_uids_to_activate.size(),Runtime().pending_destroy_actor_uids.size(),
+        Runtime().on_update_components.size(),Runtime().on_late_update_components.size(),Runtime().runtime_add_component_counter};
 }
 void PreparationRejectsWithoutPublication() {
     Fixture fixture;Engine engine;engine.InitializeHeadless();engine.StepSimulation();
@@ -79,7 +79,7 @@ void PreparationRejectsWithoutPublication() {
         Check(RayCast::GetPhysicsWorld()==physics,"preparation failure created or replaced the physics world");
         Check(ComponentManager::FindActorByName("candidate").isNil(),"rejected actor is visible by name");
         Check(ComponentManager::FindActorByName("source").cast<ActorHandle>().value().generation==generation,"old actor generation changed");
-        lua_gc(g_runtime.lua_state,LUA_GCCOLLECT);
+        lua_gc(Runtime().lua_state,LUA_GCCOLLECT);
         Lua("assert(AUDIT.starts==1 and AUDIT.destroys==0 and Actor.Find('source'):GetComponent('Good').health==100)");
     };
     auto actor=Candidate(10000);actor.component_specs.push_back({"z_body","Rigidbody",{{"width",0.0}}});reject(actor,"dimensions");
@@ -96,34 +96,34 @@ void PreparationRejectsWithoutPublication() {
     Lua("Late.owned=nil");
     std::string error;
     auto discarded=PrepareRuntimeActor(Candidate(10000),error);
-    Check(discarded&&!discarded->CommitStarted()&&!lua_gc(g_runtime.lua_state,LUA_GCISRUNNING),error);
+    Check(discarded&&!discarded->CommitStarted()&&!lua_gc(Runtime().lua_state,LUA_GCISRUNNING),error);
     Check(State(engine)==before,"successful preparation published an actor");
-    {PreparedRuntimeActor moved(std::move(*discarded));discarded.reset();Check(!moved.CommitStarted()&&!lua_gc(g_runtime.lua_state,LUA_GCISRUNNING),"moving token lost ownership");}
-    Check(lua_gc(g_runtime.lua_state,LUA_GCISRUNNING),"discarded token did not restore GC mode");
-    lua_gc(g_runtime.lua_state,LUA_GCCOLLECT);engine.StepSimulation();
+    {PreparedRuntimeActor moved(std::move(*discarded));discarded.reset();Check(!moved.CommitStarted()&&!lua_gc(Runtime().lua_state,LUA_GCISRUNNING),"moving token lost ownership");}
+    Check(lua_gc(Runtime().lua_state,LUA_GCISRUNNING),"discarded token did not restore GC mode");
+    lua_gc(Runtime().lua_state,LUA_GCCOLLECT);engine.StepSimulation();
     Check(State(engine)==before,"discarded token left pending lifecycle work");
     Lua("assert(AUDIT.starts==1 and AUDIT.destroys==0 and Actor.Find('source'):GetComponent('Good').health==100)");
 }
 void PublicationAndLifecycle() {
     Fixture fixture;Engine engine;engine.InitializeHeadless();engine.StepSimulation();
-    auto *state=g_runtime.lua_state;std::string error;
+    auto *state=Runtime().lua_state;std::string error;
     auto deferred=PrepareRuntimeActor(Candidate(10000,"deferred"),error);Check(deferred!=nullptr,error);
-    auto *spawned=PublishRuntimeActor(*deferred,*g_runtime.scene_actors,true);
+    auto *spawned=PublishRuntimeActor(*deferred,*Runtime().scene_actors,true);
     engine.NotifyRuntimeActorPublished(*spawned);
     Check(deferred->CommitStarted()&&spawned->runtime_generation!=0,"publication did not enter commit/generation boundary");
     Check(ComponentManager::FindActorByName("deferred").cast<ActorHandle>().value().IsValid(),"published deferred actor is not findable");
     auto reference=ComponentManager::GetComponentByKey(10000,"a_good");
     Check(reference["starts"].cast<int>().value()==0&&reference["updates"].cast<int>().value()==0,"publication ran gameplay callbacks");
-    Check(std::find(g_runtime.actor_uids_sorted.begin(),g_runtime.actor_uids_sorted.end(),10000)==g_runtime.actor_uids_sorted.end(),"deferred actor was activated early");
-    bool repeated=false;try{PublishRuntimeActor(*deferred,*g_runtime.scene_actors,true);}catch(const std::exception&){repeated=true;}
+    Check(std::find(Runtime().actor_uids_sorted.begin(),Runtime().actor_uids_sorted.end(),10000)==Runtime().actor_uids_sorted.end(),"deferred actor was activated early");
+    bool repeated=false;try{PublishRuntimeActor(*deferred,*Runtime().scene_actors,true);}catch(const std::exception&){repeated=true;}
     Check(repeated,"published token was reusable");deferred.reset();
     engine.StepSimulation();
     Check(reference["starts"].cast<int>().value()==1&&reference["updates"].cast<int>().value()==0,"idle deferred spawn timeline changed");
     engine.StepSimulation();Check(reference["updates"].cast<int>().value()==1,"deferred actor never entered updates");
     auto immediate=PrepareRuntimeActor(Candidate(10001,"immediate"),error);Check(immediate!=nullptr,error);
-    const auto pending_before=g_runtime.pending_on_start.size();
-    auto *copy=PublishRuntimeActor(*immediate,*g_runtime.scene_actors,false);engine.NotifyRuntimeActorPublished(*copy);
-    Check(g_runtime.pending_on_start.size()==pending_before+1&&g_runtime.pending_actor_uids_to_activate.empty(),"immediate publication changed unrelated activation queues");
+    const auto pending_before=Runtime().pending_on_start.size();
+    auto *copy=PublishRuntimeActor(*immediate,*Runtime().scene_actors,false);engine.NotifyRuntimeActorPublished(*copy);
+    Check(Runtime().pending_on_start.size()==pending_before+1&&Runtime().pending_actor_uids_to_activate.empty(),"immediate publication changed unrelated activation queues");
     auto immediate_ref=ComponentManager::GetComponentByKey(copy->uid,"a_good");
     Check(immediate_ref["starts"].cast<int>().value()==0&&immediate_ref["updates"].cast<int>().value()==0,"immediate publication invoked callbacks");
     immediate.reset();engine.StepSimulation();
@@ -133,28 +133,28 @@ void PublicationAndLifecycle() {
     // physical list position as an order value already held by a live actor.
     Check(engine.DeleteRuntimeActorByUID(10000),"could not create actor-order gap");
     std::size_t largest_order=0;
-    for(const auto &[uid,order]:g_runtime.actor_order_by_uid) largest_order=std::max(largest_order,order);
+    for(const auto &[uid,order]:Runtime().actor_order_by_uid) largest_order=std::max(largest_order,order);
     auto older=PrepareRuntimeActor(Candidate(10002,"deferred_older"),error);Check(older!=nullptr,error);
-    auto *a=PublishRuntimeActor(*older,*g_runtime.scene_actors,true);engine.NotifyRuntimeActorPublished(*a);older.reset();
-    Check(g_runtime.actor_order_by_uid.at(a->uid)>largest_order,"publication reused a pruned actor-order position");
-    const auto activation_before=g_runtime.pending_actor_uids_to_activate;
+    auto *a=PublishRuntimeActor(*older,*Runtime().scene_actors,true);engine.NotifyRuntimeActorPublished(*a);older.reset();
+    Check(Runtime().actor_order_by_uid.at(a->uid)>largest_order,"publication reused a pruned actor-order position");
+    const auto activation_before=Runtime().pending_actor_uids_to_activate;
     auto newer=PrepareRuntimeActor(Candidate(10003,"immediate_newer"),error);Check(newer!=nullptr,error);
-    auto *b=PublishRuntimeActor(*newer,*g_runtime.scene_actors,false);engine.NotifyRuntimeActorPublished(*b);newer.reset();
-    Check(g_runtime.actor_order_by_uid.at(a->uid)<g_runtime.actor_order_by_uid.at(b->uid)&&
-          g_runtime.pending_actor_uids_to_activate==activation_before,"immediate publication disturbed pending older actor");
+    auto *b=PublishRuntimeActor(*newer,*Runtime().scene_actors,false);engine.NotifyRuntimeActorPublished(*b);newer.reset();
+    Check(Runtime().actor_order_by_uid.at(a->uid)<Runtime().actor_order_by_uid.at(b->uid)&&
+          Runtime().pending_actor_uids_to_activate==activation_before,"immediate publication disturbed pending older actor");
     auto a_ref=ComponentManager::GetComponentByKey(a->uid,"a_good");
     auto b_ref=ComponentManager::GetComponentByKey(b->uid,"a_good");
     engine.StepSimulation();
     Check(a_ref["starts"].cast<int>().value()==1&&a_ref["updates"].cast<int>().value()==0&&b_ref["updates"].cast<int>().value()==1,
           "mixed deferred/immediate publication changed first-tick lifecycle timing");
-    for(const auto *list:{&g_runtime.on_update_components,&g_runtime.on_late_update_components}) {
+    for(const auto *list:{&Runtime().on_update_components,&Runtime().on_late_update_components}) {
         std::vector<Actor::UID> order;
         for(const auto &entry:*list) if(entry.actor_uid==a->uid||entry.actor_uid==b->uid) order.push_back(entry.actor_uid);
         Check(order==std::vector<Actor::UID>{a->uid,b->uid},"late deferred activation reordered callbacks after immediate publication");
     }
-    const auto a_position=std::find(g_runtime.actor_uids_sorted.begin(),g_runtime.actor_uids_sorted.end(),a->uid);
-    const auto b_position=std::find(g_runtime.actor_uids_sorted.begin(),g_runtime.actor_uids_sorted.end(),b->uid);
-    Check(a_position!=g_runtime.actor_uids_sorted.end() && b_position!=g_runtime.actor_uids_sorted.end() && a_position<b_position,
+    const auto a_position=std::find(Runtime().actor_uids_sorted.begin(),Runtime().actor_uids_sorted.end(),a->uid);
+    const auto b_position=std::find(Runtime().actor_uids_sorted.begin(),Runtime().actor_uids_sorted.end(),b->uid);
+    Check(a_position!=Runtime().actor_uids_sorted.end() && b_position!=Runtime().actor_uids_sorted.end() && a_position<b_position,
           "mixed activation reordered animation/physics traversal");
     engine.StepSimulation();
     Check(a_ref["updates"].cast<int>().value()==1&&a_ref["late_updates"].cast<int>().value()==1&&b_ref["updates"].cast<int>().value()==2,
@@ -184,7 +184,7 @@ void FatalPublicationNotificationStopsFrame() {
     Fixture fixture; Engine engine; engine.InitializeHeadless(); engine.StepSimulation();
     Actor::UID duplicate=0; Check(engine.DuplicateRuntimeActorByUID(1,&duplicate),"could not set up fatal-boundary observer");
     engine.StepSimulation();
-    auto *state=g_runtime.lua_state;
+    auto *state=Runtime().lua_state;
     lua_pushlightuserdata(state,&engine);
     lua_pushcclosure(state,[](lua_State *vm)->int {
         auto *host=static_cast<Engine *>(lua_touserdata(vm,lua_upvalueindex(1)));

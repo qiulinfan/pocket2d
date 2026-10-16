@@ -404,6 +404,7 @@ void Engine::finishGameplayFrame() {
 }
 
 void Engine::StepSimulation() {
+    WorldScope world_scope(world_);
     if (!IsRunning() || !runtime_initialized_) return;
     advanceGameplay();
     if(scene_reset_required_)return;

@@ -18,10 +18,8 @@ public:
 
     // relative subdirectory under <project-root>/scenes for the active scene
     // 当前活跃 scene 在 <project-root>/scenes 下的相对子目录
+    // Both are per World.
     static const std::filesystem::path &GetActiveSceneSubdirectory();
-
-private:
-    static std::filesystem::path active_scene_subdirectory;
 };
 
 #endif

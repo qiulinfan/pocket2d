@@ -1,4 +1,5 @@
 #include "scripting/ScriptBudget.h"
+#include "core/World.h"
 #include "lua.hpp"
 #include <algorithm>
 #include <cstdlib>
@@ -19,7 +20,7 @@ struct BudgetState {
     bool warning_continues = false;
     ScriptBudget::Failure failure = ScriptBudget::Failure::None;
 };
-BudgetState budget;
+BudgetState &Budget() { return World::Current().State<BudgetState>(); }
 
 int PanicDiagnostic(lua_State *state) {
     const char *message = lua_type(state, -1) == LUA_TSTRING
@@ -74,8 +75,21 @@ void *Allocate(void *userdata, void *pointer, std::size_t old_size,
     return result;
 }
 
+const char *FailureText(ScriptBudget::Failure failure) {
+    switch (failure) {
+    case ScriptBudget::Failure::InstructionLimit: return "Lua instruction budget exceeded";
+    case ScriptBudget::Failure::HeapLimit: return "Lua heap allocation budget exceeded";
+    default: return "";
+    }
+}
+
 void CountHook(lua_State *state, lua_Debug *) {
     // No C++ objects requiring destruction may span luaL_error's long jump.
+    // The allocator userdata is this VM's own budget, independent of the
+    // World bound on the calling thread.
+    void *userdata = nullptr;
+    lua_getallocf(state, &userdata);
+    auto &budget = *static_cast<BudgetState *>(userdata);
     if (budget.request_depth == 0 || budget.limits.instruction_limit == 0) return;
     if (budget.failure == ScriptBudget::Failure::None) {
         const auto interval = static_cast<std::uint64_t>(std::max(lua_gethookcount(state), 1));
@@ -86,65 +100,59 @@ void CountHook(lua_State *state, lua_Debug *) {
         }
     }
     if (budget.failure != ScriptBudget::Failure::None)
-        luaL_error(state, "%s", ScriptBudget::FailureMessage());
+        luaL_error(state, "%s", FailureText(budget.failure));
 }
 } // namespace
 
 namespace ScriptBudget {
 void Configure(Limits limits) {
-    if (budget.vm != nullptr || budget.request_depth != 0)
+    if (Budget().vm != nullptr || Budget().request_depth != 0)
         throw std::logic_error("configure script limits before creating the Lua VM or entering a request");
-    budget.limits = limits;
-    budget.failure = Failure::None;
+    Budget().limits = limits;
+    Budget().failure = Failure::None;
 }
 
-Limits GetLimits() { return budget.limits; }
+Limits GetLimits() { return Budget().limits; }
 
 lua_State *NewState() {
-    if (budget.vm != nullptr) throw std::logic_error("only one budgeted Lua VM may exist per process");
-    budget.used = 0;
-    budget.peak = 0;
-    budget.warnings_enabled = false;
-    budget.warning_continues = false;
-    budget.vm = lua_newstate(Allocate, &budget);
-    if (budget.vm != nullptr) {
+    if (Budget().vm != nullptr) throw std::logic_error("only one budgeted Lua VM may exist per World");
+    Budget().used = 0;
+    Budget().peak = 0;
+    Budget().warnings_enabled = false;
+    Budget().warning_continues = false;
+    Budget().vm = lua_newstate(Allocate, &Budget());
+    if (Budget().vm != nullptr) {
         // luaL_newstate normally installs these diagnostics. Preserve them
         // when selecting our own allocator through lua_newstate instead.
-        lua_atpanic(budget.vm, PanicDiagnostic);
-        lua_setwarnf(budget.vm, WarningDiagnostic, &budget);
+        lua_atpanic(Budget().vm, PanicDiagnostic);
+        lua_setwarnf(Budget().vm, WarningDiagnostic, &Budget());
     }
-    if (budget.vm != nullptr && budget.limits.instruction_limit != 0)
+    if (Budget().vm != nullptr && Budget().limits.instruction_limit != 0)
         // Each coroutine has its own hook countdown. An interval larger than
         // one would leave short-lived coroutines partially uncharged.
-        lua_sethook(budget.vm, CountHook, LUA_MASKCOUNT, 1);
-    return budget.vm;
+        lua_sethook(Budget().vm, CountHook, LUA_MASKCOUNT, 1);
+    return Budget().vm;
 }
 
 void CloseState(lua_State *state) {
     if (state == nullptr) return;
     lua_close(state);
-    if (state == budget.vm) budget.vm = nullptr;
+    if (state == Budget().vm) Budget().vm = nullptr;
 }
 
 void BeginRequest() {
-    if (budget.request_depth++ == 0) {
-        budget.remaining = budget.limits.instruction_limit;
-        budget.failure = Failure::None;
+    if (Budget().request_depth++ == 0) {
+        Budget().remaining = Budget().limits.instruction_limit;
+        Budget().failure = Failure::None;
     }
 }
 
 void EndRequest() {
-    if (budget.request_depth != 0) --budget.request_depth;
+    if (Budget().request_depth != 0) --Budget().request_depth;
 }
 
-Failure GetFailure() { return budget.failure; }
-const char *FailureMessage() {
-    switch (budget.failure) {
-    case Failure::InstructionLimit: return "Lua instruction budget exceeded";
-    case Failure::HeapLimit: return "Lua heap allocation budget exceeded";
-    default: return "";
-    }
-}
-std::size_t HeapBytesUsed() { return budget.used; }
-std::size_t PeakHeapBytes() { return budget.peak; }
+Failure GetFailure() { return Budget().failure; }
+const char *FailureMessage() { return FailureText(Budget().failure); }
+std::size_t HeapBytesUsed() { return Budget().used; }
+std::size_t PeakHeapBytes() { return Budget().peak; }
 } // namespace ScriptBudget

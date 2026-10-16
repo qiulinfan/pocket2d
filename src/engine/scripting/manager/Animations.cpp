@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/World.h"
 #include "Internal.h"
 #include "scripting/RuntimeActorAssets.h"
 #include "rendering/SpriteAnimation.h"
@@ -13,7 +14,8 @@ using namespace ManagerDetail;
 struct Configuration { std::string resource, target = "sprite", clip; };
 using SharedAnimationData = std::shared_ptr<const SpriteAnimationAsset::Data>;
 struct Prepared { std::string resource; SharedAnimationData data; };
-std::map<std::pair<Actor::UID, std::string>, Prepared> prepared;
+struct PreparedAssets { std::map<std::pair<Actor::UID, std::string>, Prepared> prepared; };
+auto &PreparedForWorld() { return World::Current().State<PreparedAssets>().prepared; }
 Configuration ReadConfiguration(const Actor::ComponentSpec &spec) {
     Configuration result;
     for (const auto &property : spec.overrides) {
@@ -49,8 +51,8 @@ void ValidateLiveTarget(Actor::UID uid, const std::string &key, const std::strin
     const auto *renderer = FindComponentRecord(uid, target);
     if (!renderer || renderer->removed || renderer->type != "SpriteRenderer")
         throw std::runtime_error("SpriteAnimation requires live SpriteRenderer key '" + target + "'");
-    auto found = g_runtime.actor_components.find(uid);
-    if (found == g_runtime.actor_components.end()) return;
+    auto found = Runtime().actor_components.find(uid);
+    if (found == Runtime().actor_components.end()) return;
     for (const auto &record : found->second) {
         if (record->removed || record->type != "SpriteAnimation" || record->key == key) continue;
         auto *other = LuaBoundary::Cast<SpriteAnimation *>(record->instance_table);
@@ -65,14 +67,15 @@ struct LiveAnimation {
     SpriteAnimation *native;
 };
 std::vector<LiveAnimation> SnapshotAnimations() {
+    ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     std::vector<LiveAnimation> result;
-    for (const auto uid : g_runtime.actor_uids_sorted) {
-        const auto actor = g_runtime.actor_by_uid.find(uid);
-        if (actor == g_runtime.actor_by_uid.end()) continue;
+    for (const auto uid : runtime.actor_uids_sorted) {
+        const auto actor = runtime.actor_by_uid.find(uid);
+        if (actor == runtime.actor_by_uid.end()) continue;
         ActorHandle handle(actor->second);
         if (!handle.IsValid()) continue;
-        const auto components = g_runtime.actor_components.find(uid);
-        if (components == g_runtime.actor_components.end()) continue;
+        const auto components = runtime.actor_components.find(uid);
+        if (components == runtime.actor_components.end()) continue;
         for (const auto &record : components->second)
             if (!record->removed && record->type == "SpriteAnimation")
                 result.push_back({handle, record->key, record->instance_table,
@@ -94,7 +97,7 @@ void ComponentManager::ValidateSpriteAnimationActor(const Actor &actor) {
     }
 }
 void ComponentManager::PrepareSpriteAnimationAssets(const std::vector<Actor> &actors) {
-    decltype(prepared) next;
+    std::remove_reference_t<decltype(PreparedForWorld())> next;
     std::map<std::string, SharedAnimationData> resources;
     for (const auto &actor : actors) {
         ValidateTargets(actor);
@@ -112,26 +115,26 @@ void ComponentManager::PrepareSpriteAnimationAssets(const std::vector<Actor> &ac
             }
         }
     }
-    prepared = std::move(next);
+    PreparedForWorld() = std::move(next);
 }
-void ComponentManager::ClearPreparedSpriteAnimationAssets() { prepared.clear(); }
+void ComponentManager::ClearPreparedSpriteAnimationAssets() { PreparedForWorld().clear(); }
 SpriteAnimation *ComponentManager::GetSpriteAnimation(Actor::UID uid, const std::string &key) {
     const auto *record = FindComponentRecord(uid, key);
     return record && !record->removed && record->type == "SpriteAnimation" ? LuaBoundary::Cast<SpriteAnimation *>(record->instance_table) : nullptr;
 }
 void ComponentManager::InitializeSpriteAnimations(Actor::UID uid) {
-    const auto actor = g_runtime.actor_by_uid.find(uid);
-    if (actor == g_runtime.actor_by_uid.end()) return;
+    const auto actor = Runtime().actor_by_uid.find(uid);
+    if (actor == Runtime().actor_by_uid.end()) return;
     ValidateTargets(*actor->second);
-    auto records = g_runtime.actor_components.find(uid);
-    if (records == g_runtime.actor_components.end()) return;
+    auto records = Runtime().actor_components.find(uid);
+    if (records == Runtime().actor_components.end()) return;
     for (const auto &record : records->second) {
         if (record->removed || record->type != "SpriteAnimation") continue;
         auto *animation = LuaBoundary::Cast<SpriteAnimation *>(record->instance_table);
         if (animation->HasAsset() || animation->animation_resource.empty()) continue;
         ValidateLiveTarget(uid, record->key, animation->renderer_key);
-        const auto cached = prepared.find({uid, record->key});
-        auto data = cached != prepared.end() && cached->second.resource == animation->animation_resource
+        const auto cached = PreparedForWorld().find({uid, record->key});
+        auto data = cached != PreparedForWorld().end() && cached->second.resource == animation->animation_resource
             ? cached->second.data : std::make_shared<const SpriteAnimationAsset::Data>(SpriteAnimationAsset::LoadResource(animation->animation_resource));
         ValidateInitialClip(*data, animation->clip);
         animation->Initialize(data);
@@ -180,6 +183,7 @@ void ComponentManager::ApplySpriteAnimationPoses() {
         if (Alive(animation)) animation.native->ApplyPose();
 }
 void ComponentManager::ProcessSpriteAnimations() {
+    ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     struct Delivery { LiveAnimation animation; std::vector<SpriteAnimation::Event> events; };
     std::vector<Delivery> deliveries;
     for (auto &animation : SnapshotAnimations()) {
@@ -192,8 +196,8 @@ void ComponentManager::ProcessSpriteAnimations() {
         if (delivery.events.empty()) continue;
         // Retain values, not vector iterators or ComponentRecord pointers, across Lua calls.
         std::vector<std::pair<std::string, luabridge::LuaRef>> recipients;
-        const auto found = g_runtime.actor_components.find(animation.owner.uid);
-        if (found == g_runtime.actor_components.end()) continue;
+        const auto found = runtime.actor_components.find(animation.owner.uid);
+        if (found == runtime.actor_components.end()) continue;
         for (const auto &record : found->second) {
             if (record->removed || !record->on_start_called || IsBuiltinComponentType(record->type)) continue;
             // Do not read Lua fields while traversing this vector: __index can
@@ -206,7 +210,7 @@ void ComponentManager::ProcessSpriteAnimations() {
                 auto *record = FindComponentRecord(animation.owner.uid, key);
                 if (!record || !record->on_start_called || record->removed ||
                     !IsComponentRefAlive(reference, animation.owner.uid, key)) continue;
-                const int top = lua_gettop(g_runtime.lua_state);
+                const int top = lua_gettop(runtime.lua_state);
                 try {
                     const auto callback = ProtectedField(reference, "OnAnimationEvent");
                     if (!callback.isFunction()) continue;
@@ -218,7 +222,7 @@ void ComponentManager::ProcessSpriteAnimations() {
                     // using identities instead of the earlier native record.
                     if (!Alive(animation) || animation.native->GetPlaybackId() != event.playback_id) break;
                     if (!IsComponentRefAlive(reference, animation.owner.uid, key)) continue;
-                    auto payload = luabridge::newTable(g_runtime.lua_state);
+                    auto payload = luabridge::newTable(runtime.lua_state);
                     payload["type"] = event.type; payload["clip"] = event.clip;
                     payload["frame"] = event.frame; payload["marker"] = event.marker;
                     payload["component_key"] = animation.key;
@@ -226,7 +230,7 @@ void ComponentManager::ProcessSpriteAnimations() {
                 } catch (const LuaBoundary::Error &error) {
                     ReportError(GetActorNameByUID(animation.owner.uid) + "/" + key + ".OnAnimationEvent", error);
                 }
-                lua_settop(g_runtime.lua_state, top);
+                lua_settop(runtime.lua_state, top);
             }
         }
     }
@@ -264,10 +268,10 @@ void PrepareDetachedAnimationAssets(const Actor &actor,
     }
 }
 void ApplyDetachedActorPoses(Actor::UID uid) {
-    const auto owner = g_runtime.actor_by_uid.find(uid);
-    if (owner == g_runtime.actor_by_uid.end() || !owner->second || owner->second->runtime_destroyed) return;
-    const auto records = g_runtime.actor_components.find(uid);
-    if (records == g_runtime.actor_components.end()) return;
+    const auto owner = Runtime().actor_by_uid.find(uid);
+    if (owner == Runtime().actor_by_uid.end() || !owner->second || owner->second->runtime_destroyed) return;
+    const auto records = Runtime().actor_components.find(uid);
+    if (records == Runtime().actor_components.end()) return;
     for (const auto &record : records->second) {
         if (!record->removed && record->type == "SpriteAnimation")
             LuaBoundary::Cast<SpriteAnimation *>(record->instance_table)->ApplyPose();

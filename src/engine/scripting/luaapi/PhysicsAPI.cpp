@@ -12,7 +12,7 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 
 float CppVector2Distance(const b2Vec2 &a, const b2Vec2 &b) {
     return b2Distance(a, b);
@@ -20,14 +20,14 @@ float CppVector2Distance(const b2Vec2 &a, const b2Vec2 &b) {
 
 template <typename T>
 void InstallClassMetamethod(const char *name, lua_CFunction function) {
-    lua_rawgetp(g_lua_state, LUA_REGISTRYINDEX,
+    lua_rawgetp(LuaState(), LUA_REGISTRYINDEX,
                 luabridge::detail::getClassRegistryKey<T>());
-    if (lua_istable(g_lua_state, -1)) {
-        lua_pushstring(g_lua_state, name);
-        lua_pushcfunction(g_lua_state, function);
-        lua_rawset(g_lua_state, -3);
+    if (lua_istable(LuaState(), -1)) {
+        lua_pushstring(LuaState(), name);
+        lua_pushcfunction(LuaState(), function);
+        lua_rawset(LuaState(), -3);
     }
-    lua_pop(g_lua_state, 1);
+    lua_pop(LuaState(), 1);
 }
 
 b2Vec2 ReadVector(lua_State *state, int index) {
@@ -82,7 +82,7 @@ int LuaVector2Mul(lua_State *L) {
 }
 
 void InjectVector2API() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<b2Vec2>("Vector2")
         .addConstructor<void (*)(float, float)>()
         .addPropertyReadWrite("x", &b2Vec2::x)
@@ -101,7 +101,7 @@ void InjectVector2API() {
 }
 
 void InjectCollisionAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<Collision>("Collision")
         .addConstructor<void (*)()>()
         .addPropertyReadWrite("other", &Collision::other_handle)
@@ -114,14 +114,14 @@ void InjectCollisionAPI() {
 luabridge::LuaRef CppPhysicsRaycast(const b2Vec2 &position,
                                     const b2Vec2 &direction, float distance) {
                                         std::optional<RayCast::HitResult> hit = RayCast::Cast(position, direction, distance);
-    if (!hit.has_value()) return luabridge::LuaRef(g_lua_state);
-    return luabridge::LuaRef(g_lua_state, *hit);
+    if (!hit.has_value()) return luabridge::LuaRef(LuaState());
+    return luabridge::LuaRef(LuaState(), *hit);
 }
 
 luabridge::LuaRef CppPhysicsRaycastAll(const b2Vec2 &position,
                                        const b2Vec2 &direction,
                                        float distance) {
-    luabridge::LuaRef results = luabridge::newTable(g_lua_state);
+    luabridge::LuaRef results = luabridge::newTable(LuaState());
     const std::vector<RayCast::HitResult> hits = RayCast::CastAll(position, direction, distance);
     for (size_t i = 0; i < hits.size(); i++) {
         results[static_cast<int>(i + 1)] = hits[i];
@@ -130,7 +130,7 @@ luabridge::LuaRef CppPhysicsRaycastAll(const b2Vec2 &position,
 }
 
 void InjectPhysicsAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<RayCast::HitResult>("HitResult")
         .addConstructor<void (*)()>()
         .addPropertyReadWrite("actor", &RayCast::HitResult::actor_handle)
@@ -139,7 +139,7 @@ void InjectPhysicsAPI() {
         .addPropertyReadWrite("is_trigger", &RayCast::HitResult::is_trigger)
         .endClass();
 
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Physics")
         .addFunction("Raycast", &CppPhysicsRaycast)
         .addFunction("RaycastAll", &CppPhysicsRaycastAll)

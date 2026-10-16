@@ -267,9 +267,9 @@ void RegisteredCanonicalRedirectRejects() {
       redirect_prototype=A;redirect_count=redirect_instance.count;redirect_starts=redirect_instance.starts
     )");
     const auto registered=ComponentManager::GetComponentScriptSource("A");
-    const auto cache_before=ManagerDetail::g_runtime.component_source_cache;
-    const auto sources_before=ManagerDetail::g_runtime.component_type_sources;
-    const auto owners_before=ManagerDetail::g_runtime.component_source_owners;
+    const auto cache_before=ManagerDetail::Runtime().component_source_cache;
+    const auto sources_before=ManagerDetail::Runtime().component_type_sources;
+    const auto owners_before=ManagerDetail::Runtime().component_source_owners;
     const auto source=fixture.root/"component_types/A.lua";
     const auto target=fixture.root/"component_types/redirect/A.lua";
     std::filesystem::create_directories(target.parent_path());
@@ -286,14 +286,14 @@ void RegisteredCanonicalRedirectRejects() {
     const auto failed=ComponentManager::ReloadScripts({"A"});
     Check(!failed.ok&&!failed.diagnostics.empty()&&failed.diagnostics.front().stage=="read"&&
           Error(failed).find("redirected")!=std::string::npos,"in-root canonical redirect was not rejected before staging");
-    Check(ManagerDetail::g_runtime.component_source_cache.size()==cache_before.size()&&
-          ManagerDetail::g_runtime.component_type_sources==sources_before&&
-          ManagerDetail::g_runtime.component_source_owners==owners_before,
+    Check(ManagerDetail::Runtime().component_source_cache.size()==cache_before.size()&&
+          ManagerDetail::Runtime().component_type_sources==sources_before&&
+          ManagerDetail::Runtime().component_source_owners==owners_before,
           "rejected redirect changed source/cache ownership metadata");
     for(const auto &[path,prototype]:cache_before)
-        Check(ManagerDetail::AreSameLuaRef(prototype,ManagerDetail::g_runtime.component_source_cache.at(path)),
+        Check(ManagerDetail::AreSameLuaRef(prototype,ManagerDetail::Runtime().component_source_cache.at(path)),
               "rejected redirect replaced cached prototype identity");
-    Check(ManagerDetail::AreSameLuaRef(cache_before.at(registered),ManagerDetail::g_runtime.component_type_tables.at("A")),
+    Check(ManagerDetail::AreSameLuaRef(cache_before.at(registered),ManagerDetail::Runtime().component_type_tables.at("A")),
           "rejected redirect replaced active prototype registry");
     Lua(state,R"(
       assert(A==redirect_prototype and Actor.Find("a")==redirect_actor and redirect_actor:IsValid())
@@ -306,11 +306,11 @@ void RegisteredCanonicalRedirectRejects() {
     fixture.Source("A","A={OnUpdate=function(self)self.count=self.count+10 end}");
     const auto restored=ComponentManager::ReloadScripts({"A"});Check(restored.ok,Error(restored));
     Check(ComponentManager::GetComponentScriptSource("A")==registered&&
-          ManagerDetail::g_runtime.component_source_owners==owners_before,
+          ManagerDetail::Runtime().component_source_owners==owners_before,
           "repair changed stable registered source/owner identity");
-    Check(ManagerDetail::AreSameLuaRef(ManagerDetail::g_runtime.component_source_cache.at(registered),
-              ManagerDetail::g_runtime.component_type_tables.at("A"))&&
-          !ManagerDetail::AreSameLuaRef(cache_before.at(registered),ManagerDetail::g_runtime.component_source_cache.at(registered)),
+    Check(ManagerDetail::AreSameLuaRef(ManagerDetail::Runtime().component_source_cache.at(registered),
+              ManagerDetail::Runtime().component_type_tables.at("A"))&&
+          !ManagerDetail::AreSameLuaRef(cache_before.at(registered),ManagerDetail::Runtime().component_source_cache.at(registered)),
           "successful repair did not update the matching canonical cache entry");
     engine.StepSimulation();Lua(state,"assert(redirect_instance.count==redirect_count+11 and redirect_instance.starts==redirect_starts)");
     Check(ComponentManager::GetRuntimeErrorCount()==0,ComponentManager::GetLastRuntimeError());

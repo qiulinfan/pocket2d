@@ -76,13 +76,13 @@ Actor Candidate(Actor::UID uid = Actor::kRuntimeGeneratedUIDStart) {
     return actor;
 }
 struct Records {
-    lua_State *state = g_runtime.lua_state;
+    lua_State *state = ManagerDetail::Runtime().lua_state;
     std::vector<std::unique_ptr<ComponentRecord>> values;
     explicit Records(const Actor &actor) {
         PauseScenePreparationGC(state);
         try {
             for (const auto &spec : actor.component_specs) {
-                const auto found = g_runtime.component_type_tables.find(spec.type);
+                const auto found = ManagerDetail::Runtime().component_type_tables.find(spec.type);
                 const auto prototype = IsBuiltinComponentType(spec.type) ? luabridge::LuaRef(state) : found->second;
                 values.push_back(PrepareComponentRecord(spec, prototype));
             }
@@ -103,13 +103,13 @@ void DetachedAndCache() {
     auto sprite_ref = ComponentManager::GetComponentByKey(2, "sprite"); auto *old_sprite = sprite_ref.cast<SpriteRenderer *>().value();
     auto *world = RayCast::GetPhysicsWorld(); const int bodies = world->GetBodyCount();
     const auto pose_owner = old_sprite->GetAnimationOverrideOwner(); const int frame = FrameClock::GetFrameNumber();
-    const auto actor_count = engine.GetActorCount(); const int stack_top = lua_gettop(g_runtime.lua_state);
+    const auto actor_count = engine.GetActorCount(); const int stack_top = lua_gettop(ManagerDetail::Runtime().lua_state);
     const auto unchanged = [&] {
         Check(engine.GetActorCount() == actor_count && engine.GetRuntimeActorByUID(1) == old_actor &&
             old_body_ref.cast<Rigidbody *>().value()->body == old_body && RayCast::GetPhysicsWorld() == world &&
             world->GetBodyCount() == bodies && old_map->GetCell("ground", 0, 0) == 2 &&
             old_sprite->GetAnimationOverrideOwner() == pose_owner && FrameClock::GetFrameNumber() == frame &&
-            lua_gettop(g_runtime.lua_state) == stack_top, "detached preparation changed the running world");
+            lua_gettop(ManagerDetail::Runtime().lua_state) == stack_top, "detached preparation changed the running world");
     };
     auto outer = *engine.GetRuntimeActorByUID(2);
     ComponentManager::PrepareTilemapAssets({outer}); ComponentManager::PrepareSpriteAnimationAssets({outer});
@@ -123,7 +123,7 @@ void DetachedAndCache() {
             "detached map data/placement is not frame-zero ready");
         Check(animation->HasAsset() && animation->GetCurrentClip() == "idle" && animation->GetFrame() == 1 &&
             !records.Get<SpriteRenderer>("sprite")->HasAnimationOverride(), "detached animation applied a live pose");
-        Check(luabridge::getGlobal(g_runtime.lua_state, "DynamicLookups").cast<int>().value() == 0,
+        Check(luabridge::getGlobal(ManagerDetail::Runtime().lua_state, "DynamicLookups").cast<int>().value() == 0,
             "detached preparation executed dynamic getter");
         unchanged();
     }
@@ -162,7 +162,7 @@ void PublishPreparedWithoutIO() {
     std::string error;
     auto plan = PrepareRuntimeActor(Candidate(), error);
     Check(plan != nullptr, error);
-    Check(runtime.actors.empty() && g_runtime.actor_components.empty() && !Rigidbody::HasPhysicsWorld(),
+    Check(runtime.actors.empty() && ManagerDetail::Runtime().actor_components.empty() && !Rigidbody::HasPhysicsWorld(),
           "preparation published actor/native physics early");
     std::filesystem::remove(fixture.root / "maps/local.tilemap.json");
     std::filesystem::remove(fixture.root / "animations/local.animation.json");

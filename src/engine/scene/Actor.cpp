@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include "core/World.h"
 #include "scene/Actor.h"
 #include "scene/ActorHandle.h"
 #include "scene/Scene.h"
@@ -12,13 +13,17 @@
 
 namespace {
 
-std::unordered_map<std::string, Actor> g_template_cache;
-std::uint64_t g_next_actor_generation = 1;
+struct ActorTemplates {
+    std::unordered_map<std::string, Actor> template_cache;
+    // Generations are monotonic within a World; handles never cross Worlds.
+    std::uint64_t next_actor_generation = 1;
+};
+ActorTemplates &Templates() { return World::Current().State<ActorTemplates>(); }
 
 } // namespace
 
 void Actor::AssignRuntimeGeneration() {
-    runtime_generation = g_next_actor_generation++;
+    runtime_generation = Templates().next_actor_generation++;
 }
 
 ActorHandle::ActorHandle(const Actor *actor) {
@@ -71,7 +76,7 @@ luabridge::LuaRef ActorHandle::GetComponentsInChildren(const std::string &type_n
 }
 
 void Actor::ClearTemplateCache() {
-    g_template_cache.clear();
+    Templates().template_cache.clear();
 }
 
 std::string Actor::GetName() const {
@@ -141,15 +146,15 @@ luabridge::LuaRef Actor::GetComponentsInChildren(
 ActorTemplateCandidate Actor::ReadTemplateForSpawn(const std::string &template_name) {
     const std::string path = SceneFormat::ResolveTemplatePath(template_name, Scene::GetActiveSceneSubdirectory());
     if (path.empty()) throw std::runtime_error("template " + template_name + " is missing");
-    const auto cached = g_template_cache.find(path);
-    if (cached != g_template_cache.end()) return {cached->second, {}};
+    const auto cached = Templates().template_cache.find(path);
+    if (cached != Templates().template_cache.end()) return {cached->second, {}};
     Actor actor = SceneFormat::LoadActorTemplateAsset(template_name, Scene::GetActiveSceneSubdirectory()).actor;
     SceneFormat::EnsureBuiltinTransformComponent(actor.component_specs);
     return {std::move(actor), path};
 }
 
 void Actor::CommitSpawnTemplate(const ActorTemplateCandidate &candidate) {
-    if (!candidate.uncached_path.empty()) g_template_cache.emplace(candidate.uncached_path, candidate.actor);
+    if (!candidate.uncached_path.empty()) Templates().template_cache.emplace(candidate.uncached_path, candidate.actor);
 }
 
 Actor Actor::LoadTemplate(const std::string &template_name) {

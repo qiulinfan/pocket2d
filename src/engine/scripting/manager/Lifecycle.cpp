@@ -10,7 +10,7 @@
 #include <cmath>
 
 using namespace ManagerDetail;
-using APIRegistrationDetail::g_engine;
+using APIRegistrationDetail::BoundEngine;
 
 namespace {
 
@@ -47,28 +47,29 @@ struct PendingTriggerEvent {
 };
 
 ComponentRecord *FindRuntimeRigidbodyComponent(Actor::UID actor_uid) {
+    ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     ComponentRecord *rigidbody_component =
-        FindComponentRecord(actor_uid, "Rigidbody");
+        FindComponentRecord(runtime, actor_uid, "Rigidbody");
     if (rigidbody_component != nullptr) return rigidbody_component;
 
-    auto type_it = g_runtime.component_first_key_by_type.find(actor_uid);
-    if (type_it == g_runtime.component_first_key_by_type.end()) return nullptr;
+    auto type_it = runtime.component_first_key_by_type.find(actor_uid);
+    if (type_it == runtime.component_first_key_by_type.end()) return nullptr;
     auto rigidbody_key_it = type_it->second.find("Rigidbody");
     if (rigidbody_key_it == type_it->second.end()) return nullptr;
-    return FindComponentRecord(actor_uid, rigidbody_key_it->second);
+    return FindComponentRecord(runtime, actor_uid, rigidbody_key_it->second);
 }
 
 ComponentRecord *FindRuntimeTransformComponent(Actor::UID actor_uid) {
-    auto type_it = g_runtime.component_first_key_by_type.find(actor_uid);
-    if (type_it == g_runtime.component_first_key_by_type.end()) return nullptr;
+    auto type_it = Runtime().component_first_key_by_type.find(actor_uid);
+    if (type_it == Runtime().component_first_key_by_type.end()) return nullptr;
     auto transform_key_it = type_it->second.find("Transform");
     if (transform_key_it == type_it->second.end()) return nullptr;
     return FindComponentRecord(actor_uid, transform_key_it->second);
 }
 
 Actor *FindRuntimeActor(Actor::UID actor_uid) {
-    auto actor_it = g_runtime.actor_by_uid.find(actor_uid);
-    if (actor_it == g_runtime.actor_by_uid.end()) return nullptr;
+    auto actor_it = Runtime().actor_by_uid.find(actor_uid);
+    if (actor_it == Runtime().actor_by_uid.end()) return nullptr;
     return actor_it->second;
 }
 
@@ -140,28 +141,29 @@ struct CallbackTarget {
 CallbackTarget Snapshot(Actor::UID uid, const ComponentRecord &component) {
     return {uid, component.key, component.instance_table};
 }
-bool Alive(const CallbackTarget &target) {
-    return IsComponentRefAlive(target.reference, target.uid, target.key);
+bool Alive(RuntimeState &runtime, const CallbackTarget &target) {
+    return IsComponentRefAlive(runtime, target.reference, target.uid, target.key);
 }
 void Invoke(const CallbackTarget &target, const char *method, const Collision *collision = nullptr) {
-    const int top = lua_gettop(g_runtime.lua_state);
+    RuntimeState &runtime = Runtime();
+    const int top = lua_gettop(runtime.lua_state);
     try {
-        if (!Alive(target)) return;
+        if (!Alive(runtime, target)) return;
         const auto enabled = ProtectedField(target.reference, "enabled");
-        if (!Alive(target) || !LuaBoundary::IsEnabled(enabled)) return;
+        if (!Alive(runtime, target) || !LuaBoundary::IsEnabled(enabled)) return;
         const auto callback = ProtectedField(target.reference, method);
-        if (!Alive(target) || !callback.isFunction()) return;
+        if (!Alive(runtime, target) || !callback.isFunction()) return;
         if (collision) LuaBoundary::CallDiscard(callback, target.reference, *collision);
         else LuaBoundary::CallDiscard(callback, target.reference);
     } catch (const LuaBoundary::Error &error) {
         ReportError(GetActorNameByUID(target.uid), error);
     }
-    lua_settop(g_runtime.lua_state, top);
+    lua_settop(runtime.lua_state, top);
 }
 void DispatchContact(Actor::UID uid, const Collision &collision, const char *method,
                      bool ComponentRecord::*has_method) {
-    const auto found = g_runtime.actor_components.find(uid);
-    if (found == g_runtime.actor_components.end()) return;
+    const auto found = Runtime().actor_components.find(uid);
+    if (found == Runtime().actor_components.end()) return;
     std::vector<CallbackTarget> targets;
     for (const auto &component : found->second)
         if (!component->removed && component->on_start_called && component.get()->*has_method)
@@ -178,8 +180,8 @@ void DispatchTriggerEventToActor(const PendingTriggerEvent &event) {
 }
 void DestroyRemovedComponents(Actor::UID uid) {
     while (true) {
-        auto found = g_runtime.actor_components.find(uid);
-        if (found == g_runtime.actor_components.end()) return;
+        auto found = Runtime().actor_components.find(uid);
+        if (found == Runtime().actor_components.end()) return;
         std::vector<luabridge::LuaRef> removed;
         for (const auto &component : found->second)
             if (component->removed && !component->on_destroy_called) removed.push_back(component->instance_table);
@@ -187,16 +189,16 @@ void DestroyRemovedComponents(Actor::UID uid) {
         for (const auto &reference : removed) {
             // Reacquire after each callback. Only use a record pointer until the
             // invocation starts; no vector iterator is advanced after user code.
-            found = g_runtime.actor_components.find(uid);
-            if (found == g_runtime.actor_components.end()) return;
+            found = Runtime().actor_components.find(uid);
+            if (found == Runtime().actor_components.end()) return;
             ComponentRecord *target = nullptr;
             for (const auto &component : found->second)
                 if (AreSameLuaRef(component->instance_table, reference)) { target = component.get(); break; }
             if (target && target->removed) RunComponentOnDestroyIfNeeded(*target, uid);
         }
     }
-    auto found = g_runtime.actor_components.find(uid);
-    if (found == g_runtime.actor_components.end()) return;
+    auto found = Runtime().actor_components.find(uid);
+    if (found == Runtime().actor_components.end()) return;
     auto &components = found->second;
     std::erase_if(components, [](const auto &component) { return component->removed && component->on_destroy_called; });
     RebuildComponentIndexForActor(uid);
@@ -213,14 +215,14 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
     // SetType/SetEnabled may dispatch contact-exit callbacks. Keep userdata
     // alive and never retain a container iterator or record across those calls.
     std::vector<CallbackTarget> targets;
-    for (const auto &actor_components_entry : g_runtime.actor_components) {
+    for (const auto &actor_components_entry : Runtime().actor_components) {
         const auto uid = actor_components_entry.first;
         const auto *component = FindRuntimeRigidbodyComponent(uid);
         if (component && !component->removed) targets.push_back(Snapshot(uid, *component));
     }
     for (const auto &target : targets) {
-        if (g_engine && g_engine->RequiresSceneReset()) return;
-        if (!Alive(target)) continue;
+        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
+        if (!Alive(Runtime(), target)) continue;
         auto *rigidbody_component = FindComponentRecord(target.uid, target.key);
         Rigidbody *rigidbody = nullptr;
         if (!TryCastRuntimeRigidbody(rigidbody_component, rigidbody) ||
@@ -229,7 +231,7 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
         }
 
         const PhysicsHierarchy::State physics_state =
-            g_engine ? g_engine->GetRuntimePhysicsHierarchyStateByUID(target.uid)
+            BoundEngine() ? BoundEngine()->GetRuntimePhysicsHierarchyStateByUID(target.uid)
                      : PhysicsHierarchy::State{};
         const std::string effective_body_type =
             physics_state.has_rigidbody_self
@@ -241,33 +243,33 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
         before OnStart / physics step consume it.
         */
         rigidbody->SetEffectiveBodyType(effective_body_type);
-        if (!Alive(target)) continue;
+        if (!Alive(Runtime(), target)) continue;
         rigidbody->ApplyEnabledState();
     }
 }
 
 // per-frame lifecycle entry points
 void ComponentManager::ProcessPendingOnStart() {
-    auto pending = std::move(g_runtime.pending_on_start);
-    g_runtime.pending_on_start.clear();
+    auto pending = std::move(Runtime().pending_on_start);
+    Runtime().pending_on_start.clear();
     std::vector<CallbackTarget> targets;
     for (const auto &entry : pending) {
         const auto *component = FindComponentRecord(entry.actor_uid, entry.component_key);
         if (component && !component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
     }
     for (const auto &target : targets) {
-        if (g_engine && g_engine->RequiresSceneReset()) return;
+        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
         auto *component = FindComponentRecord(target.uid, target.key);
-        if (!component || !Alive(target) || component->on_start_called) continue;
+        if (!component || !Alive(Runtime(), target) || component->on_start_called) continue;
         // Disabled components have not started. Retain their pending entry so
         // later activation observes the same one-time lifecycle boundary.
         try {
             const auto enabled = ProtectedField(target.reference, "enabled");
-            if (!Alive(target)) continue;
+            if (!Alive(Runtime(), target)) continue;
             component = FindComponentRecord(target.uid, target.key);
             if (!component || component->on_start_called) continue;
             if (!LuaBoundary::IsEnabled(enabled)) {
-                g_runtime.pending_on_start.emplace_back(target.uid, target.key);
+                Runtime().pending_on_start.emplace_back(target.uid, target.key);
                 continue;
             }
             const bool has_callback = component->has_on_start;
@@ -276,30 +278,31 @@ void ComponentManager::ProcessPendingOnStart() {
             component->on_start_called = true;
             if (has_callback) {
                 const auto callback = ProtectedField(target.reference, "OnStart");
-                if (Alive(target) && callback.isFunction())
+                if (Alive(Runtime(), target) && callback.isFunction())
                     LuaBoundary::CallDiscard(callback, target.reference);
             }
         } catch (const LuaBoundary::Error &error) {
             ReportError(GetActorNameByUID(target.uid), error);
             component = FindComponentRecord(target.uid, target.key);
-            if (component && Alive(target) && !component->on_start_called)
-                g_runtime.pending_on_start.emplace_back(target.uid, target.key);
+            if (component && Alive(Runtime(), target) && !component->on_start_called)
+                Runtime().pending_on_start.emplace_back(target.uid, target.key);
         }
     }
 }
 
 void ComponentManager::ProcessOnUpdate() {
+    RuntimeState &runtime = Runtime();
     std::vector<CallbackTarget> targets;
-    targets.reserve(g_runtime.on_update_components.size());
-    for (const auto &entry : g_runtime.on_update_components) {
+    targets.reserve(runtime.on_update_components.size());
+    for (const auto &entry : runtime.on_update_components) {
         auto *component = entry.component;
         if (!component || component->removed) continue;
         if (component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
     }
     for (const auto &target : targets) {
-        if (g_engine && g_engine->RequiresSceneReset()) return;
-        auto *component = FindComponentRecord(target.uid, target.key);
-        if (!component || !Alive(target)) continue;
+        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
+        auto *component = FindComponentRecord(runtime, target.uid, target.key);
+        if (!component || !Alive(runtime, target)) continue;
         // Preserve original per-component ordering: earlier Lua updates can
         // change this emitter's enabled state during the same tick.
         SyncBuiltinParticleSystemState(*component);
@@ -309,8 +312,8 @@ void ComponentManager::ProcessOnUpdate() {
 
 void ComponentManager::ProcessOnLateUpdate() {
     std::vector<CallbackTarget> targets;
-    targets.reserve(g_runtime.on_late_update_components.size());
-    for (const auto &entry : g_runtime.on_late_update_components)
+    targets.reserve(Runtime().on_late_update_components.size());
+    for (const auto &entry : Runtime().on_late_update_components)
         if (entry.component && !entry.component->removed && entry.component->on_start_called)
             targets.push_back(Snapshot(entry.actor_uid, *entry.component));
     for (const auto &target : targets) Invoke(target, "OnLateUpdate");
@@ -329,13 +332,13 @@ void ComponentManager::StepPhysics() {
     // the frame-start bridge. Apply those requests before this actual step.
     ApplyEffectiveRigidbodyBodyTypes();
     FinalizePrePhysicsDestructions();
-    if (g_engine && g_engine->RequiresSceneReset()) return;
+    if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
 
     if (!Rigidbody::HasPhysicsWorld()) return;
 
-    if (g_engine != nullptr) {
+    if (BoundEngine() != nullptr) {
         ComponentManager::ResolveTransformHierarchy();
-        for (const auto &actor_components_entry : g_runtime.actor_components) {
+        for (const auto &actor_components_entry : Runtime().actor_components) {
             const Actor::UID actor_uid = actor_components_entry.first;
             ComponentRecord *rigidbody_component =
                 FindRuntimeRigidbodyComponent(actor_uid);
@@ -346,7 +349,7 @@ void ComponentManager::StepPhysics() {
             }
 
             const PhysicsHierarchy::State physics_state =
-                g_engine->GetRuntimePhysicsHierarchyStateByUID(actor_uid);
+                BoundEngine()->GetRuntimePhysicsHierarchyStateByUID(actor_uid);
             if (!physics_state.has_rigidbody_self ||
                 physics_state.effective_body_type == "dynamic") {
                 continue;
@@ -372,7 +375,7 @@ void ComponentManager::StepPhysics() {
 
     Rigidbody::StepPhysicsWorld();
 
-    for (const auto &actor_components_entry : g_runtime.actor_components) {
+    for (const auto &actor_components_entry : Runtime().actor_components) {
         const Actor::UID actor_uid = actor_components_entry.first;
         ComponentRecord *rigidbody_component =
             FindRuntimeRigidbodyComponent(actor_uid);
@@ -391,8 +394,8 @@ void ComponentManager::StepPhysics() {
         }
 
         const PhysicsHierarchy::State physics_state =
-            (g_engine != nullptr)
-                ? g_engine->GetRuntimePhysicsHierarchyStateByUID(actor_uid)
+            (BoundEngine() != nullptr)
+                ? BoundEngine()->GetRuntimePhysicsHierarchyStateByUID(actor_uid)
                 : PhysicsHierarchy::State{};
         if (!physics_state.has_rigidbody_self ||
             physics_state.effective_body_type != "dynamic") {
@@ -427,12 +430,12 @@ void ComponentManager::StepPhysics() {
 void ComponentManager::FinalizePrePhysicsDestructions() {
     while (true) {
         std::unordered_set<Actor::UID> dirty_actor_uids =
-            g_runtime.pending_destroy_actor_uids;
-        for (Actor::UID actor_uid : g_runtime.dirty_component_actor_uids) {
+            Runtime().pending_destroy_actor_uids;
+        for (Actor::UID actor_uid : Runtime().dirty_component_actor_uids) {
             if (dirty_actor_uids.find(actor_uid) != dirty_actor_uids.end()) continue;
 
-            auto actor_it = g_runtime.actor_components.find(actor_uid);
-            if (actor_it == g_runtime.actor_components.end()) continue;
+            auto actor_it = Runtime().actor_components.find(actor_uid);
+            if (actor_it == Runtime().actor_components.end()) continue;
 
             bool has_removed_components = false;
             for (const std::unique_ptr<ComponentRecord> &component_ptr :
@@ -446,7 +449,7 @@ void ComponentManager::FinalizePrePhysicsDestructions() {
             }
         }
         const std::unordered_set<Actor::UID> destroyed_actor_uids =
-            g_runtime.pending_destroy_actor_uids;
+            Runtime().pending_destroy_actor_uids;
 
         if (dirty_actor_uids.empty() && destroyed_actor_uids.empty()) {
             return;
@@ -454,55 +457,55 @@ void ComponentManager::FinalizePrePhysicsDestructions() {
 
         // Consume existing marks before user code; new marks from OnDestroy
         // must survive even when they concern an actor processed earlier.
-        for (Actor::UID actor_uid : dirty_actor_uids) g_runtime.dirty_component_actor_uids.erase(actor_uid);
+        for (Actor::UID actor_uid : dirty_actor_uids) Runtime().dirty_component_actor_uids.erase(actor_uid);
         for (Actor::UID actor_uid : dirty_actor_uids) DestroyRemovedComponents(actor_uid);
 
         RebuildLifecycleListsForDirtyActors(dirty_actor_uids);
 
         if (!destroyed_actor_uids.empty()) {
-            g_runtime.pending_on_start.erase(
+            Runtime().pending_on_start.erase(
                 std::remove_if(
-                    g_runtime.pending_on_start.begin(),
-                    g_runtime.pending_on_start.end(),
+                    Runtime().pending_on_start.begin(),
+                    Runtime().pending_on_start.end(),
                     [&](const PendingOnStartRecord &pending) {
                         return destroyed_actor_uids.find(pending.actor_uid) !=
                                destroyed_actor_uids.end();
                     }),
-                g_runtime.pending_on_start.end());
+                Runtime().pending_on_start.end());
 
-            g_runtime.pending_actor_uids_to_activate.erase(
+            Runtime().pending_actor_uids_to_activate.erase(
                 std::remove_if(
-                    g_runtime.pending_actor_uids_to_activate.begin(),
-                    g_runtime.pending_actor_uids_to_activate.end(),
+                    Runtime().pending_actor_uids_to_activate.begin(),
+                    Runtime().pending_actor_uids_to_activate.end(),
                     [&](Actor::UID actor_uid) {
                         return destroyed_actor_uids.find(actor_uid) !=
                                destroyed_actor_uids.end();
                     }),
-                g_runtime.pending_actor_uids_to_activate.end());
+                Runtime().pending_actor_uids_to_activate.end());
         }
 
         for (Actor::UID actor_uid : destroyed_actor_uids) {
-            auto actor_ptr_it = g_runtime.actor_by_uid.find(actor_uid);
+            auto actor_ptr_it = Runtime().actor_by_uid.find(actor_uid);
             Actor *actor_ptr =
-                (actor_ptr_it == g_runtime.actor_by_uid.end()) ? nullptr
+                (actor_ptr_it == Runtime().actor_by_uid.end()) ? nullptr
                                                               : actor_ptr_it->second;
             if (actor_ptr != nullptr) {
                 actor_ptr->runtime_destroyed = true;
             }
-            g_runtime.actor_by_uid.erase(actor_uid);
-            g_runtime.actor_components.erase(actor_uid);
-            g_runtime.component_index_by_key.erase(actor_uid);
-            g_runtime.component_first_key_by_type.erase(actor_uid);
-            g_runtime.component_keys_by_type.erase(actor_uid);
-            g_runtime.actor_order_by_uid.erase(actor_uid);
-            g_runtime.actor_uids_sorted.erase(
-                std::remove(g_runtime.actor_uids_sorted.begin(),
-                            g_runtime.actor_uids_sorted.end(), actor_uid),
-                g_runtime.actor_uids_sorted.end());
+            Runtime().actor_by_uid.erase(actor_uid);
+            Runtime().actor_components.erase(actor_uid);
+            Runtime().component_index_by_key.erase(actor_uid);
+            Runtime().component_first_key_by_type.erase(actor_uid);
+            Runtime().component_keys_by_type.erase(actor_uid);
+            Runtime().actor_order_by_uid.erase(actor_uid);
+            Runtime().actor_uids_sorted.erase(
+                std::remove(Runtime().actor_uids_sorted.begin(),
+                            Runtime().actor_uids_sorted.end(), actor_uid),
+                Runtime().actor_uids_sorted.end());
         }
 
         for (Actor::UID actor_uid : destroyed_actor_uids) {
-            g_runtime.pending_destroy_actor_uids.erase(actor_uid);
+            Runtime().pending_destroy_actor_uids.erase(actor_uid);
         }
     }
 }
@@ -513,8 +516,8 @@ void ComponentManager::QueueCollisionEvent(Actor *actor, Actor *other, const b2V
                                      const b2Vec2 &normal, bool is_enter) {
     if (actor == nullptr || other == nullptr) return;
 
-    auto actor_it = g_runtime.actor_by_uid.find(actor->uid);
-    if (actor_it == g_runtime.actor_by_uid.end() || actor_it->second == nullptr) {
+    auto actor_it = Runtime().actor_by_uid.find(actor->uid);
+    if (actor_it == Runtime().actor_by_uid.end() || actor_it->second == nullptr) {
         return;
     }
 
@@ -534,8 +537,8 @@ void ComponentManager::QueueTriggerEvent(Actor *actor, Actor *other, const b2Vec
                                    const b2Vec2 &normal, bool is_enter) {
     if (actor == nullptr || other == nullptr) return;
 
-    auto actor_it = g_runtime.actor_by_uid.find(actor->uid);
-    if (actor_it == g_runtime.actor_by_uid.end() || actor_it->second == nullptr) {
+    auto actor_it = Runtime().actor_by_uid.find(actor->uid);
+    if (actor_it == Runtime().actor_by_uid.end() || actor_it->second == nullptr) {
         return;
     }
 
@@ -555,60 +558,60 @@ void ComponentManager::FinalizeFrameMutations() {
     // 1) 激活本帧新建 actor (下一帧开始参与生命周期)
     // 2) 清理 removed 组件
     // 3) 处理 Actor.Destroy 的最终移除
-    if (g_runtime.pending_actor_uids_to_activate.empty() &&
-        g_runtime.dirty_component_actor_uids.empty() &&
-        g_runtime.pending_destroy_actor_uids.empty()) {
+    if (Runtime().pending_actor_uids_to_activate.empty() &&
+        Runtime().dirty_component_actor_uids.empty() &&
+        Runtime().pending_destroy_actor_uids.empty()) {
         return;
     }
 
     std::unordered_set<Actor::UID> dirty_actor_uids =
-        std::move(g_runtime.dirty_component_actor_uids);
-    g_runtime.dirty_component_actor_uids.clear();
+        std::move(Runtime().dirty_component_actor_uids);
+    Runtime().dirty_component_actor_uids.clear();
 
-    for (Actor::UID actor_uid : g_runtime.pending_actor_uids_to_activate) {
-        if (g_runtime.pending_destroy_actor_uids.find(actor_uid) !=
-            g_runtime.pending_destroy_actor_uids.end()) {
+    for (Actor::UID actor_uid : Runtime().pending_actor_uids_to_activate) {
+        if (Runtime().pending_destroy_actor_uids.find(actor_uid) !=
+            Runtime().pending_destroy_actor_uids.end()) {
             continue;
         }
-        if (g_runtime.actor_order_by_uid.find(actor_uid) ==
-            g_runtime.actor_order_by_uid.end()) {
-            g_runtime.actor_order_by_uid[actor_uid] = g_runtime.next_actor_order++;
+        if (Runtime().actor_order_by_uid.find(actor_uid) ==
+            Runtime().actor_order_by_uid.end()) {
+            Runtime().actor_order_by_uid[actor_uid] = Runtime().next_actor_order++;
         }
-        auto actor_ptr_it = g_runtime.actor_by_uid.find(actor_uid);
-        if (actor_ptr_it == g_runtime.actor_by_uid.end() ||
+        auto actor_ptr_it = Runtime().actor_by_uid.find(actor_uid);
+        if (actor_ptr_it == Runtime().actor_by_uid.end() ||
             actor_ptr_it->second == nullptr) {
             continue;
         }
         // Normally append; an immediate host duplicate can already follow this
         // delayed actor in publication order. Keep animation/physics traversal
         // consistent with the lifecycle caches in that mixed case.
-        auto &active = g_runtime.actor_uids_sorted;
+        auto &active = Runtime().actor_uids_sorted;
         const auto before = [](Actor::UID a, Actor::UID b) {
-            return g_runtime.actor_order_by_uid.at(a) < g_runtime.actor_order_by_uid.at(b);
+            return Runtime().actor_order_by_uid.at(a) < Runtime().actor_order_by_uid.at(b);
         };
         if (active.empty() || !before(actor_uid, active.back())) active.push_back(actor_uid);
         else active.insert(std::lower_bound(active.begin(), active.end(), actor_uid, before), actor_uid);
 
         // Newly instantiated actors have no existing lifecycle entries yet.
         // Append them directly instead of forcing a full dirty-list rebuild/sort.
-        auto actor_components_it = g_runtime.actor_components.find(actor_uid);
-        if (actor_components_it != g_runtime.actor_components.end()) {
+        auto actor_components_it = Runtime().actor_components.find(actor_uid);
+        if (actor_components_it != Runtime().actor_components.end()) {
             for (std::unique_ptr<ComponentRecord> &component_ptr :
                  actor_components_it->second) {
                 ComponentRecord &component = *component_ptr;
                 if (component.removed) continue;
                 if (component.has_on_update) {
-                    AppendOrderedLifecycle(g_runtime.on_update_components, actor_uid, &component);
+                    AppendOrderedLifecycle(Runtime().on_update_components, actor_uid, &component);
                 }
                 if (component.has_on_late_update) {
-                    AppendOrderedLifecycle(g_runtime.on_late_update_components, actor_uid, &component);
+                    AppendOrderedLifecycle(Runtime().on_late_update_components, actor_uid, &component);
                 }
             }
         }
 
         dirty_actor_uids.erase(actor_uid);
     }
-    g_runtime.pending_actor_uids_to_activate.clear();
+    Runtime().pending_actor_uids_to_activate.clear();
 
     // Snapshot-based teardown permits OnDestroy to add/remove components.
     for (Actor::UID actor_uid : dirty_actor_uids) DestroyRemovedComponents(actor_uid);

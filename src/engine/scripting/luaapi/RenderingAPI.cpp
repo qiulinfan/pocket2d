@@ -7,7 +7,7 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 
 int DowncastToInt(float value) {
     return static_cast<int>(value);
@@ -105,7 +105,7 @@ void CppImageDrawPixel(float x, float y, float r, float g, float b, float a) {
 }
 
 void InjectImageAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Image")
         .addFunction("DrawUI", &CppImageDrawUI)
         .addFunction("DrawUIEx", &CppImageDrawUIEx)
@@ -132,7 +132,7 @@ void CppTextDraw(const std::string &str_content, float x, float y,
 }
 
 void InjectTextAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Text")
         .addFunction("Draw", &CppTextDraw)
         .endNamespace();

@@ -22,15 +22,15 @@ struct GCStop {
     ~GCStop(){if(running)lua_gc(state,LUA_GCRESTART);}
 };
 Ref Raw(const Ref &table,const char *name) {
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     table.push(state);lua_pushstring(state,name);lua_rawget(state,-2);return Ref::fromStack(state,-1);
 }
 const void *Identity(const Ref &value) {
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     value.push(state);return lua_topointer(state,-1);
 }
 bool Plain(const Ref &table) {
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     table.push(state);return lua_getmetatable(state,-1)==0;
 }
 std::string Read(const std::filesystem::path &path) {
@@ -52,7 +52,7 @@ void ValidatePrototype(const Ref &prototype) {
     if(!prototype.isTable()||!Plain(prototype))throw std::runtime_error("reload requires a plain component prototype table");
     if(!Raw(prototype,"actor").isNil()||!Raw(prototype,"key").isNil())
         throw std::runtime_error("prototype cannot replace engine actor/key identity");
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     prototype.push(state);lua_pushnil(state);
     while(lua_next(state,-2)) {
         if(lua_type(state,-2)!=LUA_TSTRING)throw std::runtime_error("prototype keys must be strings");
@@ -67,7 +67,7 @@ void ValidatePrototype(const Ref &prototype) {
     }
 }
 void ValidateInstanceMetatable(const Ref &instance,const Ref &prototype) {
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};instance.push(state);
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};instance.push(state);
     if(!lua_getmetatable(state,-1))throw std::runtime_error("instance no longer has the engine prototype metatable");
     const int meta=lua_gettop(state);int entries=0;lua_pushnil(state);
     while(lua_next(state,meta)) {
@@ -84,7 +84,7 @@ void ValidateInstanceMetatable(const Ref &instance,const Ref &prototype) {
 // hidden old closure. Native values and references to other registered components keep
 // their identity and are not traversed as if owned script tables.
 void ValidateState(const Ref &root,const std::unordered_set<const void *> &instances) {
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     std::unordered_set<const void *> seen;
     struct Entry{Ref value;int depth;bool root;};std::vector<Entry> pending{{root,0,true}};
     std::size_t nodes=0;
@@ -109,7 +109,7 @@ void ValidateState(const Ref &root,const std::unordered_set<const void *> &insta
     }
 }
 std::vector<EventBus::FunctionReplacement> Methods(const Ref &before,const Ref &after) {
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     std::vector<EventBus::FunctionReplacement> result;
     before.push(state);const int index=lua_gettop(state);lua_pushnil(state);
     while(lua_next(state,index)) {
@@ -133,12 +133,12 @@ struct Prepared {
 
 std::string ComponentManager::GetComponentScriptSource(const std::string &type) {
     if(IsBuiltinComponentType(type))return {};
-    const auto found=g_runtime.component_type_sources.find(type);
-    return found==g_runtime.component_type_sources.end()?std::string{}:found->second;
+    const auto found=Runtime().component_type_sources.find(type);
+    return found==Runtime().component_type_sources.end()?std::string{}:found->second;
 }
 
 ScriptReloadResult ComponentManager::ReloadScripts(const std::vector<std::string> &types) {
-    ScriptReloadResult result;auto *state=g_runtime.lua_state;
+    ScriptReloadResult result;auto *state=Runtime().lua_state;
     auto fail=[&](const std::string &type,const std::string &resource,const std::string &stage,const std::string &message){
         result.diagnostics.push_back({ScriptReloadCandidate::SanitizeDiagnosticText(type),
             ScriptReloadCandidate::SanitizeDiagnosticText(resource),stage,
@@ -160,9 +160,9 @@ ScriptReloadResult ComponentManager::ReloadScripts(const std::vector<std::string
             current_type=type;current_resource.clear();
             if(type.empty()||type.size()>128||type.find('\0')!=std::string::npos||!unique.insert(type).second)
                 return fail(type,"","validate","type names must be nonempty, bounded and unique");
-            auto found=g_runtime.component_type_tables.find(type);
-            auto location=g_runtime.component_type_sources.find(type);
-            if(IsBuiltinComponentType(type)||found==g_runtime.component_type_tables.end()||location==g_runtime.component_type_sources.end())
+            auto found=Runtime().component_type_tables.find(type);
+            auto location=Runtime().component_type_sources.find(type);
+            if(IsBuiltinComponentType(type)||found==Runtime().component_type_tables.end()||location==Runtime().component_type_sources.end())
                 return fail(type,"","validate","type is not a registered Lua component");
             ValidatePrototype(found->second);
             const auto registered=std::filesystem::path(std::u8string(location->second.begin(),location->second.end()));
@@ -181,29 +181,29 @@ ScriptReloadResult ComponentManager::ReloadScripts(const std::vector<std::string
             for(const auto &error:candidate.diagnostics)result.diagnostics.push_back({error.type,error.resource,error.stage,error.message,error.line});
             return result;
         }
-        auto registry=g_runtime.component_type_tables;
-        auto source_cache=g_runtime.component_source_cache;
+        auto registry=Runtime().component_type_tables;
+        auto source_cache=Runtime().component_source_cache;
         std::unordered_map<std::string,std::vector<EventBus::FunctionReplacement>> replacements;
         for(const auto &source:sources) {
             current_type=source.type;current_resource=source.resource;
             const auto &prototype=candidate.exports.at(source.type);ValidatePrototype(prototype);
             replacements.emplace(source.type,Methods(registry.at(source.type),prototype));
             registry.at(source.type)=prototype;
-            source_cache.insert_or_assign(g_runtime.component_type_sources.at(source.type),prototype);
+            source_cache.insert_or_assign(Runtime().component_type_sources.at(source.type),prototype);
             result.types.push_back(source.type);
         }
         std::unordered_set<const void *> instances;
-        for(const auto &[uid,records]:g_runtime.actor_components)for(const auto &record:records)
+        for(const auto &[uid,records]:Runtime().actor_components)for(const auto &record:records)
             if(record->instance_table.isTable())instances.insert(Identity(record->instance_table));
         std::vector<Prepared> prepared;
         std::vector<EventBus::ComponentReload> events;
         std::unordered_map<ComponentRecord *,std::array<bool,8>> future_flags;
-        for(const auto &[uid,records]:g_runtime.actor_components)for(const auto &record:records) {
+        for(const auto &[uid,records]:Runtime().actor_components)for(const auto &record:records) {
             if(record->removed||!unique.contains(record->type))continue;
-            current_type=record->type;current_resource=std::filesystem::relative(g_runtime.component_type_sources.at(current_type),ResourcePath::ResourcesRootPath()).generic_string();
-            if(record->on_destroy_called||g_runtime.pending_destroy_actor_uids.contains(uid))
+            current_type=record->type;current_resource=std::filesystem::relative(Runtime().component_type_sources.at(current_type),ResourcePath::ResourcesRootPath()).generic_string();
+            if(record->on_destroy_called||Runtime().pending_destroy_actor_uids.contains(uid))
                 return fail(current_type,current_resource,"validate","cannot reload a component pending destruction");
-            const auto &before=g_runtime.component_type_tables.at(record->type);
+            const auto &before=Runtime().component_type_tables.at(record->type);
             const auto &after=candidate.exports.at(record->type);
             ValidateInstanceMetatable(record->instance_table,before);ValidateState(record->instance_table,instances);
             auto defaults=CloneComponentDefaults(after,record->type,&record->instance_table);ValidateState(defaults,instances);
@@ -228,9 +228,9 @@ ScriptReloadResult ComponentManager::ReloadScripts(const std::vector<std::string
         if(!EventBus::PrepareReload(events,event_plan,event_error))return fail(current_type,current_resource,"validate",event_error);
         // All C++ allocations and lifecycle ordering happen before publication.
         std::vector<LifecycleComponentRef> updates,late_updates;
-        const std::unordered_set<Actor::UID> pending_actors(g_runtime.pending_actor_uids_to_activate.begin(),g_runtime.pending_actor_uids_to_activate.end());
-        for(const auto &[uid,records]:g_runtime.actor_components) {
-            if(g_runtime.pending_destroy_actor_uids.contains(uid)||pending_actors.contains(uid))continue;
+        const std::unordered_set<Actor::UID> pending_actors(Runtime().pending_actor_uids_to_activate.begin(),Runtime().pending_actor_uids_to_activate.end());
+        for(const auto &[uid,records]:Runtime().actor_components) {
+            if(Runtime().pending_destroy_actor_uids.contains(uid)||pending_actors.contains(uid))continue;
             for(const auto &record:records) {
                 if(record->removed)continue;
                 const auto found=future_flags.find(record.get());
@@ -260,9 +260,9 @@ ScriptReloadResult ComponentManager::ReloadScripts(const std::vector<std::string
             lua_pushglobaltable(state);lua_pushlstring(state,source.type.data(),source.type.size());
             candidate.exports.at(source.type).push(state);lua_rawset(state,-3);lua_pop(state,1);
         }
-        g_runtime.component_type_tables.swap(registry);
-        g_runtime.component_source_cache.swap(source_cache);
-        g_runtime.on_update_components.swap(updates);g_runtime.on_late_update_components.swap(late_updates);
+        Runtime().component_type_tables.swap(registry);
+        Runtime().component_source_cache.swap(source_cache);
+        Runtime().on_update_components.swap(updates);Runtime().on_late_update_components.swap(late_updates);
         EventBus::CommitReload(std::move(event_plan));
         result.instances_updated=static_cast<int>(prepared.size());result.ok=true;return result;
     }catch(const std::exception &error){if(commit_started)throw;return fail(current_type,current_resource,"validate",error.what());}

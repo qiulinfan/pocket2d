@@ -25,8 +25,8 @@ void Text(const std::string &value,const char *label) {
     }
 }
 void UnusedUID(Actor::UID uid) {
-    Require(!g_runtime.actor_by_uid.contains(uid)&&!g_runtime.actor_components.contains(uid)&&
-            !g_runtime.pending_destroy_actor_uids.contains(uid),"runtime actor UID is already registered");
+    Require(!Runtime().actor_by_uid.contains(uid)&&!Runtime().actor_components.contains(uid)&&
+            !Runtime().pending_destroy_actor_uids.contains(uid),"runtime actor UID is already registered");
 }
 void ValidatePoses(const std::vector<std::unique_ptr<ComponentRecord>> &records) {
     bool has_body=false;
@@ -73,13 +73,13 @@ std::unique_ptr<PreparedRuntimeActor> PrepareRuntimeActor(Actor candidate,std::s
     std::string context;
     std::unique_ptr<PreparedRuntimeActor> plan;
     try {
-        Require(g_runtime.lua_state&&g_runtime.scene_actors,"runtime actor preparation requires a bound live scene");
+        Require(Runtime().lua_state&&Runtime().scene_actors,"runtime actor preparation requires a bound live scene");
         Require(candidate.uid>=Actor::kRuntimeGeneratedUIDStart,"runtime actor requires a reserved generated UID");
         Require(candidate.runtime_generation==0,"unpublished runtime actor must have generation zero");
         Require(candidate.parent_uid==Actor::kInvalidUID,"new runtime actor must be a root");
         Require(!candidate.scene_backed&&!candidate.runtime_destroyed,"runtime actor candidate has invalid provenance/liveness");
         UnusedUID(candidate.uid);Text(candidate.actor_name,"actor name");
-        plan.reset(new PreparedRuntimeActor(g_runtime.lua_state));
+        plan.reset(new PreparedRuntimeActor(Runtime().lua_state));
         auto &prepared=*plan->state_;
         prepared.records.reserve(candidate.component_specs.size());
         std::sort(candidate.component_specs.begin(),candidate.component_specs.end(),[](const auto &a,const auto &b){return a.key<b.key;});
@@ -88,10 +88,10 @@ std::unique_ptr<PreparedRuntimeActor> PrepareRuntimeActor(Actor candidate,std::s
             context="component '"+spec.key+"' ("+spec.type+"): ";
             Text(spec.key,"component key");Text(spec.type,"component type");
             Require(keys.insert(spec.key).second,"duplicate runtime component key");
-            luabridge::LuaRef prototype(g_runtime.lua_state);
+            luabridge::LuaRef prototype(Runtime().lua_state);
             if(!IsBuiltinComponentType(spec.type)) {
-                const auto found=g_runtime.component_type_tables.find(spec.type);
-                Require(found!=g_runtime.component_type_tables.end(),"component type is not registered");
+                const auto found=Runtime().component_type_tables.find(spec.type);
+                Require(found!=Runtime().component_type_tables.end(),"component type is not registered");
                 prototype=found->second;
             }
             prepared.records.push_back(PrepareComponentRecord(spec,prototype));
@@ -109,10 +109,10 @@ std::unique_ptr<PreparedRuntimeActor> PrepareRuntimeActor(Actor candidate,std::s
 }
 
 Actor *PublishRuntimeActor(PreparedRuntimeActor &plan,std::list<Actor> &actors,bool deferred_activation) {
-    Require(plan.state_&&plan.state_->vm==g_runtime.lua_state,"runtime actor token belongs to another Lua lifetime");
+    Require(plan.state_&&plan.state_->vm==Runtime().lua_state,"runtime actor token belongs to another Lua lifetime");
     auto &prepared=*plan.state_;
     Require(!prepared.commit_started&&!prepared.published&&prepared.node.size()==1,"runtime actor token was already published");
-    Require(g_runtime.scene_actors==&actors,"runtime actor target is not the bound scene container");
+    Require(Runtime().scene_actors==&actors,"runtime actor target is not the bound scene container");
     Actor *actor=&prepared.node.front();
     UnusedUID(actor->uid);
     // Everything below may allocate host indexes or Lua identity userdata.
@@ -120,21 +120,21 @@ Actor *PublishRuntimeActor(PreparedRuntimeActor &plan,std::list<Actor> &actors,b
     prepared.commit_started=true;
     actor->AssignRuntimeGeneration();
     actors.splice(actors.end(),prepared.node);
-    g_runtime.actor_by_uid.emplace(actor->uid,actor);
-    g_runtime.actors_by_name[actor->actor_name].push_back(actor);
-    g_runtime.actor_order_by_uid[actor->uid]=g_runtime.next_actor_order++;
-    if(deferred_activation) g_runtime.pending_actor_uids_to_activate.push_back(actor->uid);
-    else g_runtime.actor_uids_sorted.push_back(actor->uid);
+    Runtime().actor_by_uid.emplace(actor->uid,actor);
+    Runtime().actors_by_name[actor->actor_name].push_back(actor);
+    Runtime().actor_order_by_uid[actor->uid]=Runtime().next_actor_order++;
+    if(deferred_activation) Runtime().pending_actor_uids_to_activate.push_back(actor->uid);
+    else Runtime().actor_uids_sorted.push_back(actor->uid);
     for(auto &record:prepared.records) InstallPreparedComponent(actor->uid,std::move(record));
     prepared.records.clear();
     SortComponentsForActor(actor->uid);
     if(!deferred_activation) {
-        const auto found=g_runtime.actor_components.find(actor->uid);
-        if(found!=g_runtime.actor_components.end()) for(const auto &record:found->second) {
-            if(record->has_on_update) g_runtime.on_update_components.emplace_back(actor->uid,record.get());
-            if(record->has_on_late_update) g_runtime.on_late_update_components.emplace_back(actor->uid,record.get());
+        const auto found=Runtime().actor_components.find(actor->uid);
+        if(found!=Runtime().actor_components.end()) for(const auto &record:found->second) {
+            if(record->has_on_update) Runtime().on_update_components.emplace_back(actor->uid,record.get());
+            if(record->has_on_late_update) Runtime().on_late_update_components.emplace_back(actor->uid,record.get());
         }
-        g_runtime.dirty_component_actor_uids.erase(actor->uid);
+        Runtime().dirty_component_actor_uids.erase(actor->uid);
     }
     ApplyDetachedActorPoses(actor->uid);
     prepared.published=true;

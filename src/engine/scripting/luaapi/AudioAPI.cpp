@@ -7,7 +7,7 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 
 bool CanRouteAudioCommands() {
     // Top-level component scripts run before an Engine is bound. Respect the
@@ -57,7 +57,7 @@ bool CppAudioIsPlaybackEnabled() {
 }
 
 void InjectAudioAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Audio")
         .addFunction("Play", &CppAudioPlay)
         .addFunction("HasClip", &CppAudioHasClip)
@@ -93,7 +93,7 @@ bool CppMusicIsPlaying() {
 }
 
 void InjectMusicAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Music")
         .addFunction("Play", &CppMusicPlay)
         .addFunction("Halt", &CppMusicHalt)

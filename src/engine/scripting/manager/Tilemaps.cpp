@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/World.h"
 #include "Internal.h"
 #include "scripting/RuntimeActorAssets.h"
 #include "scene/Tilemap.h"
@@ -13,7 +14,8 @@
 namespace {
 using namespace ManagerDetail;
 using PreparedMap = std::pair<std::string, TilemapAsset::Data>;
-std::unordered_map<std::string, PreparedMap> prepared;
+struct PreparedAssets { std::unordered_map<std::string, PreparedMap> prepared; };
+auto &PreparedForWorld() { return World::Current().State<PreparedAssets>().prepared; }
 
 std::string Identity(Actor::UID uid, const std::string &key) {
     return std::to_string(uid) + ":" + key;
@@ -93,8 +95,8 @@ void Origin(Actor::UID uid, float &x, float &y, float &rotation) {
     if (ComponentManager::TryGetRuntimeTransformWorld(uid, x, y, rotation)) return;
     // During scene assembly a map's key can sort before its Transform key.
     // Use the same primary authored Transform as scene prevalidation.
-    const auto owner = g_runtime.actor_by_uid.find(uid);
-    if (owner != g_runtime.actor_by_uid.end()) AuthoredOrigin(*owner->second, x, y, rotation);
+    const auto owner = Runtime().actor_by_uid.find(uid);
+    if (owner != Runtime().actor_by_uid.end()) AuthoredOrigin(*owner->second, x, y, rotation);
 }
 }
 
@@ -121,10 +123,10 @@ void ComponentManager::PrepareTilemapAssets(const std::vector<Actor> &actors) {
             }
         }
     }
-    prepared = std::move(next);
+    PreparedForWorld() = std::move(next);
 }
 
-void ComponentManager::ClearPreparedTilemapAssets() { prepared.clear(); }
+void ComponentManager::ClearPreparedTilemapAssets() { PreparedForWorld().clear(); }
 
 Tilemap *ComponentManager::GetTilemap(Actor::UID uid, const std::string &key) {
     auto *record = ManagerDetail::FindComponentRecord(uid, key);
@@ -135,15 +137,15 @@ Tilemap *ComponentManager::GetTilemap(Actor::UID uid, const std::string &key) {
 void ComponentManager::InitializeTilemap(Actor::UID uid, const std::string &key) {
     auto *map = GetTilemap(uid, key);
     if (map == nullptr) return;
-    const auto owner = ManagerDetail::g_runtime.actor_by_uid.find(uid);
-    if (owner == ManagerDetail::g_runtime.actor_by_uid.end()) return;
+    const auto owner = ManagerDetail::Runtime().actor_by_uid.find(uid);
+    if (owner == ManagerDetail::Runtime().actor_by_uid.end()) return;
     ValidateOwner(*owner->second, GetRuntimeComponentSpecs(uid), false);
     if (map->map_resource.empty()) return;
     float x, y, rotation;
     Origin(uid, x, y, rotation);
     if (rotation != 0) throw std::runtime_error("Tilemap rotation must be zero");
-    const auto cached = prepared.find(Identity(uid, key));
-    if (cached != prepared.end() && cached->second.first == map->map_resource)
+    const auto cached = PreparedForWorld().find(Identity(uid, key));
+    if (cached != PreparedForWorld().end() && cached->second.first == map->map_resource)
         map->Initialize(cached->second.second, x, y);
     else map->Initialize(TilemapAsset::LoadResource(map->map_resource), x, y);
 }
@@ -168,13 +170,14 @@ bool ComponentManager::SetTilemapResource(Actor::UID uid, const std::string &key
 }
 
 void ComponentManager::CommitTilemaps() {
-    for (Actor::UID uid : ManagerDetail::g_runtime.actor_uids_sorted) {
-        const auto owner = ManagerDetail::g_runtime.actor_by_uid.find(uid);
-        if (owner == ManagerDetail::g_runtime.actor_by_uid.end() ||
+    ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
+    for (Actor::UID uid : runtime.actor_uids_sorted) {
+        const auto owner = runtime.actor_by_uid.find(uid);
+        if (owner == runtime.actor_by_uid.end() ||
             owner->second == nullptr || owner->second->runtime_destroyed ||
-            ManagerDetail::g_runtime.pending_destroy_actor_uids.count(uid)) continue;
-        const auto components = ManagerDetail::g_runtime.actor_components.find(uid);
-        if (components == ManagerDetail::g_runtime.actor_components.end()) continue;
+            runtime.pending_destroy_actor_uids.count(uid)) continue;
+        const auto components = runtime.actor_components.find(uid);
+        if (components == runtime.actor_components.end()) continue;
         for (auto &entry : components->second) {
             if (entry->removed || entry->type != "Tilemap") continue;
             if (owner->second->parent_uid != Actor::kInvalidUID)
@@ -188,12 +191,12 @@ void ComponentManager::CommitTilemaps() {
 
 void ComponentManager::QueueTilemaps(float min_x, float min_y, float max_x, float max_y,
                                      bool scene_backed_only) {
-    for (Actor::UID uid : ManagerDetail::g_runtime.actor_uids_sorted) {
-        const auto owner = ManagerDetail::g_runtime.actor_by_uid.find(uid);
-        if (owner == ManagerDetail::g_runtime.actor_by_uid.end() || owner->second == nullptr ||
+    for (Actor::UID uid : ManagerDetail::Runtime().actor_uids_sorted) {
+        const auto owner = ManagerDetail::Runtime().actor_by_uid.find(uid);
+        if (owner == ManagerDetail::Runtime().actor_by_uid.end() || owner->second == nullptr ||
             owner->second->runtime_destroyed || (scene_backed_only && !owner->second->scene_backed)) continue;
-        const auto components = ManagerDetail::g_runtime.actor_components.find(uid);
-        if (components == ManagerDetail::g_runtime.actor_components.end()) continue;
+        const auto components = ManagerDetail::Runtime().actor_components.find(uid);
+        if (components == ManagerDetail::Runtime().actor_components.end()) continue;
         for (auto &entry : components->second) {
             if (entry->removed || entry->type != "Tilemap") continue;
             LuaBoundary::Cast<Tilemap *>(entry->instance_table)->QueueVisible(min_x, min_y, max_x, max_y);

@@ -1,5 +1,6 @@
 #include <stdexcept>
 #include "scene/Scene.h"
+#include "core/World.h"
 #include "scene/Actor.h"
 #include "shared/scene_format/SceneFormat.h"
 #include "scripting/ComponentManager.h"
@@ -8,19 +9,23 @@
 #include <iostream>
 #include <utility>
 
-std::filesystem::path Scene::active_scene_subdirectory;
+namespace {
+struct ActiveScene { std::filesystem::path subdirectory; };
+std::filesystem::path &ActiveSubdirectory() { return World::Current().State<ActiveScene>().subdirectory; }
+} // namespace
 
 // Override the active scene subdirectory used for resource preference.
 void Scene::SetActiveSceneSubdirectory( const std::filesystem::path &subdirectory) {
-    active_scene_subdirectory = subdirectory.lexically_normal();
-    if (active_scene_subdirectory == ".") {
-        active_scene_subdirectory.clear();
+    std::filesystem::path &active = ActiveSubdirectory();
+    active = subdirectory.lexically_normal();
+    if (active == ".") {
+        active.clear();
     }
 }
 
 // relative subdirectory under <project-root>/scenes for the active scene
 const std::filesystem::path &Scene::GetActiveSceneSubdirectory() {
-    return active_scene_subdirectory;
+    return ActiveSubdirectory();
 }
 
 // load actors from <project-root>/scenes/<scene_name>.scene

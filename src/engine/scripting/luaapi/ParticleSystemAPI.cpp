@@ -10,7 +10,7 @@
 #include <type_traits>
 
 namespace {
-using APIRegistrationDetail::g_lua_state;
+using APIRegistrationDetail::LuaState;
 template <typename Component> ActorHandle GetComponentActor(const Component *component) { return component->actor_handle; }
 template <typename Component> void SetComponentActor(Component *component, ActorHandle handle) {
     component->actor_handle = handle; component->actor = handle.Resolve();
@@ -40,7 +40,7 @@ void SetValue(ParticleSystem *system, luabridge::LuaRef input) {
 }
 
 void APIRegistrationDetail::RegisterParticleSystemAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginClass<ParticleSystem>("ParticleSystem")
         .addConstructor<void (*)()>()
         .addProperty("actor", &GetComponentActor<ParticleSystem>, &SetComponentActor<ParticleSystem>)

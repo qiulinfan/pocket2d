@@ -55,7 +55,7 @@ std::vector<Selection> Discover(const fs::path &preferred) {
         ValidPath(file);
         const auto type = PathText(file.stem());
         if (IsBuiltinComponentType(type) || !selected.insert(type).second) continue;
-        if (g_runtime.reserved_component_type_names.contains(type))
+        if (Runtime().reserved_component_type_names.contains(type))
             throw std::runtime_error("component filename conflicts with reserved host/standard-library global: " + type);
         if (!TypeName(type)) throw std::runtime_error("invalid component filename/type: " + type);
         const auto canonical = fs::canonical(file);
@@ -97,17 +97,17 @@ std::string LuaError(lua_State *state) {
 
 namespace ManagerDetail {
 void PauseScenePreparationGC(lua_State *state) {
-    if (!state || state != g_runtime.lua_state) throw std::logic_error("scene preparation GC guard requires the current live Lua VM");
-    if (g_runtime.scene_script_gc_guards++ == 0) {
-        g_runtime.scene_script_gc_was_running = lua_gc(state, LUA_GCISRUNNING) != 0;
+    if (!state || state != Runtime().lua_state) throw std::logic_error("scene preparation GC guard requires the current live Lua VM");
+    if (Runtime().scene_script_gc_guards++ == 0) {
+        Runtime().scene_script_gc_was_running = lua_gc(state, LUA_GCISRUNNING) != 0;
         lua_gc(state, LUA_GCSTOP);
     }
 }
 void ResumeScenePreparationGC(lua_State *state) noexcept {
-    if (!state || state != g_runtime.lua_state || g_runtime.scene_script_gc_guards == 0) return;
-    if (--g_runtime.scene_script_gc_guards == 0) {
-        if (g_runtime.scene_script_gc_was_running) lua_gc(state, LUA_GCRESTART);
-        g_runtime.scene_script_gc_was_running = false;
+    if (!state || state != Runtime().lua_state || Runtime().scene_script_gc_guards == 0) return;
+    if (--Runtime().scene_script_gc_guards == 0) {
+        if (Runtime().scene_script_gc_was_running) lua_gc(state, LUA_GCRESTART);
+        Runtime().scene_script_gc_was_running = false;
     }
 }
 } // namespace ManagerDetail
@@ -136,11 +136,11 @@ SceneScriptPlan::SceneScriptPlan(SceneScriptPlan &&) noexcept = default;
 SceneScriptPlan &SceneScriptPlan::operator=(SceneScriptPlan &&) noexcept = default;
 
 void ComponentManager::BootstrapComponentTypes(const fs::path &preferred) {
-    if (!g_runtime.lua_state) throw std::logic_error("Initialize must precede component bootstrap");
-    if (g_runtime.component_types_bootstrapped) return;
+    if (!Runtime().lua_state) throw std::logic_error("Initialize must precede component bootstrap");
+    if (Runtime().component_types_bootstrapped) return;
     const auto selections = Discover(preferred); // Select winners before any file executes.
-    g_runtime.component_types_bootstrapped = true;
-    auto *state = g_runtime.lua_state;
+    Runtime().component_types_bootstrapped = true;
+    auto *state = Runtime().lua_state;
     for (const auto &selection : selections) {
         StackScope stack{state, lua_gettop(state)};
         try {
@@ -151,10 +151,10 @@ void ComponentManager::BootstrapComponentTypes(const fs::path &preferred) {
             auto prototype = Global(state, selection.type);
             if (!prototype.isTable()) throw std::runtime_error("expected global table named " + selection.type);
             const auto path = PathText(selection.path);
-            g_runtime.component_source_cache.insert_or_assign(path, prototype);
-            g_runtime.component_source_owners.emplace(path, selection.type);
-            g_runtime.component_type_tables.emplace(selection.type, std::move(prototype));
-            g_runtime.component_type_sources.emplace(selection.type, path);
+            Runtime().component_source_cache.insert_or_assign(path, prototype);
+            Runtime().component_source_owners.emplace(path, selection.type);
+            Runtime().component_type_tables.emplace(selection.type, std::move(prototype));
+            Runtime().component_type_sources.emplace(selection.type, path);
         } catch (const std::exception &error) {
             LogComponentTypeWarningOnce("bootstrap:" + PathText(selection.path), ScriptReloadCandidate::SanitizeDiagnosticText(
                 "problem with lua component [" + selection.type + "]: " + error.what()));
@@ -167,13 +167,13 @@ std::unique_ptr<SceneScriptPlan> ComponentManager::PrepareSceneScripts(const fs:
     error.clear();
     std::unique_ptr<SceneScriptPlan> plan;
     try {
-        if (!g_runtime.lua_state || !g_runtime.component_types_bootstrapped) throw std::logic_error("component scripts must bootstrap before scene preparation");
-        plan.reset(new SceneScriptPlan(g_runtime.lua_state));
+        if (!Runtime().lua_state || !Runtime().component_types_bootstrapped) throw std::logic_error("component scripts must bootstrap before scene preparation");
+        plan.reset(new SceneScriptPlan(Runtime().lua_state));
         auto &prepared = *plan->impl_;
-        prepared.types = g_runtime.component_type_tables;
-        prepared.sources = g_runtime.component_type_sources;
-        prepared.source_cache = g_runtime.component_source_cache;
-        prepared.source_owners = g_runtime.component_source_owners;
+        prepared.types = Runtime().component_type_tables;
+        prepared.sources = Runtime().component_type_sources;
+        prepared.source_cache = Runtime().component_source_cache;
+        prepared.source_owners = Runtime().component_source_owners;
         const auto selections = Discover(preferred);
         std::unordered_set<std::string> available;
         for (const auto &[name, unused] : prepared.types) available.insert(name);
@@ -183,8 +183,8 @@ std::unique_ptr<SceneScriptPlan> ComponentManager::PrepareSceneScripts(const fs:
                 throw std::runtime_error("missing Lua component type '" + component.type + "' for actor " + std::to_string(actor.uid));
         std::unordered_set<std::string> persistent_types;
         for (const auto uid : persistent_uids) {
-            const auto actor = g_runtime.actor_components.find(uid);
-            if (actor == g_runtime.actor_components.end()) continue;
+            const auto actor = Runtime().actor_components.find(uid);
+            if (actor == Runtime().actor_components.end()) continue;
             for (const auto &component : actor->second) if (!component->removed && !IsBuiltinComponentType(component->type)) persistent_types.insert(component->type);
         }
         std::vector<ScriptReloadCandidate::Source> candidates;
@@ -206,7 +206,7 @@ std::unique_ptr<SceneScriptPlan> ComponentManager::PrepareSceneScripts(const fs:
             else candidates.push_back({selection.type, selection.resource, Read(selection.path)});
         }
         if (!candidates.empty()) {
-            auto staged = ScriptReloadCandidate::Stage(g_runtime.lua_state, candidates);
+            auto staged = ScriptReloadCandidate::Stage(Runtime().lua_state, candidates);
             if (!staged.ok) {
                 if (staged.diagnostics.empty()) throw std::runtime_error("candidate script preparation failed");
                 const auto &diagnostic = staged.diagnostics.front();
@@ -227,13 +227,13 @@ std::unique_ptr<SceneScriptPlan> ComponentManager::PrepareSceneScripts(const fs:
 }
 
 luabridge::LuaRef ComponentManager::GetPreparedSceneType(const SceneScriptPlan &plan, const std::string &type) {
-    if (!plan.impl_ || plan.impl_->state != g_runtime.lua_state) throw std::logic_error("scene script plan belongs to another Lua lifetime");
-    const auto &types = plan.impl_->committed ? g_runtime.component_type_tables : plan.impl_->types;
+    if (!plan.impl_ || plan.impl_->state != Runtime().lua_state) throw std::logic_error("scene script plan belongs to another Lua lifetime");
+    const auto &types = plan.impl_->committed ? Runtime().component_type_tables : plan.impl_->types;
     const auto found = types.find(type);
-    return found == types.end() ? Ref(g_runtime.lua_state) : found->second;
+    return found == types.end() ? Ref(Runtime().lua_state) : found->second;
 }
 void ComponentManager::CommitSceneScripts(SceneScriptPlan &plan) {
-    if (!plan.impl_ || plan.impl_->state != g_runtime.lua_state || plan.impl_->committed) throw std::logic_error("scene script plan cannot be committed");
+    if (!plan.impl_ || plan.impl_->state != Runtime().lua_state || plan.impl_->committed) throw std::logic_error("scene script plan cannot be committed");
     auto &prepared = *plan.impl_;
     auto *state = prepared.state;
     StackScope stack{state, lua_gettop(state)};
@@ -241,9 +241,9 @@ void ComponentManager::CommitSceneScripts(SceneScriptPlan &plan) {
     for (const auto &type : prepared.changed) {
         lua_pushlstring(state, type.data(), type.size()); prepared.types.at(type).push(state); lua_rawset(state, -3);
     }
-    g_runtime.component_type_tables.swap(prepared.types);
-    g_runtime.component_type_sources.swap(prepared.sources);
-    g_runtime.component_source_cache.swap(prepared.source_cache);
-    g_runtime.component_source_owners.swap(prepared.source_owners);
+    Runtime().component_type_tables.swap(prepared.types);
+    Runtime().component_type_sources.swap(prepared.sources);
+    Runtime().component_source_cache.swap(prepared.source_cache);
+    Runtime().component_source_owners.swap(prepared.source_owners);
     prepared.committed = true;
 }

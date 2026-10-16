@@ -59,7 +59,7 @@ void ValidateOverrides(const Actor::ComponentSpec &spec) {
     }
 }
 Ref StaticField(const Ref &object,const char *name) {
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     if(!object.isTable()) return ProtectedField(object,name); // trusted native userdata binding
     object.push(state);std::unordered_set<const void *> visited;
     for(int depth=0;depth<1024;++depth) {
@@ -80,7 +80,7 @@ Ref StaticField(const Ref &object,const char *name) {
 namespace ManagerDetail {
 std::unique_ptr<ComponentRecord> PrepareComponentRecord(const Actor::ComponentSpec &spec,const Ref &prototype) {
     ValidateOverrides(spec);
-    auto *state=g_runtime.lua_state;StackScope stack{state,lua_gettop(state)};
+    auto *state=Runtime().lua_state;StackScope stack{state,lua_gettop(state)};
     Ref instance(state);
     if(spec.type=="Transform") instance=Ref(state,Transform{});
     else if(spec.type=="Rigidbody") instance=Ref(state,Rigidbody{});
@@ -111,12 +111,12 @@ std::unique_ptr<ComponentRecord> PrepareComponentRecord(const Actor::ComponentSp
     return std::make_unique<ComponentRecord>(spec.key,spec.type,std::move(instance),present[0],present[1],present[2],present[3],present[4],present[5],present[6],present[7]);
 }
 void InstallPreparedComponent(Actor::UID uid,std::unique_ptr<ComponentRecord> record) {
-    const auto actor=g_runtime.actor_by_uid.find(uid);
-    if(actor!=g_runtime.actor_by_uid.end()) SetSystemField(record->instance_table,"actor",Ref(g_runtime.lua_state,ActorHandle(actor->second)));
+    const auto actor=Runtime().actor_by_uid.find(uid);
+    if(actor!=Runtime().actor_by_uid.end()) SetSystemField(record->instance_table,"actor",Ref(Runtime().lua_state,ActorHandle(actor->second)));
     const auto key=record->key;
-    g_runtime.actor_components[uid].push_back(std::move(record));
-    g_runtime.pending_on_start.emplace_back(uid,key);
-    if(actor!=g_runtime.actor_by_uid.end()) g_runtime.dirty_component_actor_uids.insert(uid);
+    Runtime().actor_components[uid].push_back(std::move(record));
+    Runtime().pending_on_start.emplace_back(uid,key);
+    if(actor!=Runtime().actor_by_uid.end()) Runtime().dirty_component_actor_uids.insert(uid);
 }
 }
 struct SceneComponentPlan::State {
@@ -140,7 +140,7 @@ std::unique_ptr<SceneComponentPlan> PrepareSceneComponents(const std::vector<Act
             for(const auto &spec:actor.component_specs) {
                 context="actor "+std::to_string(actor.uid)+" component '"+spec.key+"' ("+spec.type+"): ";
                 Require(keys.insert(spec.key).second,"duplicate component key");
-                const auto prototype=ManagerDetail::IsBuiltinComponentType(spec.type)?Ref(ManagerDetail::g_runtime.lua_state):
+                const auto prototype=ManagerDetail::IsBuiltinComponentType(spec.type)?Ref(ManagerDetail::Runtime().lua_state):
                     ComponentManager::GetPreparedSceneType(scripts,spec.type);
                 prepared.records.push_back(ManagerDetail::PrepareComponentRecord(spec,prototype));
             }
@@ -192,13 +192,13 @@ void InstallSceneComponents(SceneComponentPlan &plan,std::list<Actor> &actors,st
         Require(actor->uid==plan.state_->actors[index].uid,"scene component plan actor identity mismatch");
     // Register all prepared records before native initialization resolves peers.
     for(auto &entry:plan.state_->actors) {
-        Require(ManagerDetail::g_runtime.actor_components.find(entry.uid)==ManagerDetail::g_runtime.actor_components.end(),"incoming actor collides with existing components");
+        Require(ManagerDetail::Runtime().actor_components.find(entry.uid)==ManagerDetail::Runtime().actor_components.end(),"incoming actor collides with existing components");
         for(auto &record:entry.records) ManagerDetail::InstallPreparedComponent(entry.uid,std::move(record));
         ManagerDetail::SortComponentsForActor(entry.uid);
     }
     for(const auto &entry:plan.state_->actors) {
-        const auto found=ManagerDetail::g_runtime.actor_components.find(entry.uid);
-        if(found!=ManagerDetail::g_runtime.actor_components.end())
+        const auto found=ManagerDetail::Runtime().actor_components.find(entry.uid);
+        if(found!=ManagerDetail::Runtime().actor_components.end())
             for(const auto &record:found->second) if(record->type=="Tilemap") ComponentManager::InitializeTilemap(entry.uid,record->key);
         ComponentManager::InitializeSpriteAnimations(entry.uid);
     }
@@ -218,12 +218,12 @@ PreparedRuntimeComponent &PreparedRuntimeComponent::operator=(PreparedRuntimeCom
 std::unique_ptr<PreparedRuntimeComponent> PrepareRuntimeComponent(const Actor::ComponentSpec &spec,std::string &error) {
     error.clear();
     try {
-        auto *state=ManagerDetail::g_runtime.lua_state;Require(state!=nullptr,"Lua runtime is not initialized");
+        auto *state=ManagerDetail::Runtime().lua_state;Require(state!=nullptr,"Lua runtime is not initialized");
         auto token=std::unique_ptr<PreparedRuntimeComponent>(new PreparedRuntimeComponent(state));
         Ref prototype(state);
         if(!ManagerDetail::IsBuiltinComponentType(spec.type)) {
-            const auto found=ManagerDetail::g_runtime.component_type_tables.find(spec.type);
-            Require(found!=ManagerDetail::g_runtime.component_type_tables.end(),"component type is not registered: "+spec.type);
+            const auto found=ManagerDetail::Runtime().component_type_tables.find(spec.type);
+            Require(found!=ManagerDetail::Runtime().component_type_tables.end(),"component type is not registered: "+spec.type);
             prototype=found->second;
         }
         token->state_->record=ManagerDetail::PrepareComponentRecord(spec,prototype);
@@ -232,7 +232,7 @@ std::unique_ptr<PreparedRuntimeComponent> PrepareRuntimeComponent(const Actor::C
 }
 void InstallRuntimeComponent(PreparedRuntimeComponent &plan,Actor::UID uid) {
     Require(plan.state_ && plan.state_->record,"runtime component plan was already installed");
-    Require(ManagerDetail::g_runtime.actor_by_uid.contains(uid) && !ManagerDetail::g_runtime.pending_destroy_actor_uids.contains(uid),"component owner is not live");
+    Require(ManagerDetail::Runtime().actor_by_uid.contains(uid) && !ManagerDetail::Runtime().pending_destroy_actor_uids.contains(uid),"component owner is not live");
     Require(ManagerDetail::FindComponentRecord(uid,plan.state_->record->key)==nullptr,"component key still belongs to a live instance");
     const auto key=plan.state_->record->key;
     const auto type=plan.state_->record->type;

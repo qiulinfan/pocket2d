@@ -34,7 +34,7 @@ void Text(const std::string &text,const char *label,bool allow_empty=false) {
     while(input.Tell()<text.size()){unsigned cp=0;Require(rapidjson::UTF8<>::Decode(input,&cp),std::string(label)+" must be UTF-8");}
 }
 struct GCScope {
-    lua_State *state=g_runtime.lua_state;
+    lua_State *state=Runtime().lua_state;
     GCScope(){PauseScenePreparationGC(state);}
     ~GCScope(){ResumeScenePreparationGC(state);}
 };
@@ -46,7 +46,7 @@ struct ComponentEdit {
     bool authored=true, removed=false, replace=false, changed=false, adopt=false;
     std::map<std::string,Actor::ComponentPropertyValue> patches;
     std::unique_ptr<ComponentRecord> prepared;
-    explicit ComponentEdit(Spec value):spec(std::move(value)),effective(spec),original(g_runtime.lua_state){}
+    explicit ComponentEdit(Spec value):spec(std::move(value)),effective(spec),original(Runtime().lua_state){}
 };
 struct ActorEdit {
     Actor candidate;
@@ -152,10 +152,10 @@ void Patch(ComponentEdit &component,const std::string &name,const Actor::Compone
 }
 void BuildSnapshot(Plan &plan,const std::list<Actor> &actors) {
     for(const auto &actor:actors) {
-        if(actor.runtime_destroyed||g_runtime.pending_destroy_actor_uids.contains(actor.uid))continue;
+        if(actor.runtime_destroyed||Runtime().pending_destroy_actor_uids.contains(actor.uid))continue;
         auto item=std::make_unique<ActorEdit>();item->candidate=actor;item->original=const_cast<Actor *>(&actor);
-        const auto found=g_runtime.actor_components.find(actor.uid);
-        if(found!=g_runtime.actor_components.end())for(const auto &record:found->second) {
+        const auto found=Runtime().actor_components.find(actor.uid);
+        if(found!=Runtime().actor_components.end())for(const auto &record:found->second) {
             if(record->removed)continue;
             const auto *authored=SceneFormat::FindComponentSpec(actor.component_specs,record->key);
             auto component=std::make_unique<ComponentEdit>(authored?*authored:Spec{record->key,record->type,{}});
@@ -172,7 +172,7 @@ void Simulate(Plan &plan,const SceneFormat::SceneMutation &mutation) {
     std::visit([&](const auto &edit) {
         using T=std::decay_t<decltype(edit)>;
         if constexpr(std::is_same_v<T,SceneFormat::CreateActorMutation>) {
-            Require(edit.actor_uid!=0&&!plan.entries.contains(edit.actor_uid)&&!g_runtime.actor_by_uid.contains(edit.actor_uid),"scene edit actor UID is already used or zero");
+            Require(edit.actor_uid!=0&&!plan.entries.contains(edit.actor_uid)&&!Runtime().actor_by_uid.contains(edit.actor_uid),"scene edit actor UID is already used or zero");
             auto position=plan.order.end();
             if(edit.insert_after_actor_uid){ActorAt(plan,*edit.insert_after_actor_uid);position=std::find(plan.order.begin(),plan.order.end(),*edit.insert_after_actor_uid)+1;}
             auto item=std::make_unique<ActorEdit>();item->candidate=SceneFormat::BuildEffectiveActor(edit.actor_record,Scene::GetActiveSceneSubdirectory());
@@ -231,10 +231,10 @@ void Simulate(Plan &plan,const SceneFormat::SceneMutation &mutation) {
 }
 std::unique_ptr<ComponentRecord> Prepare(const Spec &spec) {
     Text(spec.key,"component key");Text(spec.type,"component type");
-    Ref prototype(g_runtime.lua_state);
+    Ref prototype(Runtime().lua_state);
     if(!IsBuiltinComponentType(spec.type)) {
-        const auto found=g_runtime.component_type_tables.find(spec.type);
-        Require(found!=g_runtime.component_type_tables.end(),"component type is not registered: "+spec.type);prototype=found->second;
+        const auto found=Runtime().component_type_tables.find(spec.type);
+        Require(found!=Runtime().component_type_tables.end(),"component type is not registered: "+spec.type);prototype=found->second;
     }
     return PrepareComponentRecord(spec,prototype);
 }
@@ -336,22 +336,22 @@ void PrepareFinal(Plan &plan) {
 // Reindex only native bookkeeping. Existing Lua identities and pending starts
 // stay intact, and deferred spawns remain deferred across an editor transaction.
 void Reindex(std::list<Actor> &actors) {
-    const std::unordered_set<UID> deferred(g_runtime.pending_actor_uids_to_activate.begin(),g_runtime.pending_actor_uids_to_activate.end());
-    g_runtime.actor_by_uid.clear();g_runtime.actors_by_name.clear();g_runtime.actor_order_by_uid.clear();g_runtime.actor_uids_sorted.clear();
-    g_runtime.on_update_components.clear();g_runtime.on_late_update_components.clear();g_runtime.next_actor_order=0;
-    for(auto &actor:actors)if(!actor.runtime_destroyed&&!g_runtime.pending_destroy_actor_uids.contains(actor.uid)) {
-        g_runtime.actor_by_uid[actor.uid]=&actor;g_runtime.actors_by_name[actor.actor_name].push_back(&actor);
-        g_runtime.actor_order_by_uid[actor.uid]=g_runtime.next_actor_order++;
+    const std::unordered_set<UID> deferred(Runtime().pending_actor_uids_to_activate.begin(),Runtime().pending_actor_uids_to_activate.end());
+    Runtime().actor_by_uid.clear();Runtime().actors_by_name.clear();Runtime().actor_order_by_uid.clear();Runtime().actor_uids_sorted.clear();
+    Runtime().on_update_components.clear();Runtime().on_late_update_components.clear();Runtime().next_actor_order=0;
+    for(auto &actor:actors)if(!actor.runtime_destroyed&&!Runtime().pending_destroy_actor_uids.contains(actor.uid)) {
+        Runtime().actor_by_uid[actor.uid]=&actor;Runtime().actors_by_name[actor.actor_name].push_back(&actor);
+        Runtime().actor_order_by_uid[actor.uid]=Runtime().next_actor_order++;
         SortComponentsForActor(actor.uid);
         if(deferred.contains(actor.uid))continue;
-        g_runtime.actor_uids_sorted.push_back(actor.uid);
-        const auto found=g_runtime.actor_components.find(actor.uid);if(found==g_runtime.actor_components.end())continue;
+        Runtime().actor_uids_sorted.push_back(actor.uid);
+        const auto found=Runtime().actor_components.find(actor.uid);if(found==Runtime().actor_components.end())continue;
         for(const auto &record:found->second)if(!record->removed) {
-            if(record->has_on_update)g_runtime.on_update_components.emplace_back(actor.uid,record.get());
-            if(record->has_on_late_update)g_runtime.on_late_update_components.emplace_back(actor.uid,record.get());
+            if(record->has_on_update)Runtime().on_update_components.emplace_back(actor.uid,record.get());
+            if(record->has_on_late_update)Runtime().on_late_update_components.emplace_back(actor.uid,record.get());
         }
     }
-    g_runtime.dirty_component_actor_uids.clear();
+    Runtime().dirty_component_actor_uids.clear();
 }
 } // namespace
 
@@ -363,7 +363,7 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
     bool committing=false;
     struct Transition {bool &flag;explicit Transition(bool &value):flag(value){flag=true;}~Transition(){flag=false;}} transition(scene_transition_active_);
     try {
-        Require(g_runtime.lua_state&&g_runtime.scene_actors==&actors,"scene edit requires a bound runtime");
+        Require(Runtime().lua_state&&Runtime().scene_actors==&actors,"scene edit requires a bound runtime");
         Require(!RayCast::GetPhysicsWorld()||!RayCast::GetPhysicsWorld()->IsLocked(),"scene edits cannot run during a physics callback");
         Plan plan;BuildSnapshot(plan,actors);
         for(const auto &mutation:command.mutations) {
@@ -399,8 +399,8 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
         if(teardown)ComponentManager::FinalizePrePhysicsDestructions();
         Require(ComponentManager::GetRuntimeErrorCount()==errors_before,"scene edit teardown callback failed: "+ComponentManager::GetLastRuntimeError());
         for(auto &[uid,item]:plan.entries)if(!item->removed&&item->original) {
-            const auto found=g_runtime.actor_by_uid.find(uid);
-            Require(found!=g_runtime.actor_by_uid.end()&&found->second==item->original&&!item->original->runtime_destroyed&&item->original->runtime_generation==item->candidate.runtime_generation,"scene edit owner changed during commit");
+            const auto found=Runtime().actor_by_uid.find(uid);
+            Require(found!=Runtime().actor_by_uid.end()&&found->second==item->original&&!item->original->runtime_destroyed&&item->original->runtime_generation==item->candidate.runtime_generation,"scene edit owner changed during commit");
             for(auto &entry:item->components)if(!entry->removed&&!entry->replace&&!entry->original.isNil()) {
                 auto *record=FindComponentRecord(uid,entry->original_key);
                 Require(record&&AreSameLuaRef(record->instance_table,entry->original),"scene edit component changed during teardown");
@@ -409,7 +409,7 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
         }
         // Publish preallocated nodes in final document order; splice preserves
         // every old Actor address, including unrelated actors created by callbacks.
-        for(auto &node:plan.nodes){node.AssignRuntimeGeneration();g_runtime.actor_by_uid[node.uid]=&node;NotifyRuntimeActorPublished(node);}
+        for(auto &node:plan.nodes){node.AssignRuntimeGeneration();Runtime().actor_by_uid[node.uid]=&node;NotifyRuntimeActorPublished(node);}
         actors.splice(actors.end(),plan.nodes);
         if(plan.structural) {
             std::unordered_map<UID,std::list<Actor>::iterator> positions;
@@ -425,16 +425,16 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
             actors.splice(actors.end(),ordered);
         }
         for(auto &[uid,item]:plan.entries)if(!item->removed&&item->changed) {
-            auto *live=g_runtime.actor_by_uid.at(uid);
+            auto *live=Runtime().actor_by_uid.at(uid);
             live->actor_name.swap(item->candidate.actor_name);live->parent_uid=item->candidate.parent_uid;live->component_specs.swap(item->candidate.component_specs);
             // Rename as a simultaneous key update, allowing a->temp,b->a,temp->b.
             for(auto &entry:item->components)if(!entry->removed&&!entry->replace&&!entry->original.isNil()&&entry->original_key!=entry->spec.key) {
                 auto *record=entry->original_record;
                 Require(record&&!record->removed&&AreSameLuaRef(record->instance_table,entry->original),"renamed component changed during commit");
-                SetSystemField(record->instance_table,"key",Ref(g_runtime.lua_state,entry->spec.key));record->key=entry->spec.key;
+                SetSystemField(record->instance_table,"key",Ref(Runtime().lua_state,entry->spec.key));record->key=entry->spec.key;
 
             }
-            for(auto &pending:g_runtime.pending_on_start)if(pending.actor_uid==uid) {
+            for(auto &pending:Runtime().pending_on_start)if(pending.actor_uid==uid) {
                 for(const auto &entry:item->components)if(!entry->removed&&!entry->replace&&entry->original_key==pending.component_key) { pending.component_key=entry->spec.key;break; }
             }
             for(auto &entry:item->components)if(!entry->removed&&(entry->original.isNil()||entry->replace)) {
@@ -470,8 +470,8 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
         }
         Require(ComponentManager::GetRuntimeErrorCount()==errors_before,"scene edit commit callback failed: "+ComponentManager::GetLastRuntimeError());
         for(auto &[uid,item]:plan.entries)if(!item->removed&&item->changed) {
-            const auto owner=g_runtime.actor_by_uid.find(uid);
-            Require(owner!=g_runtime.actor_by_uid.end()&&!owner->second->runtime_destroyed&&!g_runtime.pending_destroy_actor_uids.contains(uid),"scene edit owner was destroyed by a commit callback");
+            const auto owner=Runtime().actor_by_uid.find(uid);
+            Require(owner!=Runtime().actor_by_uid.end()&&!owner->second->runtime_destroyed&&!Runtime().pending_destroy_actor_uids.contains(uid),"scene edit owner was destroyed by a commit callback");
             for(const auto &entry:item->components)if(!entry->removed) {
                 const auto *record=FindComponentRecord(uid,entry->spec.key);
                 Require(record&&record->type==entry->spec.type,"scene edit component was removed by a commit callback");

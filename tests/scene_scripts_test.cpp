@@ -18,7 +18,7 @@ void Put(const fs::path &path, const std::string &text) {
     Check(static_cast<bool>(output), "cannot write scene script fixture");
 }
 void Lua(const char *code) {
-    auto *state = g_runtime.lua_state; const int top = lua_gettop(state);
+    auto *state = Runtime().lua_state; const int top = lua_gettop(state);
     const int status = luaL_dostring(state, code);
     const auto message = status == LUA_OK ? std::string() : std::string(lua_tostring(state, -1));
     lua_settop(state, top); Check(status == LUA_OK, message);
@@ -46,12 +46,12 @@ void Run() {
     Put(fixture.scripts / "Trusted.lua", "local f=assert(io.open([=[" + io_path + "]=],'w'));f:write('trusted');f:close();Trusted={roll=math.random(1,100),vector=Vector2(3,4)}");
     ComponentManager::SetRandomSeed(123);
     ComponentManager::Initialize();
-    auto *state = g_runtime.lua_state;
-    Check(state != nullptr && !g_runtime.component_types_bootstrapped && g_runtime.component_type_tables.empty(), "Initialize still executed project code");
+    auto *state = Runtime().lua_state;
+    Check(state != nullptr && !Runtime().component_types_bootstrapped && Runtime().component_type_tables.empty(), "Initialize still executed project code");
     Check(!fs::exists(fixture.root / "bootstrap-side-effect.txt"), "Initialize executed trusted file I/O");
     Lua("assert(type(SpriteRenderer)=='table' and Trusted==nil and Shared==nil)");
     ComponentManager::BootstrapComponentTypes("a");
-    Check(g_runtime.component_types_bootstrapped && ComponentManager::IsRegisteredComponentType("Shared"), "bootstrap did not register winner");
+    Check(Runtime().component_types_bootstrapped && ComponentManager::IsRegisteredComponentType("Shared"), "bootstrap did not register winner");
     Check(!ComponentManager::IsRegisteredComponentType("Broken") && ComponentManager::GetComponentTypeWarningCount() == 1, "bad preferred script fell back to another source");
     Lua("assert(bootstrap_runs==1 and Shared.value==2 and type(Trusted.vector)=='userdata' and Trusted.roll>=1 and Trusted.roll<=100);assert(type(SpriteRenderer)=='table')");
     Check(fs::exists(fixture.root / "bootstrap-side-effect.txt"), "trusted bootstrap capabilities changed");
@@ -65,7 +65,7 @@ void Run() {
     std::string error;
     auto plan = ComponentManager::PrepareSceneScripts("a", {Incoming("Shared"), Incoming("Trusted")}, {}, error);
     Check(plan && error.empty() && !lua_gc(state, LUA_GCISRUNNING), "prepare did not own GC pause");
-    Check(AreSameLuaRef(ComponentManager::GetPreparedSceneType(*plan, "Shared"), g_runtime.component_type_tables.at("Shared")), "same canonical source did not reuse prototype identity");
+    Check(AreSameLuaRef(ComponentManager::GetPreparedSceneType(*plan, "Shared"), Runtime().component_type_tables.at("Shared")), "same canonical source did not reuse prototype identity");
     Check(ComponentManager::GetPreparedSceneType(*plan, "Trusted")["vector"].isUserdata(), "cached native defaults were restaged as declarative Lua");
     Check(ComponentManager::GetPreparedSceneType(*plan, "Missing").isNil(), "missing prepared type must be nil");
     auto nested = ComponentManager::PrepareSceneScripts("a", {}, {}, error);
@@ -102,10 +102,10 @@ void Run() {
     plan = ComponentManager::PrepareSceneScripts("a", {Incoming("NewUnused")}, {}, error);
     Check(plan && ComponentManager::GetPreparedSceneType(*plan, "NewUnused")["value"].cast<int>().value() == 4, error);
     Lua("assert(NewUnused==nil)");
-    Check(!g_runtime.component_source_cache.contains(new_path), "uncommitted source cache became visible");
+    Check(!Runtime().component_source_cache.contains(new_path), "uncommitted source cache became visible");
     plan.reset();
     Check(!ComponentManager::IsRegisteredComponentType("NewUnused"), "discarded plan registered candidate");
-    Check(!g_runtime.component_source_cache.contains(new_path), "discarded plan published source cache");
+    Check(!Runtime().component_source_cache.contains(new_path), "discarded plan published source cache");
     plan = ComponentManager::PrepareSceneScripts("a", {}, {}, error); Check(plan != nullptr, error);
     ComponentManager::CommitSceneScripts(*plan);
     Check(ComponentManager::IsRegisteredComponentType("NewUnused") && ComponentManager::GetPreparedSceneType(*plan, "NewUnused")["value"].cast<int>().value() == 4,
@@ -148,12 +148,12 @@ void Run() {
         plan = ComponentManager::PrepareSceneScripts("b", {}, {}, error);
         Check(!plan && error.find("escapes") != std::string::npos, "outside source symlink accepted");
         fs::remove(fixture.scripts / "Escape.lua");
-        const auto cache_size = g_runtime.component_source_cache.size();
+        const auto cache_size = Runtime().component_source_cache.size();
         fs::create_symlink(fixture.scripts / "b/Shared.lua", fixture.scripts / "Alias.lua");
         plan = ComponentManager::PrepareSceneScripts("b", {}, {}, error);
         Check(!plan && error.find("one canonical component source") != std::string::npos,
               "different type names sharing one canonical source were accepted");
-        Check(g_runtime.component_source_cache.size() == cache_size && !ComponentManager::IsRegisteredComponentType("Alias"),
+        Check(Runtime().component_source_cache.size() == cache_size && !ComponentManager::IsRegisteredComponentType("Alias"),
               "rejected canonical alias changed the registry/cache");
         Lua("assert(Shared.value==3 and Alias==nil)");
         fs::remove(fixture.scripts / "Alias.lua");
@@ -166,10 +166,10 @@ void Run() {
     }
     Check(lua_gettop(state) == 0 && lua_gc(state, LUA_GCISRUNNING), "scene preparation left stack/GC state changed");
     ComponentManager::Shutdown();
-    Check(!g_runtime.component_types_bootstrapped, "project shutdown did not reset bootstrap flag");
-    Check(g_runtime.component_source_cache.empty(), "project shutdown retained source cache LuaRefs");
-    Check(g_runtime.component_source_owners.empty(), "project shutdown retained canonical source owners");
-    Check(g_runtime.reserved_component_type_names.empty(), "project shutdown retained host reserved-name snapshot");
+    Check(!Runtime().component_types_bootstrapped, "project shutdown did not reset bootstrap flag");
+    Check(Runtime().component_source_cache.empty(), "project shutdown retained source cache LuaRefs");
+    Check(Runtime().component_source_owners.empty(), "project shutdown retained canonical source owners");
+    Check(Runtime().reserved_component_type_names.empty(), "project shutdown retained host reserved-name snapshot");
     // A new project lifetime bootstraps code again and drops deleted modules.
     Put(fixture.scripts / "a/Shared.lua", "Shared={value=8}");
     ComponentManager::Initialize(); ComponentManager::BootstrapComponentTypes("a");
@@ -188,13 +188,13 @@ void SourceVariantCache() {
     Lua("assert(LOADS==1 and Variant.name=='root' and Variant.Next()==1)");
     const auto root_path = fs::canonical(fixture.scripts / "Variant.lua").generic_string();
     const auto zone_path = fs::canonical(fixture.scripts / "zone/Variant.lua").generic_string();
-    Check(g_runtime.component_source_cache.size() == 1 && g_runtime.component_source_cache.contains(root_path), "bootstrap did not cache its canonical module");
+    Check(Runtime().component_source_cache.size() == 1 && Runtime().component_source_cache.contains(root_path), "bootstrap did not cache its canonical module");
     std::string error;
     auto zone = ComponentManager::PrepareSceneScripts("zone", {Incoming("Variant")}, {}, error);
-    Check(zone && !g_runtime.component_source_cache.contains(zone_path), "candidate source cache published before commit");
+    Check(zone && !Runtime().component_source_cache.contains(zone_path), "candidate source cache published before commit");
     ComponentManager::CommitSceneScripts(*zone); zone.reset();
     Lua("assert(LOADS==1 and Variant.name=='zone' and Variant.Next()==200)");
-    Check(g_runtime.component_source_cache.size() == 2, "variant switch dropped the old source cache");
+    Check(Runtime().component_source_cache.size() == 2, "variant switch dropped the old source cache");
     Put(fixture.scripts / "Variant.lua", "error('cached root must not execute'); Variant={bad syntax");
 
     // A cached path remains a source-definition change for persistent actors.
@@ -207,19 +207,19 @@ void SourceVariantCache() {
     ComponentManager::ClearActorComponents();
     root = ComponentManager::PrepareSceneScripts({}, {Incoming("Variant")}, {}, error);
     Check(root && ComponentManager::GetPreparedSceneType(*root, "Variant")["name"].cast<std::string>().value() == "root", error);
-    Check(AreSameLuaRef(ComponentManager::GetPreparedSceneType(*root, "Variant"), g_runtime.component_source_cache.at(root_path)), "return to root cloned/reexecuted its module");
+    Check(AreSameLuaRef(ComponentManager::GetPreparedSceneType(*root, "Variant"), Runtime().component_source_cache.at(root_path)), "return to root cloned/reexecuted its module");
     ComponentManager::CommitSceneScripts(*root); root.reset();
     Lua("assert(Variant.name=='root' and LOADS==1 and Variant.Next()==2)");
 
     Put(fixture.scripts / "NewA.lua", "NewA={value=1}");
     Put(fixture.scripts / "NewZ.lua", "NewZ={broken syntax");
-    const auto count = g_runtime.component_source_cache.size();
+    const auto count = Runtime().component_source_cache.size();
     auto failed = ComponentManager::PrepareSceneScripts({}, {}, {}, error);
-    Check(!failed && g_runtime.component_source_cache.size() == count && !ComponentManager::IsRegisteredComponentType("NewA"), "failed batch published a new source cache entry");
+    Check(!failed && Runtime().component_source_cache.size() == count && !ComponentManager::IsRegisteredComponentType("NewA"), "failed batch published a new source cache entry");
     Lua("assert(NewA==nil and NewZ==nil and LOADS==1 and Variant.name=='root')");
     fs::remove(fixture.scripts / "NewA.lua"); fs::remove(fixture.scripts / "NewZ.lua");
     fs::remove(fixture.scripts / "zone/Variant.lua");
-    Check(g_runtime.component_source_cache.contains(zone_path), "deleting an unselected source evicted its module");
+    Check(Runtime().component_source_cache.contains(zone_path), "deleting an unselected source evicted its module");
 }
 void BootstrapAliasRejection() {
     Fixture fixture;
@@ -237,7 +237,7 @@ void BootstrapAliasRejection() {
     bool rejected = false;
     try { ComponentManager::BootstrapComponentTypes({}); }
     catch (const std::exception &failure) { rejected = std::string(failure.what()).find("one canonical component source") != std::string::npos; }
-    Check(rejected && !g_runtime.component_types_bootstrapped && g_runtime.component_type_tables.empty() && g_runtime.component_source_cache.empty(),
+    Check(rejected && !Runtime().component_types_bootstrapped && Runtime().component_type_tables.empty() && Runtime().component_source_cache.empty(),
           "bootstrap canonical alias was executed or cached before rejection");
     Lua("assert(alias_executions==nil and Original==nil and Alias==nil)");
 }
@@ -249,14 +249,14 @@ void ReservedHostNames() {
         Put(conflicting, std::string(name) + "={shadow=true}");
         ComponentManager::Initialize();
         {
-            auto *state = g_runtime.lua_state;
+            auto *state = Runtime().lua_state;
             auto original = luabridge::getGlobal(state, name);
-            Check(original.isTable() && g_runtime.reserved_component_type_names.contains(name),
+            Check(original.isTable() && Runtime().reserved_component_type_names.contains(name),
                   std::string("actual host global missing from initialization snapshot: ") + name);
             bool rejected = false;
             try { ComponentManager::BootstrapComponentTypes({}); }
             catch (const std::exception &failure) { rejected = std::string(failure.what()).find("reserved host") != std::string::npos; }
-            Check(rejected && !g_runtime.component_types_bootstrapped && g_runtime.component_type_tables.empty() && g_runtime.component_source_cache.empty(),
+            Check(rejected && !Runtime().component_types_bootstrapped && Runtime().component_type_tables.empty() && Runtime().component_source_cache.empty(),
                   "reserved filename reached trusted bootstrap evaluation");
             Check(AreSameLuaRef(original, luabridge::getGlobal(state, name)), "reserved filename changed original host identity");
             Lua("assert(unrelated_bootstrap_runs==nil and AAA==nil)");
@@ -264,16 +264,16 @@ void ReservedHostNames() {
             ComponentManager::BootstrapComponentTypes({});
             Lua("assert(unrelated_bootstrap_runs==1 and AAA.value==1)");
             Put(conflicting, std::string(name) + "={shadow=true}");
-            const auto cache_size = g_runtime.component_source_cache.size();
+            const auto cache_size = Runtime().component_source_cache.size();
             std::string error;
             auto plan = ComponentManager::PrepareSceneScripts({}, {}, {}, error);
             Check(!plan && error.find("reserved host") != std::string::npos, "new reserved filename accepted during scene preparation");
-            Check(AreSameLuaRef(original, luabridge::getGlobal(state, name)) && g_runtime.component_source_cache.size() == cache_size,
+            Check(AreSameLuaRef(original, luabridge::getGlobal(state, name)) && Runtime().component_source_cache.size() == cache_size,
                   "reserved preparation changed host identity/cache");
             Lua("assert(unrelated_bootstrap_runs==1 and AAA.value==1)");
         }
         ComponentManager::Shutdown();
-        Check(g_runtime.reserved_component_type_names.empty(), "host reserved-name snapshot survived shutdown");
+        Check(Runtime().reserved_component_type_names.empty(), "host reserved-name snapshot survived shutdown");
     }
 }
 void HistoricalSourceOwnership() {
@@ -291,36 +291,36 @@ void HistoricalSourceOwnership() {
     }
     ComponentManager::Initialize(); ComponentManager::BootstrapComponentTypes({});
     const auto physical_key = fs::canonical(physical).generic_string();
-    Check(g_runtime.component_source_owners.at(physical_key) == "A", "legal Lua symlink did not record its type owner");
+    Check(Runtime().component_source_owners.at(physical_key) == "A", "legal Lua symlink did not record its type owner");
     Lua("assert(A.value==1)");
     Put(fixture.scripts / "zone/A.lua", "A={value=2}");
     std::string error;
     auto zone = ComponentManager::PrepareSceneScripts("zone", {Incoming("A")}, {}, error);
     Check(zone != nullptr, error); ComponentManager::CommitSceneScripts(*zone); zone.reset();
-    Check(g_runtime.component_type_sources.at("A") != physical_key && g_runtime.component_source_owners.at(physical_key) == "A",
+    Check(Runtime().component_type_sources.at("A") != physical_key && Runtime().component_source_owners.at(physical_key) == "A",
           "switching variants lost historical type ownership");
     fs::remove(fixture.scripts / "A.lua");
     fs::create_symlink(physical, fixture.scripts / "B.lua");
-    const auto owners = g_runtime.component_source_owners;
-    const auto cache_size = g_runtime.component_source_cache.size();
+    const auto owners = Runtime().component_source_owners;
+    const auto cache_size = Runtime().component_source_cache.size();
     auto renamed = ComponentManager::PrepareSceneScripts("zone", {Incoming("B")}, {}, error);
     Check(!renamed && error.find("already belongs to type 'A'") != std::string::npos,
           "historically cached A source was silently registered as B");
-    Check(g_runtime.component_source_owners == owners && g_runtime.component_source_cache.size() == cache_size &&
-          !g_runtime.component_type_sources.contains("B"), "historical owner rejection published metadata");
+    Check(Runtime().component_source_owners == owners && Runtime().component_source_cache.size() == cache_size &&
+          !Runtime().component_type_sources.contains("B"), "historical owner rejection published metadata");
     Lua("assert(A.value==2 and B==nil)");
     fs::remove(fixture.scripts / "B.lua");
     Put(fixture.scripts / "Fresh.lua", "Fresh={value=3}");
     auto fresh = ComponentManager::PrepareSceneScripts("zone", {}, {}, error);
     Check(fresh != nullptr, error);
     const auto fresh_key = fs::canonical(fixture.scripts / "Fresh.lua").generic_string();
-    Check(!g_runtime.component_source_owners.contains(fresh_key), "prepared candidate owner published before commit");
+    Check(!Runtime().component_source_owners.contains(fresh_key), "prepared candidate owner published before commit");
     fresh.reset();
-    Check(!g_runtime.component_source_owners.contains(fresh_key), "discarded candidate owner leaked");
+    Check(!Runtime().component_source_owners.contains(fresh_key), "discarded candidate owner leaked");
     fs::remove(fixture.scripts / "Fresh.lua");
     Put(fixture.scripts / "zone/A.lua", "A={value=4}");
     const auto reloaded = ComponentManager::ReloadScripts({"A"});
-    Check(reloaded.ok && g_runtime.component_source_owners == owners, "same-source explicit reload changed canonical owners");
+    Check(reloaded.ok && Runtime().component_source_owners == owners, "same-source explicit reload changed canonical owners");
     Lua("assert(A.value==4)");
 }
 void NonLuaCanonicalTarget() {
@@ -340,7 +340,7 @@ void NonLuaCanonicalTarget() {
     bool rejected = false;
     try { ComponentManager::BootstrapComponentTypes({}); }
     catch (const std::exception &failure) { rejected = std::string(failure.what()).find("canonical component source must end in .lua") != std::string::npos; }
-    Check(rejected && !g_runtime.component_types_bootstrapped && g_runtime.component_source_cache.empty() && g_runtime.component_source_owners.empty(),
+    Check(rejected && !Runtime().component_types_bootstrapped && Runtime().component_source_cache.empty() && Runtime().component_source_owners.empty(),
           "non-Lua canonical target was executed/cached during bootstrap");
     Lua("assert(unexpected_source_execution==nil and Alias==nil and AAA==nil)");
     fs::remove(fixture.scripts / "Alias.lua");
@@ -348,7 +348,7 @@ void NonLuaCanonicalTarget() {
     fs::create_symlink(fixture.scripts / "data/source.txt", fixture.scripts / "Alias.lua");
     std::string message;
     auto plan = ComponentManager::PrepareSceneScripts({}, {}, {}, message);
-    Check(!plan && message.find("canonical component source must end in .lua") != std::string::npos && !g_runtime.component_type_sources.contains("Alias"),
+    Check(!plan && message.find("canonical component source must end in .lua") != std::string::npos && !Runtime().component_type_sources.contains("Alias"),
           "non-Lua canonical target accepted by later preparation");
 }
 } // namespace

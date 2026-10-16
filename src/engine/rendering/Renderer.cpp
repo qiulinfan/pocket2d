@@ -195,7 +195,7 @@ SDL_Texture *CreateMissingTexture(SDL_Renderer *renderer) {
 } // namespace
 
 RenderQueueState &Renderer::Queues() {
-    return World::Current().GetRenderQueueState();
+    return World::Current().State<RenderQueueState>();
 }
 
 void Renderer::PruneTextCache() {

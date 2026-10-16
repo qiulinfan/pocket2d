@@ -11,22 +11,22 @@
 
 namespace {
 
-using APIRegistrationDetail::g_lua_state;
-using APIRegistrationDetail::g_engine;
+using APIRegistrationDetail::LuaState;
+using APIRegistrationDetail::BoundEngine;
 
 void CppLog(const std::string &message) {
     std::cout << message << '\n';
 }
 
 void InjectDebugAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Debug")
         .addFunction("Log", &CppLog)
         .endNamespace();
 }
 
 void CppApplicationQuit() {
-    if (g_engine != nullptr) g_engine->RequestQuit();
+    if (BoundEngine() != nullptr) BoundEngine()->RequestQuit();
 }
 
 void CppApplicationSleep(int milliseconds) {
@@ -43,17 +43,17 @@ float CppApplicationGetDeltaTime() {
 }
 
 int CppApplicationGetWindowWidth() {
-    if (g_engine == nullptr) return 640;
-    const int runtime_width = g_engine->GetRuntimeRenderTargetWidth();
+    if (BoundEngine() == nullptr) return 640;
+    const int runtime_width = BoundEngine()->GetRuntimeRenderTargetWidth();
     if (runtime_width > 0) return runtime_width;
-    return g_engine->GetWindowWidth();
+    return BoundEngine()->GetWindowWidth();
 }
 
 int CppApplicationGetWindowHeight() {
-    if (g_engine == nullptr) return 360;
-    const int runtime_height = g_engine->GetRuntimeRenderTargetHeight();
+    if (BoundEngine() == nullptr) return 360;
+    const int runtime_height = BoundEngine()->GetRuntimeRenderTargetHeight();
     if (runtime_height > 0) return runtime_height;
-    return g_engine->GetWindowHeight();
+    return BoundEngine()->GetWindowHeight();
 }
 
 void CppApplicationOpenURL(const std::string &url) {
@@ -69,7 +69,7 @@ void CppApplicationOpenURL(const std::string &url) {
 }
 
 void InjectApplicationAPI() {
-    luabridge::getGlobalNamespace(g_lua_state)
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Application")
         .addFunction("Quit", &CppApplicationQuit)
         .addFunction("Sleep", &CppApplicationSleep)

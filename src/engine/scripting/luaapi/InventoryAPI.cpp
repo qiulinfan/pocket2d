@@ -266,11 +266,11 @@ void RegisterInventoryAPI() {
         {"GetSlot", Guard<GetSlot>}, {"GetCapacity", Guard<GetCapacity>}, {"GetRevision", Guard<GetRevision>},
         {"Snapshot", Guard<Snapshot>}, {"Add", Guard<Add, true>}, {"Remove", Guard<Remove, true>},
         {"Move", Guard<Move, true>}, {"Split", Guard<Split, true>}, {"TransferAll", Guard<TransferAll, true>}, {nullptr, nullptr}};
-    Metatable(g_lua_state, catalog_meta, catalog_methods, CatalogGC);
-    Metatable(g_lua_state, inventory_meta, inventory_methods, InventoryGC);
-    lua_newtable(g_lua_state);
-    lua_pushcfunction(g_lua_state, Guard<Open>); lua_setfield(g_lua_state, -2, "Open");
-    lua_pushcfunction(g_lua_state, (Guard<RestoreGroup, true>)); lua_setfield(g_lua_state, -2, "RestoreGroup");
-    lua_setglobal(g_lua_state, "Inventory");
+    Metatable(LuaState(), catalog_meta, catalog_methods, CatalogGC);
+    Metatable(LuaState(), inventory_meta, inventory_methods, InventoryGC);
+    lua_newtable(LuaState());
+    lua_pushcfunction(LuaState(), Guard<Open>); lua_setfield(LuaState(), -2, "Open");
+    lua_pushcfunction(LuaState(), (Guard<RestoreGroup, true>)); lua_setfield(LuaState(), -2, "RestoreGroup");
+    lua_setglobal(LuaState(), "Inventory");
 }
 }
