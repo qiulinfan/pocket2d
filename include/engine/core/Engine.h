@@ -31,6 +31,8 @@ private:
 
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;
+    // SDL subsystems this Engine initialized and must release (SDL_InitFlags).
+    std::uint32_t sdl_subsystems_ = 0;
 
     // runtime actor container for the current scene
     std::list<Actor> actors;

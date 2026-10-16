@@ -335,7 +335,11 @@ void Engine::ShutdownRuntime() {
     ComponentManager::Shutdown();
     Scene::SetActiveSceneSubdirectory({});
     ParticleManager::Clear();
-    Renderer::Shutdown();
+    // Renderer caches, the SDL video subsystem and the event/render recording
+    // helpers are process-wide; only the Engine that created a window releases
+    // them, so a headless Engine cannot tear down another Engine's window.
+    const bool presented = window != nullptr || renderer != nullptr;
+    if (renderer != nullptr) Renderer::Shutdown();
     AudioManager::Shutdown();
     if (renderer != nullptr) {
         SDL_DestroyRenderer(renderer);
@@ -345,9 +349,14 @@ void Engine::ShutdownRuntime() {
         SDL_DestroyWindow(window);
         window = nullptr;
     }
-    SDL_Quit();
-    SDLEventHelper::Reset();
-    SDLRenderHelper::Reset();
+    if (sdl_subsystems_ != 0) {
+        SDL_QuitSubSystem(sdl_subsystems_);
+        sdl_subsystems_ = 0;
+    }
+    if (presented) {
+        SDLEventHelper::Reset();
+        SDLRenderHelper::Reset();
+    }
     ::Input::Init();
     ::Input::SetExternalInputEnabled(false);
     world_.audio_output_enabled = true;
@@ -836,6 +845,7 @@ void Engine::initialize() {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw std::runtime_error(std::string("SDL video initialization failed: ") + SDL_GetError());
     }
+    sdl_subsystems_ |= SDL_INIT_VIDEO;
 
     window = SDLRenderHelper::SDL_CreateWindow(
         config_.game_title.c_str(), config_.window_width, config_.window_height,

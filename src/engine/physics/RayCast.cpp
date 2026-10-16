@@ -1,4 +1,5 @@
 #include "physics/RayCast.h"
+#include "core/World.h"
 #include <algorithm>
 #include <unordered_map>
 
@@ -9,8 +10,12 @@ struct RaycastHitCandidate {
     float fraction = 1.0f;
 };
 
-b2World *g_physics_world = nullptr;
-std::unordered_map<const b2Fixture *, RayCast::FixtureMetadata> g_fixture_metadata;
+// The physics world and its fixture metadata belong to the current World.
+struct PhysicsState {
+    b2World *physics_world = nullptr;
+    std::unordered_map<const b2Fixture *, RayCast::FixtureMetadata> fixture_metadata;
+};
+PhysicsState &Physics() { return World::Current().State<PhysicsState>(); }
 
 class CollectingRayCastCallback : public b2RayCastCallback {
 public:
@@ -43,14 +48,14 @@ std::vector<RaycastHitCandidate> CollectHits(const b2Vec2 &position,
                                              const b2Vec2 &direction,
                                              float distance) {
     std::vector<RaycastHitCandidate> hits;
-    if (g_physics_world == nullptr || distance <= 0.0f) return hits;
+    if (Physics().physics_world == nullptr || distance <= 0.0f) return hits;
 
     b2Vec2 normalized_direction = direction;
     if (normalized_direction.Normalize() == 0.0f) return hits;
 
     CollectingRayCastCallback callback(hits);
     const b2Vec2 end = position + (distance * normalized_direction);
-    g_physics_world->RayCast(&callback, position, end);
+    Physics().physics_world->RayCast(&callback, position, end);
 
     std::stable_sort(hits.begin(), hits.end(),
                      [](const RaycastHitCandidate &a,
@@ -66,36 +71,36 @@ namespace RayCast {
 
 // global physics world accessors
 b2World *GetPhysicsWorld() {
-    return g_physics_world;
+    return Physics().physics_world;
 }
 
 // global physics world accessors
 void SetPhysicsWorld(b2World *world) {
-    g_physics_world = world;
+    Physics().physics_world = world;
 }
 
 // global physics world accessors
 void ClearPhysicsState() {
-    g_fixture_metadata.clear();
-    g_physics_world = nullptr;
+    Physics().fixture_metadata.clear();
+    Physics().physics_world = nullptr;
 }
 
 // register and query fixture metadata
 void RegisterFixture(b2Fixture *fixture, Actor *actor, FixtureKind kind) {
     if (fixture == nullptr) return;
-    g_fixture_metadata[fixture] = {actor, kind};
+    Physics().fixture_metadata[fixture] = {actor, kind};
 }
 
 // register and query fixture metadata
 void UnregisterFixture(b2Fixture *fixture) {
     if (fixture == nullptr) return;
-    g_fixture_metadata.erase(fixture);
+    Physics().fixture_metadata.erase(fixture);
 }
 
 // register and query fixture metadata
 const FixtureMetadata *FindFixtureMetadata(const b2Fixture *fixture) {
-    auto metadata_it = g_fixture_metadata.find(fixture);
-    if (metadata_it == g_fixture_metadata.end()) return nullptr;
+    auto metadata_it = Physics().fixture_metadata.find(fixture);
+    if (metadata_it == Physics().fixture_metadata.end()) return nullptr;
     return &metadata_it->second;
 }
 

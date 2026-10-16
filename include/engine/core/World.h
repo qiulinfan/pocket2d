@@ -2,6 +2,7 @@
 #define ENGINE_CORE_WORLD_H
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -31,6 +32,8 @@ public:
     // Gameplay tick counter, advanced once per completed simulation step.
     int frame_number = 0;
     bool frame_clock_initialized = false;
+    // Start of the current presented frame, for 60 Hz pacing (SDL ticks, ns).
+    std::uint64_t frame_start_timestamp = 0;
 
     // Whether this World plays through the process audio device. Headless
     // Worlds turn it off so they never touch the shared mixer.

@@ -1,5 +1,6 @@
 #include "scripting/LuaBoundary.h"
 #include "physics/Rigidbody.h"
+#include "core/World.h"
 #include "physics/PhysicsMutationGuard.h"
 #include "scene/Actor.h"
 #include "scripting/ComponentManager.h"
@@ -18,7 +19,9 @@ constexpr float kPhysicsSyncEpsilon = 0.0001f;
 constexpr double kFloatLimit = static_cast<double>(std::numeric_limits<float>::max()) / 16.0;
 constexpr double kSquaredLimit = static_cast<double>(std::numeric_limits<float>::max()) / 256.0;
 constexpr float kStep = 1.0f / 60.0f;
-std::uint64_t g_force_step = 0;
+// Physics step counter used to scope same-step force accumulation; per World.
+struct ForceStep { std::uint64_t value = 0; };
+std::uint64_t &CurrentForceStep() { return World::Current().State<ForceStep>().value; }
 
 void Require(bool valid,const char *message) {
     if(!valid) throw std::invalid_argument(std::string("Rigidbody: ")+message);
@@ -346,7 +349,7 @@ void Rigidbody::EnsurePhysicsWorld() {
 void Rigidbody::DestroyPhysicsWorld() {
     delete RayCast::GetPhysicsWorld();
     RayCast::ClearPhysicsState();
-    ++g_force_step;
+    ++CurrentForceStep();
 }
 
 // global physics world lifecycle
@@ -359,7 +362,7 @@ void Rigidbody::StepPhysicsWorld() {
     b2World *world = RayCast::GetPhysicsWorld();
     if (world == nullptr) return;
     world->Step(kStep, 8, 3);
-    if(world->GetAutoClearForces()) ++g_force_step;
+    if(world->GetAutoClearForces()) ++CurrentForceStep();
 }
 
 bool Rigidbody::HasLiveRuntimeBinding() const {
@@ -393,7 +396,7 @@ void Rigidbody::OnStart() {
     CreateColliderFixture(*this);
     CreateTriggerFixture(*this);
     CreatePhantomFixture(*this);
-    accumulated_force_.SetZero();force_step_=g_force_step;
+    accumulated_force_.SetZero();force_step_=CurrentForceStep();
 }
 
 // Destroy the backing Box2D body and unregister all fixture metadata.
@@ -412,7 +415,7 @@ void Rigidbody::OnDestroy() {
     PhysicsMutationGuard mutation;
     world->DestroyBody(body);
     body = nullptr;
-    accumulated_force_.SetZero();force_step_=g_force_step;
+    accumulated_force_.SetZero();force_step_=CurrentForceStep();
 }
 
 // runtime physics controls
@@ -441,19 +444,19 @@ void Rigidbody::AddForce(const b2Vec2 &force) {
     FiniteVector(force);
     if (body == nullptr) return;
     if(body->GetType()!=b2_dynamicBody) return;
-    const auto previous=force_step_==g_force_step?accumulated_force_:b2Vec2_zero;
+    const auto previous=force_step_==CurrentForceStep()?accumulated_force_:b2Vec2_zero;
     const double next_x=static_cast<double>(previous.x)+force.x,next_y=static_cast<double>(previous.y)+force.y;
     const auto predicted=Integration(body->GetMass(),body->GetGravityScale(),body->GetWorld()->GetGravity(),next_x,next_y,body->GetLinearVelocity());
     PointSpeed(body,predicted,body->GetAngularVelocity());
     body->ApplyForceToCenter(force, true);
-    accumulated_force_.Set(static_cast<float>(next_x),static_cast<float>(next_y));force_step_=g_force_step;
+    accumulated_force_.Set(static_cast<float>(next_x),static_cast<float>(next_y));force_step_=CurrentForceStep();
 }
 
 // runtime physics controls
 void Rigidbody::SetVelocity(const b2Vec2 &velocity) {
     FiniteVector(velocity);SquaredVector(velocity.x,velocity.y,"linear velocity exceeds finite squared-magnitude range");
     if (body == nullptr) return;
-    const auto force=force_step_==g_force_step?accumulated_force_:b2Vec2_zero;
+    const auto force=force_step_==CurrentForceStep()?accumulated_force_:b2Vec2_zero;
     PointSpeed(body,velocity,body->GetAngularVelocity());
     const auto predicted=Integration(body->GetMass(),body->GetGravityScale(),body->GetWorld()->GetGravity(),force.x,force.y,velocity);
     PointSpeed(body,predicted,body->GetAngularVelocity());
@@ -504,7 +507,7 @@ void Rigidbody::SetEffectiveBodyType(const std::string &type_name) {
     PhysicsMutationGuard state_change;
     body->SetType(requested_type);
     effective_body_type = type_name;
-    accumulated_force_.SetZero();force_step_=g_force_step;
+    accumulated_force_.SetZero();force_step_=CurrentForceStep();
 }
 
 void Rigidbody::ApplyEnabledState() {
@@ -529,7 +532,7 @@ void Rigidbody::SetAngularVelocity(float degrees_clockwise) {
 void Rigidbody::SetGravityScale(float scale) {
     ValidateNumericProperty("gravity_scale",scale);
     if(body) {
-        const auto force=force_step_==g_force_step?accumulated_force_:b2Vec2_zero;
+        const auto force=force_step_==CurrentForceStep()?accumulated_force_:b2Vec2_zero;
         const auto predicted=Integration(body->GetMass(),scale,body->GetWorld()->GetGravity(),force.x,force.y,body->GetLinearVelocity());
         PointSpeed(body,predicted,body->GetAngularVelocity());
     }

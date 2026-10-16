@@ -7,10 +7,7 @@
 
 namespace FrameClock {
 
-// The frame index belongs to the current World; the pacing timestamp belongs
-// to the presenting host loop.
-inline Uint64 current_frame_start_timestamp = 0;
-
+// The frame index and the pacing timestamp belong to the current World.
 // Runtime frame index visible to gameplay/debug APIs.
 // 对外可见的运行时帧编号.
 inline int GetFrameNumber() {
@@ -22,8 +19,8 @@ inline constexpr float GetDeltaTime() {
 }
 
 inline void Reset() {
-    current_frame_start_timestamp = SDL_GetTicksNS();
     World &world = World::Current();
+    world.frame_start_timestamp = SDL_GetTicksNS();
     world.frame_number = 0;
     world.frame_clock_initialized = true;
 }
@@ -35,6 +32,7 @@ inline void EnsureInitialized() {
 
 inline void DelayToMaintain60FPS() {
     EnsureInitialized();
+    Uint64 &current_frame_start_timestamp = World::Current().frame_start_timestamp;
     constexpr Uint64 interval_ns = 1000000000ULL / 60;
     const Uint64 deadline = current_frame_start_timestamp + interval_ns;
     const Uint64 now = SDL_GetTicksNS();
