@@ -1,6 +1,7 @@
 #ifndef ENGINE_H
 #define ENGINE_H
 
+#include "core/World.h"
 #include "scene/Actor.h"
 #include "shared/physics/PhysicsHierarchyState.h"
 #include "shared/config/GameConfig.h"
@@ -23,6 +24,9 @@ union SDL_Event;
 class Engine
 {
 private:
+    // The World holding this runtime's mutable subsystem state. Public entry
+    // points bind it, so several Engines may coexist on one or more threads.
+    World &world_;
     GameConfigData config_;
 
     SDL_Window *window = nullptr;
@@ -104,8 +108,11 @@ private:
     void PruneDestroyedRuntimeActors();
 
 public:
+    // Uses the World current on this thread at construction.
     Engine();
+    explicit Engine(World &world);
     ~Engine();
+    World &GetWorld() const { return world_; }
     // Start SDL/runtime systems without entering the blocking game loop.
     // 初始化 SDL/运行时系统, 但不进入游戏循环.
     void InitializeRuntime();

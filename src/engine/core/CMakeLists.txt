@@ -4,6 +4,8 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/Engine.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SceneEdits.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TaskExecutor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/World.cpp"
+        "${PROJECT_SOURCE_DIR}/include/engine/core/World.h"
         "${PROJECT_SOURCE_DIR}/include/engine/core/TaskExecutor.h"
         "${PROJECT_SOURCE_DIR}/include/engine/core/Helper.h"
         "${PROJECT_SOURCE_DIR}/include/engine/core/Engine.h"

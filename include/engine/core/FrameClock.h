@@ -2,18 +2,19 @@
 #define ENGINE_CORE_FRAME_CLOCK_H
 
 #include "SDL3/SDL.h"
+#include "core/World.h"
 #include <algorithm>
 
 namespace FrameClock {
 
+// The frame index belongs to the current World; the pacing timestamp belongs
+// to the presenting host loop.
+inline Uint64 current_frame_start_timestamp = 0;
+
 // Runtime frame index visible to gameplay/debug APIs.
 // 对外可见的运行时帧编号.
-inline int frame_number = 0;
-inline Uint64 current_frame_start_timestamp = 0;
-inline bool initialized = false;
-
 inline int GetFrameNumber() {
-    return frame_number;
+    return World::Current().frame_number;
 }
 
 inline constexpr float GetDeltaTime() {
@@ -22,12 +23,13 @@ inline constexpr float GetDeltaTime() {
 
 inline void Reset() {
     current_frame_start_timestamp = SDL_GetTicksNS();
-    frame_number = 0;
-    initialized = true;
+    World &world = World::Current();
+    world.frame_number = 0;
+    world.frame_clock_initialized = true;
 }
 
 inline void EnsureInitialized() {
-    if (initialized) return;
+    if (World::Current().frame_clock_initialized) return;
     Reset();
 }
 
@@ -45,7 +47,7 @@ inline void DelayToMaintain60FPS() {
 
 inline void AdvanceFrame() {
     EnsureInitialized();
-    ++frame_number;
+    ++World::Current().frame_number;
 }
 
 inline void DelayAndAdvanceFrame() {

@@ -356,6 +356,7 @@ void Reindex(std::list<Actor> &actors) {
 } // namespace
 
 bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command) {
+    WorldScope world_scope(world_);
     if(command.empty())return false;
     last_scene_edit_error_.clear();
     if(scene_reset_required_||scene_transition_active_) {last_scene_edit_error_="runtime cannot edit during scene transition or before reset";return false;}

@@ -229,7 +229,10 @@ PhysicsHierarchy::State BuildRuntimeActorPhysicsSelfState(
 
 } // namespace
 
-Engine::Engine() {
+Engine::Engine() : Engine(World::Current()) {}
+
+Engine::Engine(World &world) : world_(world) {
+    WorldScope world_scope(world_);
     /*
     Engine owns both standalone runtime and editor-embedded runtime state.
     Construction loads config and prepares the initial actor/component world,
@@ -268,6 +271,7 @@ Engine::~Engine() {
 }
 
 void Engine::GameLoop() {
+    WorldScope world_scope(world_);
     InitializeRuntime();
 
     while (IsRunning()) {
@@ -283,6 +287,7 @@ Editor can call this without entering GameLoop()
 so the host can bootstrap runtime services on demand
 */
 void Engine::InitializeRuntime() {
+    WorldScope world_scope(world_);
     if(scene_reset_required_)throw std::runtime_error("runtime requires reset after failed publication");
     if (runtime_initialized_ || runtime_shutdown_) return;
     is_game_running = true;
@@ -291,6 +296,7 @@ void Engine::InitializeRuntime() {
 }
 
 void Engine::InitializeHeadless() {
+    WorldScope world_scope(world_);
     if(scene_reset_required_)throw std::runtime_error("runtime requires reset after failed publication");
     if (runtime_initialized_ || runtime_shutdown_) return;
     if (!SDL_Init(0)) {
@@ -315,6 +321,7 @@ Tear down SDL objects and runtime only caches
 They need to be cleared once actors and components are destroyed.
 */
 void Engine::ShutdownRuntime() {
+    WorldScope world_scope(world_);
     
     if (runtime_shutdown_) return;
     runtime_shutdown_ = true;
@@ -351,6 +358,7 @@ Just wrapper, checking if quit is requested this frame,
 then call the real RunSingleFrame(bool quit_requested_this_frame)
 */
 void Engine::RunSingleFrame() {
+    WorldScope world_scope(world_);
     if (!IsRunning()) return;
 
     bool quit_requested_this_frame = false;
@@ -363,6 +371,7 @@ void Engine::RunSingleFrame() {
 }
 
 void Engine::RunSingleFrame(bool quit_requested_this_frame) {
+    WorldScope world_scope(world_);
     if (!IsRunning()) return;
     /* Run one full gameplay frame: scene load, starts, update, render, input late update. */
     advanceGameplay();
@@ -413,6 +422,7 @@ Edit mode stays static by default; live preview may explicitly flush OnStart.
 */
 void Engine::RunRenderFrozenFrame(bool quit_requested_this_frame,
                                   bool process_pending_on_start) {
+    WorldScope world_scope(world_);
     
     if (!IsRunning()) return;
 
@@ -442,6 +452,7 @@ keep the last runtime render target exactly as it was on the previous gameplay
 frame, and only clear the editor host backbuffer so ImGui can compose over it.
 */
 void Engine::RunPresentPausedFrame(bool quit_requested_this_frame) {
+    WorldScope world_scope(world_);
     if (!IsRunning()) return;
 
     if (render_runtime_to_texture_) {
@@ -463,6 +474,7 @@ But: both standalone runtime and editor embedding feed the same input path
 */
 void Engine::ProcessSDLEvent(const SDL_Event &event,
                              bool &quit_requested_this_frame) {
+    WorldScope world_scope(world_);
     ::Input::ProcessEvent(event);
     if (event.type == SDL_EVENT_QUIT) {
         quit_requested_this_frame = true;
@@ -471,6 +483,7 @@ void Engine::ProcessSDLEvent(const SDL_Event &event,
 
 /* Present the current backbuffer to the window once drawing is complete. */
 void Engine::PresentFrame(bool advance_gameplay_frame) {
+    WorldScope world_scope(world_);
     if (renderer == nullptr) return;
     SDLRenderHelper::SDL_RenderPresent(renderer, advance_gameplay_frame);
     RefreshPerformanceCounters();
@@ -521,6 +534,7 @@ without forcing every mutation site to eagerly recompute ancestry state.
 */
 PhysicsHierarchy::State Engine::GetRuntimePhysicsHierarchyStateByUID(
     Actor::UID actor_uid) const {
+    WorldScope world_scope(world_);
     if (actor_uid == PhysicsHierarchy::kInvalidActorUID) return {};
     rebuildRuntimePhysicsHierarchyCache();
     auto state_it = runtime_physics_hierarchy_state_by_uid_.find(actor_uid);
@@ -580,6 +594,7 @@ void Engine::ReportRuntimeActorPublicationFailure(const std::string &message) {
 
 bool Engine::DuplicateRuntimeActorByUID(Actor::UID actor_uid,
                                         Actor::UID *out_new_actor_uid) {
+    WorldScope world_scope(world_);
     if (scene_reset_required_) return false;
     last_runtime_actor_error_.clear();
     const Actor *source_actor = GetRuntimeActorByUID(actor_uid);
@@ -612,6 +627,7 @@ Remove one runtime actor and immediately flush the component-system destruction
 queue so editor views do not keep dangling selections or stale hierarchy data.
 */
 bool Engine::DeleteRuntimeActorByUID(Actor::UID actor_uid) {
+    WorldScope world_scope(world_);
     for (Actor &actor : actors) {
         if (actor.runtime_destroyed) continue;
         if (actor.uid != actor_uid) continue;
@@ -631,6 +647,7 @@ This is the backend used by the Lua SetParent API.
 */
 bool Engine::SetRuntimeActorParentByUID(Actor::UID actor_uid,
                                         Actor::UID parent_uid) {
+    WorldScope world_scope(world_);
     /*
     Runtime-generated actors are appended directly by the scripting layer, so
     the UID cache may lag behind until we explicitly resync it here.
@@ -677,6 +694,7 @@ void Engine::failSceneCommit(const std::string &message) {
 
 bool Engine::LoadSceneAsset(const SceneFormat::SceneAsset &scene_asset,
                            const std::function<bool()> &before_commit) {
+    WorldScope world_scope(world_);
     ++scene_load_attempt_revision_;
     if(scene_transition_active_){last_scene_load_error_="another scene transaction is already active";return false;}
     SceneTransitionScope transition(scene_transition_active_);
@@ -725,6 +743,7 @@ if any single mutation fails to apply then the whole command is rejected and rol
 */
 /* Toggle offscreen runtime rendering for the docked editor viewport. */
 void Engine::SetRenderRuntimeToTexture(bool enabled) {
+    WorldScope world_scope(world_);
     render_runtime_to_texture_ = enabled;
     if (!enabled) {
         destroyRuntimeRenderTarget();
@@ -734,6 +753,7 @@ void Engine::SetRenderRuntimeToTexture(bool enabled) {
 }
 
 void Engine::SetRuntimeRenderTargetSize(int width, int height) {
+    WorldScope world_scope(world_);
     const int safe_width = std::max(1, width);
     const int safe_height = std::max(1, height);
     if (requested_runtime_render_target_width_ == safe_width &&
@@ -753,6 +773,7 @@ SDL_Texture *Engine::RenderScenePreview(float camera_x, float camera_y,
                                         float zoom_factor, int preview_width,
                                         int preview_height,
                                         bool scene_backed_only) {
+    WorldScope world_scope(world_);
     if (renderer == nullptr) return nullptr;
 
     ensureScenePreviewRenderTarget(preview_width, preview_height);
@@ -794,9 +815,11 @@ int Engine::GetScenePreviewRenderTargetHeight() const {
 float Engine::GetRuntimeRenderFPS() const {return displayed_runtime_render_fps_;}
 float Engine::GetGameplayFPS() const {return displayed_gameplay_fps_;}
 void Engine::SetAudioPlaybackEnabled(bool enabled) {
+    WorldScope world_scope(world_);
     AudioManager::SetPlaybackEnabled(enabled);
 }
 bool Engine::IsAudioPlaybackEnabled() const {
+    WorldScope world_scope(world_);
     return AudioManager::IsPlaybackEnabled();
 }
 
