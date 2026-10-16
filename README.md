@@ -83,7 +83,10 @@ Run the game executable:
 - `Projects/Default/*`: the default sample project
 - `Projects/*`: local project slots; every project except `Default` is ignored by this engine repository
 - `.engine/*`: editor-facing config, state, fonts, and icons
-- `thirdparty/*`: dependencies
+- `thirdparty/*`: vendored dependencies; SDL3 (with SDL_image, SDL_ttf, SDL_mixer) and Box2D 3 are fetched at configure time
+- `scripting/api/*`: Lua host API contract, agent command schema and asset JSON Schemas
+- `clients/python/*`, `tools/*`: the Python agent client and the `pocket` command line
+- `tests/*`: CTest suites and fixture projects
 
 ## Projects
 Pocket2D suggests project management in the `Projects/` directory, butyou are also welcome to create projects anywhere and open them with the editor through `File -> Open Project...`.
