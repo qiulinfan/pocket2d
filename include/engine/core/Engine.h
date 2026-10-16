@@ -1,6 +1,7 @@
 #ifndef ENGINE_H
 #define ENGINE_H
 
+#include "core/Vector2.h"
 #include "core/World.h"
 #include "scene/Actor.h"
 #include "shared/physics/PhysicsHierarchyState.h"
@@ -250,6 +251,14 @@ public:
     float GetCameraPositionY() const;
     void SetCameraZoom(float zoom_factor);
     float GetCameraZoom() const;
+    // Screen space is window coordinates (as the mouse reports them); the
+    // camera view is the configured resolution, stretched to the window.
+    Vector2 ScreenToWorld(float screen_x, float screen_y) const;
+    Vector2 WorldToScreen(float world_x, float world_y) const;
+    // The configured resolution (the UI drawing space) and the world-unit
+    // size of the camera's view.
+    Vector2 GetScreenSize() const;
+    Vector2 GetViewSize() const;
 
     // scene API exposed to Lua
     // Queue a scene change to be applied at the start of the next frame.

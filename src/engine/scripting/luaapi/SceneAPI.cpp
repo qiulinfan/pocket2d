@@ -1,4 +1,5 @@
 #include "RegistrationDetail.h"
+#include "core/Vector2.h"
 #include "core/Engine.h"
 #include "scene/ActorHandle.h"
 #include "lua.hpp"
@@ -59,6 +60,26 @@ float CppCameraGetZoom() {
     return BoundEngine()->GetCameraZoom();
 }
 
+Vector2 CppCameraScreenToWorld(float x, float y) {
+    if (BoundEngine() == nullptr) return {x, y};
+    return BoundEngine()->ScreenToWorld(x, y);
+}
+
+Vector2 CppCameraWorldToScreen(float x, float y) {
+    if (BoundEngine() == nullptr) return {x, y};
+    return BoundEngine()->WorldToScreen(x, y);
+}
+
+Vector2 CppCameraGetScreenSize() {
+    if (BoundEngine() == nullptr) return {0.0f, 0.0f};
+    return BoundEngine()->GetScreenSize();
+}
+
+Vector2 CppCameraGetViewSize() {
+    if (BoundEngine() == nullptr) return {0.0f, 0.0f};
+    return BoundEngine()->GetViewSize();
+}
+
 void InjectCameraAPI() {
     luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Camera")
@@ -67,6 +88,10 @@ void InjectCameraAPI() {
         .addFunction("GetPositionY", &CppCameraGetPositionY)
         .addFunction("SetZoom", &CppCameraSetZoom)
         .addFunction("GetZoom", &CppCameraGetZoom)
+        .addFunction("ScreenToWorld", &CppCameraScreenToWorld)
+        .addFunction("WorldToScreen", &CppCameraWorldToScreen)
+        .addFunction("GetScreenSize", &CppCameraGetScreenSize)
+        .addFunction("GetViewSize", &CppCameraGetViewSize)
         .endNamespace();
 }
 

@@ -1024,6 +1024,41 @@ float Engine::GetCameraPositionY() const {return camera_position.y;}
 void Engine::SetCameraZoom(float zoom_factor) {runtime_zoom_factor = zoom_factor;}
 float Engine::GetCameraZoom() const {return runtime_zoom_factor;}
 
+namespace {
+// Window logical size, or the configured size without a window (headless).
+std::pair<float, float> ScreenExtent(SDL_Window *window, float fallback_width, float fallback_height) {
+    int width = 0, height = 0;
+    if (window != nullptr && SDL_GetWindowSize(window, &width, &height) && width > 0 && height > 0)
+        return {static_cast<float>(width), static_cast<float>(height)};
+    return {fallback_width, fallback_height};
+}
+} // namespace
+
+Vector2 Engine::GetScreenSize() const {
+    return {static_cast<float>(std::max(1, config_.window_width)), static_cast<float>(std::max(1, config_.window_height))};
+}
+Vector2 Engine::GetViewSize() const {
+    const float zoom = std::clamp(runtime_zoom_factor, kMinZoomFactor, kMaxZoomFactor);
+    const Vector2 screen = GetScreenSize();
+    return {screen.x / (100.0f * zoom), screen.y / (100.0f * zoom)};
+}
+Vector2 Engine::ScreenToWorld(float screen_x, float screen_y) const {
+    const Vector2 render = GetScreenSize();
+    const auto [width, height] = ScreenExtent(window, render.x, render.y);
+    const float zoom = std::clamp(runtime_zoom_factor, kMinZoomFactor, kMaxZoomFactor);
+    const float rx = screen_x * render.x / width, ry = screen_y * render.y / height;
+    return {camera_position.x + (rx - render.x * 0.5f) / (100.0f * zoom),
+            camera_position.y + (ry - render.y * 0.5f) / (100.0f * zoom)};
+}
+Vector2 Engine::WorldToScreen(float world_x, float world_y) const {
+    const Vector2 render = GetScreenSize();
+    const auto [width, height] = ScreenExtent(window, render.x, render.y);
+    const float zoom = std::clamp(runtime_zoom_factor, kMinZoomFactor, kMaxZoomFactor);
+    const float rx = (world_x - camera_position.x) * 100.0f * zoom + render.x * 0.5f;
+    const float ry = (world_y - camera_position.y) * 100.0f * zoom + render.y * 0.5f;
+    return {rx * width / render.x, ry * height / render.y};
+}
+
 
 void Engine::RequestSceneLoad(const std::string &scene_name) {
     has_pending_scene_load = true;

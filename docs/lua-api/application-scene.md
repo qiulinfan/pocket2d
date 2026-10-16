@@ -75,3 +75,21 @@ Sets the runtime camera zoom.
 ### `Camera.GetZoom() -> float`
 
 Returns the runtime camera zoom.
+
+### `Camera.ScreenToWorld(x, y) -> Vector2` / `Camera.WorldToScreen(x, y) -> Vector2`
+
+Convert between screen coordinates (window coordinates, as
+`Input.GetMousePosition` reports them) and world coordinates through the
+current camera position and zoom. The camera view is the configured
+resolution stretched to the window, so a resized window still maps the mouse
+to the right world point. Headless runs use the configured resolution as the
+screen.
+
+### `Camera.GetScreenSize() -> Vector2`
+
+The configured resolution: the UI drawing space of `Image.DrawUI*` and `Text.Draw`.
+
+### `Camera.GetViewSize() -> Vector2`
+
+The world-unit size of the camera's view at the current zoom
+(`screen size / (100 * zoom)`).
