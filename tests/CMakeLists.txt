@@ -84,6 +84,10 @@ set_tests_properties(agent_mcp PROPERTIES TIMEOUT 90)
 add_test(NAME agent_actions COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_actions_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_actions PROPERTIES TIMEOUT 60)
+add_test(NAME scenario_env COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scenario_env_test.py"
+    $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village")
+set_tests_properties(scenario_env PROPERTIES TIMEOUT 180)
 add_test(NAME agent_protocol_generated COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/tools/generate_agent_protocol.py" --check)
 set_tests_properties(agent_protocol_generated PROPERTIES TIMEOUT 30)

@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "seed": 42,
+  "frames_per_step": 1,
+  "controls": {
+    "keys": [
+      "up",
+      "down",
+      "left",
+      "right",
+      "e",
+      "space",
+      "1",
+      "q"
+    ]
+  },
+  "select": {
+    "names": [
+      "village",
+      "player"
+    ]
+  },
+  "name": "plant_and_harvest",
+  "description": "Plant a seed in village soil and harvest the grown crop into the bag.",
+  "max_frames": 1200,
+  "success": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "harvested",
+      "op": ">=",
+      "value": 1
+    }
+  ],
+  "failure": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "phase",
+      "op": "==",
+      "value": "failed"
+    }
+  ],
+  "reward": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "planted",
+      "weight": 0.25
+    },
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "harvested",
+      "weight": 1.0
+    },
+    {
+      "per_frame": -0.0005
+    }
+  ]
+}

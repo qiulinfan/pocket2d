@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "seed": 42,
+  "frames_per_step": 1,
+  "controls": {
+    "keys": [
+      "up",
+      "down",
+      "left",
+      "right",
+      "e",
+      "space",
+      "1",
+      "q"
+    ]
+  },
+  "select": {
+    "names": [
+      "village",
+      "player"
+    ]
+  },
+  "name": "defend_wave",
+  "description": "Survive the first invasion wave by defeating all three invaders.",
+  "max_frames": 3000,
+  "success": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "wave",
+      "op": ">=",
+      "value": 2
+    }
+  ],
+  "failure": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "phase",
+      "op": "==",
+      "value": "failed"
+    }
+  ],
+  "reward": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "defeated",
+      "weight": 0.3
+    },
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "wave",
+      "weight": 1.0
+    },
+    {
+      "per_frame": -0.0002
+    }
+  ]
+}

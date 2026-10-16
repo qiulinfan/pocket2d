@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "seed": 42,
+  "frames_per_step": 1,
+  "controls": {
+    "keys": [
+      "up",
+      "down",
+      "left",
+      "right",
+      "e",
+      "space",
+      "1",
+      "q"
+    ]
+  },
+  "select": {
+    "names": [
+      "village",
+      "player"
+    ]
+  },
+  "name": "close_route",
+  "description": "Travel through the portal and destroy the invasion source, closing the route permanently.",
+  "max_frames": 9000,
+  "success": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "route_closed",
+      "op": "==",
+      "value": true
+    }
+  ],
+  "failure": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "phase",
+      "op": "==",
+      "value": "failed"
+    }
+  ],
+  "reward": [
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "defeated",
+      "weight": 0.2
+    },
+    {
+      "actor": "village",
+      "component": "state",
+      "property": "source_health",
+      "weight": -0.1
+    },
+    {
+      "per_frame": -0.0001
+    }
+  ]
+}
