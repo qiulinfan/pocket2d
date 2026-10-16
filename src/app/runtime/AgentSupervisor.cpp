@@ -1,5 +1,6 @@
 #include "app/runtime/AgentSupervisor.h"
 #include "app/runtime/AgentProtocolSchema.h"
+#include "app/runtime/AgentReplay.h"
 #include <SDL3/SDL.h>
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -360,16 +361,22 @@ private:
 };
 } // namespace
 
-int RunAgentSupervisor(const std::filesystem::path &executable,
-                       const std::filesystem::path &project, std::uint32_t seed,
-                       const AgentExecutionLimits &limits) {
-    Worker worker(limits.max_response_bytes);
+struct AgentHost::Impl {
+    std::filesystem::path executable, project;
+    std::uint32_t seed;
+    AgentExecutionLimits limits;
+    Worker worker;
     int frame = 0;
-    std::string description;
-    const auto deadline = [&] {
-        return Clock::now() + std::chrono::milliseconds(limits.request_timeout_ms);
-    };
-    const auto start = [&](Deadline end) {
+    std::string description, initial_observation;
+
+    Impl(std::filesystem::path executable_in, std::filesystem::path project_in, std::uint32_t seed_in,
+         AgentExecutionLimits limits_in)
+        : executable(std::move(executable_in)), project(std::move(project_in)), seed(seed_in),
+          limits(limits_in), worker(limits_in.max_response_bytes) {}
+
+    Deadline deadline() const { return Clock::now() + std::chrono::milliseconds(limits.request_timeout_ms); }
+
+    std::string start(Deadline end) {
         worker.Start(executable, project, seed, limits);
         const std::string response = worker.Exchange(R"({"cmd":"_bootstrap"})", end, true);
         auto document = ParseResponse(response);
@@ -386,122 +393,142 @@ int RunAgentSupervisor(const std::filesystem::path &executable,
         description = Serialize(document);
         frame = initial["frame"].GetInt();
         return Serialize(initial);
-    };
+    }
+};
+
+AgentHost::AgentHost(std::filesystem::path executable, std::filesystem::path project, std::uint32_t seed,
+                     AgentExecutionLimits limits)
+    : impl_(std::make_unique<Impl>(std::move(executable), std::move(project), seed, limits)) {}
+AgentHost::~AgentHost() = default;
+
+bool AgentHost::Start(std::string &failure_response) {
     try {
-        start(deadline());
+        impl_->initial_observation = impl_->start(impl_->deadline());
+        return true;
     } catch (const WorkerFailure &error) {
-        worker.Stop();
-        std::cout << Error(error.code, error.what(), frame, true, error.response) << std::endl;
+        impl_->worker.Stop();
+        failure_response = Error(error.code, error.what(), impl_->frame, true, error.response);
+        return false;
+    }
+}
+
+const std::string &AgentHost::InitialObservation() const { return impl_->initial_observation; }
+std::uint32_t AgentHost::Seed() const { return impl_->seed; }
+bool AgentHost::Stop() { return impl_->worker.Stop(); }
+
+AgentHost::Reply AgentHost::Handle(const std::string &line, bool oversized) {
+    Impl &host = *impl_;
+    Worker &worker = host.worker;
+    int &frame = host.frame;
+    if (oversized) return {Error("invalid_request", "command exceeds 64 KiB", frame, false)};
+    rapidjson::Document request;
+    if (HasBoundedJSONDepth(line))
+        request.Parse<rapidjson::kParseIterativeFlag | rapidjson::kParseValidateEncodingFlag>(line.data(), line.size());
+    const bool valid_command = !request.HasParseError() && request.IsObject() &&
+        request.HasMember("cmd") && request["cmd"].IsString();
+    if (!valid_command)
+        return {Error("invalid_request", "expected a JSON object with string cmd and nesting at most 64", frame, false)};
+    // v2 clients may correlate responses with any string or integer id.
+    rapidjson::Value client_id;
+    if (request.HasMember("id") && (request["id"].IsString() || request["id"].IsInt64() || request["id"].IsUint64()))
+        client_id.CopyFrom(request["id"], request.GetAllocator());
+    const auto reply = [&](const std::string &response, bool finished = false, int exit_code = 0) {
+        Reply result{response, finished, exit_code};
+        if (client_id.IsNull()) return result;
+        rapidjson::Document document;
+        document.Parse(response.data(), response.size());
+        if (!document.IsObject()) return result;
+        document.RemoveMember("id");
+        rapidjson::Value id;
+        id.CopyFrom(client_id, document.GetAllocator());
+        document.AddMember("id", id, document.GetAllocator());
+        result.response = Serialize(document);
+        return result;
+    };
+    const std::string name(request["cmd"].GetString(), request["cmd"].GetStringLength());
+    if (name.find('\0') != std::string::npos)
+        return reply(Error("invalid_request", "cmd must not contain a NUL byte", frame, false));
+    if (name == "_bootstrap" || request.HasMember("_pocket_request_id") ||
+        request.HasMember("_initial_observation"))
+        return reply(Error("invalid_request", "private worker protocol fields are reserved", frame, false));
+    if (name == "quit") {
+        if (worker.Exists()) {
+            const Deadline end = host.deadline();
+            try {
+                worker.Exchange(line, end);
+                worker.WaitForExit(end);
+            } catch (const WorkerFailure &) {
+                // Quit can always dispose of an unhealthy worker.
+            }
+        }
+        const bool reaped = worker.Stop();
+        return reply(reaped ? QuitResponse(frame)
+                            : Error("worker_cleanup_failed", "worker did not terminate", frame, true),
+                     true, reaped ? 0 : 1);
+    }
+    if (name == "describe" && !worker.Exists()) {
+        auto cached = ParseResponse(host.description);
+        SetBool(cached, "runtime_available", false);
+        SetBool(cached, "requires_reset", true);
+        return reply(Serialize(cached));
+    }
+    try {
+        const Deadline end = host.deadline();
+        std::string response;
+        if (name == "reset") {
+            if (request.HasMember("seed") && !request["seed"].IsUint())
+                return reply(Error("invalid_request", "seed must be uint32", frame, false));
+            if (request.HasMember("seed")) host.seed = request["seed"].GetUint();
+            // Rebuild a process, not just an Engine: OOM/panic and swallowed
+            // budget errors cannot contaminate the new Lua VM.
+            if (worker.Exists()) {
+                try {
+                    const Deadline grace = std::min(end, Clock::now() + std::chrono::milliseconds(100));
+                    worker.Exchange(R"({"cmd":"quit"})", grace);
+                    worker.WaitForExit(grace);
+                } catch (const WorkerFailure &) {}
+            }
+            response = host.start(end);
+        } else if (!worker.Exists()) {
+            return reply(Error("worker_unavailable", "runtime unavailable; reset required", frame, true));
+        }
+        if (name != "reset") response = worker.Exchange(line, end);
+        auto document = ParseResponse(response);
+        if (document.HasMember("frame") && document["frame"].IsInt()) frame = document["frame"].GetInt();
+        if (name == "describe" && document["ok"].GetBool()) {
+            AddExecutionLimits(document, host.limits);
+            host.description = Serialize(document);
+            response = host.description;
+        }
+        if (document.HasMember("requires_reset") && document["requires_reset"].IsBool() &&
+            document["requires_reset"].GetBool()) {
+            if (!worker.Stop())
+                return reply(Error("worker_cleanup_failed", "worker did not terminate", frame, true), true, 1);
+        }
+        return reply(response);
+    } catch (const WorkerFailure &error) {
+        const bool reaped = worker.Stop();
+        return reply(Error(error.code, error.what(), frame, true, error.response), !reaped, reaped ? 0 : 1);
+    }
+}
+
+int RunAgentSupervisor(const std::filesystem::path &executable,
+                       const std::filesystem::path &project, std::uint32_t seed,
+                       const AgentExecutionLimits &limits, AgentReplayRecorder *recorder) {
+    AgentHost host(executable, project, seed, limits);
+    std::string failure;
+    if (!host.Start(failure)) {
+        std::cout << failure << std::endl;
         return 1;
     }
-
+    if (recorder) recorder->Begin(host.Seed(), host.InitialObservation());
     std::string line;
     bool oversized = false;
     while (ReadCommand(std::cin, line, oversized)) {
-        if (oversized) {
-            std::cout << Error("invalid_request", "command exceeds 64 KiB", frame, false) << std::endl;
-            continue;
-        }
-        rapidjson::Document request;
-        if (HasBoundedJSONDepth(line))
-            request.Parse<rapidjson::kParseIterativeFlag | rapidjson::kParseValidateEncodingFlag>(line.data(), line.size());
-        const bool valid_command = !request.HasParseError() && request.IsObject() &&
-            request.HasMember("cmd") && request["cmd"].IsString();
-        if (!valid_command) {
-            std::cout << Error("invalid_request", "expected a JSON object with string cmd and nesting at most 64", frame, false) << std::endl;
-            continue;
-        }
-        // v2 clients may correlate responses with any string or integer id.
-        rapidjson::Value client_id;
-        if (request.HasMember("id") && (request["id"].IsString() || request["id"].IsInt64() || request["id"].IsUint64()))
-            client_id.CopyFrom(request["id"], request.GetAllocator());
-        const auto emit = [&](const std::string &response) {
-            if (client_id.IsNull()) { std::cout << response << std::endl; return; }
-            rapidjson::Document document;
-            document.Parse(response.data(), response.size());
-            if (!document.IsObject()) { std::cout << response << std::endl; return; }
-            document.RemoveMember("id");
-            rapidjson::Value id;
-            id.CopyFrom(client_id, document.GetAllocator());
-            document.AddMember("id", id, document.GetAllocator());
-            std::cout << Serialize(document) << std::endl;
-        };
-        const std::string name(request["cmd"].GetString(), request["cmd"].GetStringLength());
-        if (name.find('\0') != std::string::npos) {
-            emit(Error("invalid_request", "cmd must not contain a NUL byte", frame, false));
-            continue;
-        }
-        if (name == "_bootstrap" || request.HasMember("_pocket_request_id") ||
-            request.HasMember("_initial_observation")) {
-            emit(Error("invalid_request", "private worker protocol fields are reserved", frame, false));
-            continue;
-        }
-        if (name == "quit") {
-            if (worker.Exists()) {
-                const Deadline end = deadline();
-                try {
-                    worker.Exchange(line, end);
-                    worker.WaitForExit(end);
-                } catch (const WorkerFailure &) {
-                    // Quit can always dispose of an unhealthy worker.
-                }
-            }
-            const bool reaped = worker.Stop();
-            emit(reaped ? QuitResponse(frame)
-                        : Error("worker_cleanup_failed", "worker did not terminate", frame, true));
-            return reaped ? 0 : 1;
-        }
-        if (name == "describe" && !worker.Exists()) {
-            auto cached = ParseResponse(description);
-            SetBool(cached, "runtime_available", false);
-            SetBool(cached, "requires_reset", true);
-            emit(Serialize(cached));
-            continue;
-        }
-        try {
-            const Deadline end = deadline();
-            std::string response;
-            if (name == "reset") {
-                if (request.HasMember("seed") && !request["seed"].IsUint()) {
-                    emit(Error("invalid_request", "seed must be uint32", frame, false));
-                    continue;
-                }
-                if (request.HasMember("seed")) seed = request["seed"].GetUint();
-                // Rebuild a process, not just an Engine: OOM/panic and swallowed
-                // budget errors cannot contaminate the new Lua VM.
-                if (worker.Exists()) {
-                    try {
-                        const Deadline grace = std::min(end, Clock::now() + std::chrono::milliseconds(100));
-                        worker.Exchange(R"({"cmd":"quit"})", grace);
-                        worker.WaitForExit(grace);
-                    } catch (const WorkerFailure &) {}
-                }
-                response = start(end);
-            } else if (!worker.Exists()) {
-                emit(Error("worker_unavailable", "runtime unavailable; reset required", frame, true));
-                continue;
-            }
-            if (name != "reset") response = worker.Exchange(line, end);
-            auto document = ParseResponse(response);
-            if (document.HasMember("frame") && document["frame"].IsInt()) frame = document["frame"].GetInt();
-            if (name == "describe" && document["ok"].GetBool()) {
-                AddExecutionLimits(document, limits);
-                description = Serialize(document);
-                response = description;
-            }
-            if (document.HasMember("requires_reset") && document["requires_reset"].IsBool() &&
-                document["requires_reset"].GetBool()) {
-                if (!worker.Stop()) {
-                    emit(Error("worker_cleanup_failed", "worker did not terminate", frame, true));
-                    return 1;
-                }
-            }
-            emit(response);
-        } catch (const WorkerFailure &error) {
-            const bool reaped = worker.Stop();
-            emit(Error(error.code, error.what(), frame, true, error.response));
-            if (!reaped) return 1;
-        }
+        const auto reply = host.Handle(line, oversized);
+        std::cout << reply.response << std::endl;
+        if (recorder && !oversized) recorder->Record(line, reply.response);
+        if (reply.finished) return reply.exit_code;
     }
-    return worker.Stop() ? 0 : 1;
+    return host.Stop() ? 0 : 1;
 }

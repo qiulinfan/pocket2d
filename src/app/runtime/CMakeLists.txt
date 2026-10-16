@@ -4,9 +4,11 @@ add_executable(
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime_bootstrap.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentSession.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentSupervisor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AgentReplay.cpp"
     "${PROJECT_SOURCE_DIR}/include/app/runtime/RuntimeApp.h"
 )
 target_link_libraries(game_engine PRIVATE engine_runtime)
+target_compile_definitions(game_engine PRIVATE POCKET2D_VERSION="${PROJECT_VERSION}")
 game_engine_apply_cxx_warnings(game_engine)
 game_engine_link_sdl(game_engine)
 game_engine_stage_resources(game_engine)

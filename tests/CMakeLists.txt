@@ -73,6 +73,10 @@ set_tests_properties(agent_errors PROPERTIES TIMEOUT 90)
 add_test(NAME agent_run_until COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_run_until_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_run_until PROPERTIES TIMEOUT 60)
+add_test(NAME agent_replay COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/agent_replay_test.py"
+    $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
+set_tests_properties(agent_replay PROPERTIES TIMEOUT 120)
 add_test(NAME agent_protocol_generated COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/tools/generate_agent_protocol.py" --check)
 set_tests_properties(agent_protocol_generated PROPERTIES TIMEOUT 30)

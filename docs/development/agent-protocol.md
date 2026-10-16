@@ -118,6 +118,32 @@ distinction explicit. `describe` remains available from its last validated cache
 `step`/`observe` require successful reset. The internal worker command and fields
 `_bootstrap`, `_pocket_request_id`, and `_initial_observation` are reserved.
 
+## Replay files
+
+`--record FILE` (with `--agent`) writes a replay as JSON lines: a header with
+`pocket_replay: 1`, the protocol version, engine version, a project content
+digest (FNV-1a 64 over non-hidden files; change detection, not security) and
+the starting seed; the initial observation; then every `observe`, `step`,
+`run_until`, `reset` and `reload_scripts` request with its response. Client
+`id`s and `diagnostics` are omitted because they describe the session rather
+than gameplay. `describe` and `quit` are not recorded.
+
+```sh
+./build/sdl3-debug/game --headless --agent --project P --seed 42 --record session.jsonl
+./build/sdl3-release/game --headless --replay session.jsonl --project P
+```
+
+`--replay FILE` starts a fresh host with the recorded seed, re-sends each
+request and compares each response field by field. It prints one JSON line and
+exits 0 when everything matches (`records`, final `frame`, `project_changed`),
+or exits 1 with `code: replay_diverged`, the record index and command, the
+recorded `frame`, the first differing JSON pointer `path`, and the `expected` and
+`actual` values there. A changed project digest is reported as
+`project_changed: true` but does not by itself fail a replay. Responses are
+compared exactly; a replay recorded by a Debug build matched Release over 1,020
+frames of `village_defense` and `two_world_village` on macOS arm64. Other
+platforms are unverified.
+
 ## Bounded Tilemap observations
 
 ```json

@@ -1,6 +1,7 @@
 #include "app/runtime/RuntimeApp.h"
 #include "app/runtime/AgentSession.h"
 #include "app/runtime/AgentSupervisor.h"
+#include "app/runtime/AgentReplay.h"
 #include "engine/scripting/ComponentManager.h"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
@@ -95,6 +96,7 @@ int RuntimeApp::Run(int argc, char **argv) {
         std::filesystem::path capture;
         std::filesystem::path save_directory;
         std::filesystem::path project;
+        std::filesystem::path record, replay;
         std::uint32_t seed = 0;
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
@@ -123,6 +125,8 @@ int RuntimeApp::Run(int argc, char **argv) {
                 save_directory = std::filesystem::path(std::u8string(value.begin(), value.end()));
             }
             else if (arg == "--capture" && i + 1 < argc) capture = argv[++i];
+            else if (arg == "--record" && i + 1 < argc) record = argv[++i];
+            else if (arg == "--replay" && i + 1 < argc) replay = argv[++i];
             else if (arg == "--frames" && i + 1 < argc) {
                 const std::string value = argv[++i];
                 auto result = std::from_chars(value.data(), value.data() + value.size(), frame_limit);
@@ -138,7 +142,8 @@ int RuntimeApp::Run(int argc, char **argv) {
                     throw std::runtime_error("--seed expects uint32");
             } else if (arg == "--help") {
                 std::cout << "game [--project PATH] [--seed UINT32] [--frames N [--capture PNG]]\n"
-                             "game --project PATH --headless --agent [--seed UINT32] [--save-dir ROOT]\n";
+                             "game --project PATH --headless --agent [--seed UINT32] [--save-dir ROOT] [--record REPLAY]\n"
+                             "game --project PATH --headless --replay REPLAY [--save-dir ROOT]\n";
                 return 0;
             } else throw std::runtime_error("unknown or incomplete option: " + arg);
         }
@@ -148,8 +153,10 @@ int RuntimeApp::Run(int argc, char **argv) {
             if (SDL_setenv_unsafe("POCKET_SAVE_ROOT", value.c_str(), 1) != 0)
                 throw std::runtime_error("unable to configure save directory");
         }
-        if (agent && agent_worker) throw std::runtime_error("choose one agent host mode");
-        const bool automation = agent || agent_worker;
+        if (int(agent) + int(agent_worker) + int(!replay.empty()) > 1)
+            throw std::runtime_error("choose one of --agent, --agent-worker and --replay");
+        if (!record.empty() && !agent) throw std::runtime_error("--record requires --agent");
+        const bool automation = agent || agent_worker || !replay.empty();
         if (headless != automation) throw std::runtime_error("--headless and --agent must be used together");
         if (automation && (frame_limit != 0 || !capture.empty()))
             throw std::runtime_error("--frames/--capture require graphical mode");
@@ -166,11 +173,15 @@ int RuntimeApp::Run(int argc, char **argv) {
             ScriptBudget::Configure(limits.script_limits);
             return RunAgentSession(project, seed);
         }
-        if (agent) {
+        if (agent || !replay.empty()) {
             std::filesystem::path executable = argv[0];
             if (!std::filesystem::exists(executable))
                 executable = std::filesystem::path(SDL_GetBasePath()) / executable.filename();
-            return RunAgentSupervisor(std::filesystem::canonical(executable), project, seed, limits);
+            executable = std::filesystem::canonical(executable);
+            if (!replay.empty()) return RunAgentReplay(executable, project, replay, limits);
+            if (record.empty()) return RunAgentSupervisor(executable, project, seed, limits);
+            AgentReplayRecorder recorder(record, project);
+            return RunAgentSupervisor(executable, project, seed, limits, &recorder);
         }
         if (seed_provided) ComponentManager::SetRandomSeed(seed);
         Engine engine;
