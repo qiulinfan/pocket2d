@@ -39,4 +39,5 @@ protocol (`game --headless --agent --project P`), the MCP server
 - [Development status](docs/development/status.md): verified progress and open work
 - [Roadmap](docs/development/roadmap.md): owner direction
 - [Build and test](docs/development/build-and-test.md): CMake presets and CTest
+- [Benchmark harness](docs/development/benchmark-harness.md): fixed workloads and bunnymark rules for other engines
 - [Example project](tests/fixtures/two_world_village/): farming, combat, portals, saves and three scenarios
