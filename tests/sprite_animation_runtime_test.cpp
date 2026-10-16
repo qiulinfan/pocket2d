@@ -141,7 +141,7 @@ void Preflight(){
  for(int mode=0;mode<6;++mode){
   Engine e;Driver d(e);d.Step(2,{SDL_SCANCODE_RIGHT});
   auto *old=Anim();const auto playback=old->GetPlaybackId();const auto gen=e.GetRuntimeActorByUID(1)->runtime_generation;
-  const auto bodies=RayCast::GetPhysicsWorld()->GetBodyCount();const auto trace=Trace();
+  const auto bodies=RayCast::GetBodyCount();const auto trace=Trace();
   auto scene=SceneFormat::LoadSceneAsset("animation");scene.scene_name="invalid_candidate";
   auto &specs=scene.actors.front().component_specs;auto *spec=SceneFormat::FindComponentSpec(specs,"anim");
   if(mode==0)SceneFormat::UpsertComponentProperty(*spec,"renderer_key",std::string("missing"));
@@ -153,7 +153,7 @@ void Preflight(){
   Check(!e.LoadSceneAsset(scene),"invalid animation preload accepted case "+std::to_string(mode));
   Check(e.GetRuntimeActorByUID(1)->runtime_generation==gen && Anim()==old,"rejected preload replaced live generation");
   Check(Anim()->GetPlaybackId()==playback && Anim()->GetFrame()==1 && Anim()->GetElapsedTicks()==1,"rejected preload reset playback");
-  Check(Trace()==trace && RayCast::GetPhysicsWorld()->GetBodyCount()==bodies,"rejected preload altered callbacks/physics");
+  Check(Trace()==trace && RayCast::GetBodyCount()==bodies,"rejected preload altered callbacks/physics");
   Check(e.GetCurrentSceneName()=="animation","rejected preload changed scene");d.Step(1,{SDL_SCANCODE_RIGHT});State(3,"walk",2,0);
  }
 }
@@ -219,12 +219,12 @@ void BadJson(const std::filesystem::path &fixture){
  ResourcePath::SetResourcesRootPath(temporary);
  Engine e;Driver d(e);d.Step(2,{SDL_SCANCODE_RIGHT});
  auto *old=Anim();const auto gen=e.GetRuntimeActorByUID(1)->runtime_generation;
- const auto id=old->GetPlaybackId();const auto bodies=RayCast::GetPhysicsWorld()->GetBodyCount();const auto trace=Trace();
+ const auto id=old->GetPlaybackId();const auto bodies=RayCast::GetBodyCount();const auto trace=Trace();
  std::ofstream(temporary/"animations/hero.animation.json")<<"{\"version\":1,\"clips\":[";
  Check(!e.LoadSceneAsset(SceneFormat::LoadSceneAsset("animation")),"bad JSON preload accepted");
  Check(Anim()==old && e.GetRuntimeActorByUID(1)->runtime_generation==gen && Anim()->GetPlaybackId()==id,
        "bad JSON preload destroyed current world");
- Check(Trace()==trace && RayCast::GetPhysicsWorld()->GetBodyCount()==bodies,"bad JSON preload mutated events or bodies");
+ Check(Trace()==trace && RayCast::GetBodyCount()==bodies,"bad JSON preload mutated events or bodies");
  State(2,"walk",1,1);d.Step(1,{SDL_SCANCODE_RIGHT});State(3,"walk",2,0);
 }
 

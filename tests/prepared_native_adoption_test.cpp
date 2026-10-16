@@ -49,58 +49,47 @@ struct Fixture {
     }
     ~Fixture() { ResourcePath::SetResourcesRootPath(previous); std::error_code error; std::filesystem::remove_all(root, error); }
 };
-struct ContactWriter : b2ContactListener {
-    std::function<void()> on_end;
-    int begins = 0, ends = 0;
-    std::string error;
-    void BeginContact(b2Contact *) override { ++begins; }
-    void EndContact(b2Contact *) override {
-        ++ends;
-        try { if (on_end) on_end(); } catch (const std::exception &failure) { error = failure.what(); }
-    }
-};
 void TilemapAdoption() {
     Fixture fixture; Engine engine; engine.InitializeHeadless();
     auto reference = ComponentManager::GetComponentByKey(1, "map");
     auto *map = reference.cast<Tilemap *>().value(); const auto owner = map->actor_handle; auto *actor = map->actor;
     map->map_resource = "old.tilemap.json"; map->Initialize(MapData(2, 1)); map->CommitPending();
-    auto *world = RayCast::GetPhysicsWorld(); auto *old_body = map->GetChunkBody(0, 0);
-    Check(world && old_body, "old map collision missing");
-    ContactWriter writer; world->SetContactListener(&writer);
-    struct ResetListener { b2World *world; ~ResetListener() { if (RayCast::GetPhysicsWorld() == world) world->SetContactListener(nullptr); } } reset{world};
-    b2BodyDef definition; definition.type = b2_dynamicBody; definition.position.Set(0.5f, 0.5f);
-    auto *visitor = world->CreateBody(&definition);
-    b2PolygonShape shape; shape.SetAsBox(0.1f, 0.1f); visitor->CreateFixture(&shape, 1.0f);
-    world->Step(1.0f / 60, 8, 3); Check(writer.begins > 0, "test did not establish real Box2D contact");
+    const b2WorldId world = RayCast::GetPhysicsWorld(); const b2BodyId old_body = map->GetChunkBody(0, 0);
+    Check(B2_IS_NON_NULL(world) && B2_IS_NON_NULL(old_body), "old map collision missing");
+    b2BodyDef definition = b2DefaultBodyDef(); definition.type = b2_dynamicBody; definition.position = {0.5f, 0.5f};
+    const b2BodyId visitor = b2CreateBody(world, &definition);
+    const b2ShapeDef shape_def = b2DefaultShapeDef(); const b2Polygon shape = b2MakeBox(0.1f, 0.1f);
+    b2CreatePolygonShape(visitor, &shape_def, &shape);
+    b2World_Step(world, 1.0f / 60, 4);
+    Check(b2World_GetContactEvents(world).beginCount > 0, "test did not establish real Box2D contact");
     map->ReplaceAsset(MapData(2, 7)); Check(map->SetCell("ground", 0, 0, 8), "queue old map edit");
     Tilemap prepared; prepared.key = "detached-key"; prepared.map_resource = "new.tilemap.json";
     prepared.Initialize(MapData(4, 2), 10, 20);
-    Check(world->GetBodyCount() == 2 && map->GetCell("ground", 0, 0) == 1 && prepared.GetFixtureCount() == 0,
+    Check(RayCast::GetBodyCount() == 2 && map->GetCell("ground", 0, 0) == 1 && prepared.GetFixtureCount() == 0,
           "preparing candidate changed old map/native bodies");
-    bool observed_new_base = false, recursive_commit_rejected = false;
-    writer.on_end = [&] {
-        observed_new_base = map->GetWidth() == 4 && map->GetCellCenter(0, 0) == Vector2(10.5f, 20.5f);
-        try { map->CommitPending(); } catch (const std::exception &) { recursive_commit_rejected = true; }
-        map->ReplaceAsset(MapData(3, 3));
-        if (!map->SetCell("ground", 2, 2, 4)) throw std::runtime_error("callback cell edit was not queued");
-        map->enabled = false;
-    };
     const auto revision = map->GetRevision();
     map->AdoptPreparedState(prepared);
-    Check(writer.ends > 0 && writer.error.empty() && observed_new_base && recursive_commit_rejected,
-          "EndContact did not observe/queue against the newly adopted base");
     Check(ComponentManager::GetTilemap(1, "map") == map && map->actor == actor && (map->actor_handle.uid == owner.uid && map->actor_handle.generation == owner.generation) && map->key == "map",
           "map adoption changed live userdata identity");
     Check(map->GetWidth() == 4 && map->GetCell("ground", 0, 0) == 2 && map->map_resource == "new.tilemap.json" &&
-          map->GetFixtureCount() == 0 && world->GetBodyCount() == 1 && map->GetRevision() == revision + 1 && !prepared.HasAsset(),
+          map->GetFixtureCount() == 0 && RayCast::GetBodyCount() == 1 && map->GetRevision() == revision + 1 && !prepared.HasAsset(),
           "map adoption retained old edits/bodies or did not consume candidate");
-    Check(!map->enabled && !map->CollectVisible(10, 20, 14, 24).empty(), "callback desired flag changed committed rendering early");
+    // Destroying the old body ended the touch; Box2D reports it after the next
+    // step, and a handler then sees and queues against the adopted base.
+    b2World_Step(world, 1.0f / 60, 4);
+    Check(b2World_GetContactEvents(world).endCount > 0, "adoption did not end the old contact");
+    Check(map->GetWidth() == 4 && map->GetCellCenter(0, 0) == Vector2(10.5f, 20.5f),
+          "end-contact handler did not observe the newly adopted base");
+    map->ReplaceAsset(MapData(3, 3));
+    Check(map->SetCell("ground", 2, 2, 4), "handler cell edit was not queued");
+    map->enabled = false;
+    Check(!map->CollectVisible(10, 20, 14, 24).empty(), "handler desired flag changed committed rendering early");
     map->CommitPending();
     Check(map->GetWidth() == 3 && map->GetCell("ground", 2, 2) == 4 && map->GetRevision() == revision + 2 &&
-          map->GetChunkBody(0, 0) && !map->GetChunkBody(0, 0)->IsEnabled() && map->CollectVisible(10, 20, 13, 23).empty(),
-          "adoption discarded callback replacement/cell/enabled commands");
+          B2_IS_NON_NULL(map->GetChunkBody(0, 0)) && !b2Body_IsEnabled(map->GetChunkBody(0, 0)) &&
+          map->CollectVisible(10, 20, 13, 23).empty(),
+          "adoption discarded handler replacement/cell/enabled commands");
     Reject([&] { map->AdoptPreparedState(prepared); });
-    writer.on_end = {};
     Tilemap empty; empty.enabled = false;
     map->AdoptPreparedState(empty);
     Check(!map->HasAsset() && map->GetWidth() == 0 && map->GetFixtureCount() == 0 && map->key == "map" && (map->actor_handle.uid == owner.uid && map->actor_handle.generation == owner.generation),

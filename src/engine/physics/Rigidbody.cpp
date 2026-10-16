@@ -5,13 +5,16 @@
 #include "scene/Actor.h"
 #include "scripting/ComponentManager.h"
 #include "physics/RayCast.h"
-#include "glm/glm.hpp"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include <cmath>
 #include <limits>
+#include <map>
+#include <mutex>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -19,6 +22,8 @@ constexpr float kPhysicsSyncEpsilon = 0.0001f;
 constexpr double kFloatLimit = static_cast<double>(std::numeric_limits<float>::max()) / 16.0;
 constexpr double kSquaredLimit = static_cast<double>(std::numeric_limits<float>::max()) / 256.0;
 constexpr float kStep = 1.0f / 60.0f;
+constexpr int kSubSteps = 4;
+const Vector2 kSentinel(-999.0f, -999.0f);
 // Physics step counter used to scope same-step force accumulation; per World.
 struct ForceStep { std::uint64_t value = 0; };
 std::uint64_t &CurrentForceStep() { return World::Current().State<ForceStep>().value; }
@@ -29,19 +34,15 @@ Vector2 FromBox2D(const b2Vec2 &value) { return {value.x, value.y}; }
 void Require(bool valid,const char *message) {
     if(!valid) throw std::invalid_argument(std::string("Rigidbody: ")+message);
 }
-void FiniteVector(const b2Vec2 &value) {
+void FiniteVector(const Vector2 &value) {
     Require(std::isfinite(value.x)&&std::isfinite(value.y),"vector components must be finite");
 }
 void SquaredVector(double x,double y,const char *message) {
     Require(std::isfinite(x)&&std::isfinite(y)&&x*x+y*y<=kSquaredLimit,message);
 }
-void Position(const b2Vec2 &position) {
+void Position(const Vector2 &position) {
     FiniteVector(position);
     Require(std::abs(position.x)<=1e8f&&std::abs(position.y)<=1e8f,"position must remain within +/-1e8");
-}
-void Unlocked(const b2Body *body) {
-    if(body&&body->GetWorld()->IsLocked())
-        throw std::runtime_error("Rigidbody transform/type mutation cannot run while physics is stepping");
 }
 void PositiveMass(double value,const char *message) {
     // Box2D stores both a quantity and its reciprocal in float. Positive
@@ -49,8 +50,10 @@ void PositiveMass(double value,const char *message) {
     Require(std::isfinite(value)&&value>=1.0/kFloatLimit&&value<=kFloatLimit,message);
 }
 struct Mass { double mass=0,inertia=0; };
+// Box2D 3 reports rotational inertia about the centre of mass; the engine's
+// shapes are centred on the body origin, so it equals inertia about the origin.
 Mass ShapeMass(float width,float height,float radius,bool circle,float density) {
-    const double area=circle?static_cast<double>(b2_pi)*radius*radius:static_cast<double>(width)*height;
+    const double area=circle?static_cast<double>(B2_PI)*radius*radius:static_cast<double>(width)*height;
     const double expected_mass=static_cast<double>(density)*area;
     const double expected_inertia=expected_mass*(circle?0.5*radius*radius:(static_cast<double>(width)*width+static_cast<double>(height)*height)/12.0);
     if(density>0) {
@@ -58,22 +61,22 @@ Mass ShapeMass(float width,float height,float radius,bool circle,float density) 
         PositiveMass(expected_inertia,"fixture inertia or its reciprocal exceeds supported float range");
     }
     b2MassData actual;
-    if(circle) { b2CircleShape shape;shape.m_radius=radius;shape.ComputeMass(&actual,density); }
-    else { b2PolygonShape shape;shape.SetAsBox(width*0.5f,height*0.5f);shape.ComputeMass(&actual,density); }
-    Require(std::isfinite(actual.mass)&&std::isfinite(actual.I)&&actual.center.IsValid(),"derived fixture mass/center/inertia is not finite");
-    if(density>0) { PositiveMass(actual.mass,"float fixture mass has an unsafe reciprocal");PositiveMass(actual.I,"float fixture inertia has an unsafe reciprocal"); }
-    return {actual.mass,actual.I};
+    if(circle) { const b2Circle shape{{0,0},radius};actual=b2ComputeCircleMass(&shape,density); }
+    else { const b2Polygon shape=b2MakeBox(width*0.5f,height*0.5f);actual=b2ComputePolygonMass(&shape,density); }
+    Require(std::isfinite(actual.mass)&&std::isfinite(actual.rotationalInertia)&&b2IsValidVec2(actual.center),"derived fixture mass/center/inertia is not finite");
+    if(density>0) { PositiveMass(actual.mass,"float fixture mass has an unsafe reciprocal");PositiveMass(actual.rotationalInertia,"float fixture inertia has an unsafe reciprocal"); }
+    return {actual.mass,actual.rotationalInertia};
 }
-b2Vec2 Gravity() { return RayCast::GetPhysicsWorld()?RayCast::GetPhysicsWorld()->GetGravity():b2Vec2(0,9.8f); }
-b2Vec2 Integration(double mass,double scale,const b2Vec2 &gravity,double force_x,double force_y,const b2Vec2 &velocity) {
+Vector2 Gravity() { return RayCast::HasPhysicsWorld()?FromBox2D(b2World_GetGravity(RayCast::GetPhysicsWorld())):Vector2(0,9.8f); }
+Vector2 Integration(double mass,double scale,const Vector2 &gravity,double force_x,double force_y,const Vector2 &velocity) {
     FiniteVector(gravity);FiniteVector(velocity);
     Require(std::isfinite(scale),"gravity scale must be finite");
     SquaredVector(scale*gravity.x,scale*gravity.y,"derived gravity acceleration exceeds finite squared-magnitude range");
     if(mass>0) PositiveMass(mass,"live mass has an unsafe reciprocal");
     Require(std::isfinite(mass)&&mass>=0,"live mass is invalid");
     const double scaled_mass=scale*mass;
-    // This bundled Box2D integrates h*invMass*(gravityScale*mass*gravity+force).
-    // Validate its real intermediate products, not only the simplified result.
+    // Box2D integrates h*invMass*(mass*gravityScale*gravity+force) on each
+    // substep; over one step the products are the ones checked here.
     Require(std::isfinite(scaled_mass)&&std::abs(scaled_mass)<=kFloatLimit,"gravityScale * mass exceeds supported float range");
     const double gravity_x=scaled_mass*gravity.x,gravity_y=scaled_mass*gravity.y;
     Require(std::abs(gravity_x)<=kFloatLimit&&std::abs(gravity_y)<=kFloatLimit,"gravity force exceeds supported float range");
@@ -85,24 +88,28 @@ b2Vec2 Integration(double mass,double scale,const b2Vec2 &gravity,double force_x
     SquaredVector(next_x,next_y,"force/gravity integration would exceed finite velocity norms");
     return {static_cast<float>(next_x),static_cast<float>(next_y)};
 }
+std::vector<b2ShapeId> Shapes(b2BodyId body) {
+    std::vector<b2ShapeId> shapes(static_cast<std::size_t>(b2Body_GetShapeCount(body)));
+    shapes.resize(static_cast<std::size_t>(b2Body_GetShapes(body,shapes.data(),static_cast<int>(shapes.size()))));
+    return shapes;
+}
 struct Geometry { double extent=0,friction=0,restitution=0; };
-Geometry Describe(const b2Body *body) {
+Geometry Describe(b2BodyId body) {
     Geometry result;
-    for(const auto *fixture=body->GetFixtureList();fixture;fixture=fixture->GetNext()) {
-        const auto *shape=fixture->GetShape();
-        if(shape->GetType()==b2Shape::e_circle) {
-            const auto *circle=static_cast<const b2CircleShape *>(shape);
-            result.extent=std::max(result.extent,std::hypot(static_cast<double>(circle->m_p.x),circle->m_p.y)+circle->m_radius);
-        } else if(shape->GetType()==b2Shape::e_polygon) {
-            const auto *polygon=static_cast<const b2PolygonShape *>(shape);
-            for(int i=0;i<polygon->m_count;++i) result.extent=std::max(result.extent,std::hypot(static_cast<double>(polygon->m_vertices[i].x),polygon->m_vertices[i].y)+polygon->m_radius);
+    for(const b2ShapeId shape:Shapes(body)) {
+        if(b2Shape_GetType(shape)==b2_circleShape) {
+            const b2Circle circle=b2Shape_GetCircle(shape);
+            result.extent=std::max(result.extent,std::hypot(static_cast<double>(circle.center.x),circle.center.y)+circle.radius);
+        } else if(b2Shape_GetType(shape)==b2_polygonShape) {
+            const b2Polygon polygon=b2Shape_GetPolygon(shape);
+            for(int i=0;i<polygon.count;++i) result.extent=std::max(result.extent,std::hypot(static_cast<double>(polygon.vertices[i].x),polygon.vertices[i].y)+polygon.radius);
         }
-        result.friction=std::max(result.friction,static_cast<double>(fixture->GetFriction()));
-        result.restitution=std::max(result.restitution,static_cast<double>(fixture->GetRestitution()));
+        result.friction=std::max(result.friction,static_cast<double>(b2Shape_GetFriction(shape)));
+        result.restitution=std::max(result.restitution,static_cast<double>(b2Shape_GetRestitution(shape)));
     }
     return result;
 }
-void Motion(double mass,double inertia,const Geometry &geometry,const b2Vec2 &velocity,double angular_velocity) {
+void Motion(double mass,double inertia,const Geometry &geometry,const Vector2 &velocity,double angular_velocity) {
     SquaredVector(velocity.x,velocity.y,"linear velocity exceeds finite squared-magnitude range");
     Require(std::isfinite(angular_velocity)&&angular_velocity*angular_velocity<=kSquaredLimit,"angular velocity exceeds finite squared-magnitude range");
     const double speed=std::hypot(static_cast<double>(velocity.x),velocity.y)+std::abs(angular_velocity)*geometry.extent;
@@ -116,24 +123,27 @@ void Motion(double mass,double inertia,const Geometry &geometry,const b2Vec2 &ve
     Require(std::isfinite(momentum)&&std::isfinite(angular_momentum)&&momentum<=kFloatLimit&&angular_momentum<=kFloatLimit,
             "mass/inertia and velocity would overflow contact impulse products");
 }
-void PointSpeed(const b2Body *body,const b2Vec2 &velocity,double angular_velocity) {
-    Motion(body->GetMass(),body->GetInertia(),Describe(body),velocity,angular_velocity);
+void PointSpeed(b2BodyId body,const Vector2 &velocity,double angular_velocity) {
+    Motion(b2Body_GetMass(body),b2Body_GetRotationalInertia(body),Describe(body),velocity,angular_velocity);
 }
-Mass ActualMass(const b2Body *body) {
+Mass ActualMass(b2BodyId body) {
     Mass total;
     double weighted_x=0,weighted_y=0;
-    for(const auto *fixture=body->GetFixtureList();fixture;fixture=fixture->GetNext()) {
-        Require(std::isfinite(fixture->GetDensity())&&fixture->GetDensity()>=0,"live fixture density is invalid");
-        if(fixture->GetDensity()==0) continue;
-        b2MassData data;fixture->GetMassData(&data);
+    for(const b2ShapeId shape:Shapes(body)) {
+        const float density=b2Shape_GetDensity(shape);
+        Require(std::isfinite(density)&&density>=0,"live fixture density is invalid");
+        if(density==0) continue;
+        const b2MassData data=b2Shape_GetMassData(shape);
+        // Inertia about the body origin, as the combination below expects.
+        const double inertia=data.rotationalInertia+static_cast<double>(data.mass)*(data.center.x*data.center.x+data.center.y*data.center.y);
         PositiveMass(data.mass,"live fixture mass has an unsafe reciprocal");
-        PositiveMass(data.I,"live fixture inertia has an unsafe reciprocal");
-        Require(data.center.IsValid(),"live fixture center is not finite");
+        PositiveMass(inertia,"live fixture inertia has an unsafe reciprocal");
+        Require(b2IsValidVec2(data.center),"live fixture center is not finite");
         weighted_x+=static_cast<double>(data.mass)*data.center.x;
         weighted_y+=static_cast<double>(data.mass)*data.center.y;
         Require(std::isfinite(weighted_x)&&std::isfinite(weighted_y)&&std::abs(weighted_x)<=kFloatLimit&&std::abs(weighted_y)<=kFloatLimit,
                 "live mass-weighted center exceeds supported float range");
-        total.mass+=data.mass;total.inertia+=data.I;
+        total.mass+=data.mass;total.inertia+=inertia;
         PositiveMass(total.mass,"combined live mass has unsafe range/reciprocal");
         PositiveMass(total.inertia,"combined live inertia has unsafe range/reciprocal");
     }
@@ -149,74 +159,24 @@ bool NearlyEqual(float a, float b) {
     return std::fabs(a - b) <= kPhysicsSyncEpsilon;
 }
 
-class RigidbodyContactListener : public b2ContactListener {
-public:
-    void BeginContact(b2Contact *contact) override {
-        QueueContactEvents(contact, true);
-    }
-
-    void EndContact(b2Contact *contact) override {
-        QueueContactEvents(contact, false);
-    }
-
-private:
-    static void QueueContactEvents(b2Contact *contact, bool is_enter) {
-        if (contact == nullptr) return;
-
-        b2Fixture *fixture_a = contact->GetFixtureA();
-        b2Fixture *fixture_b = contact->GetFixtureB();
-        if (fixture_a == nullptr || fixture_b == nullptr) return;
-
-        const RayCast::FixtureMetadata *metadata_a = RayCast::FindFixtureMetadata(fixture_a);
-        const RayCast::FixtureMetadata *metadata_b = RayCast::FindFixtureMetadata(fixture_b);
-        if (metadata_a == nullptr || metadata_b == nullptr) return;
-        if (metadata_a->actor == nullptr || metadata_b->actor == nullptr) return;
-
-        const b2Vec2 velocity_a = fixture_a->GetBody()->GetLinearVelocity();
-        const b2Vec2 velocity_b = fixture_b->GetBody()->GetLinearVelocity();
-        const b2Vec2 relative_velocity = velocity_a - velocity_b;
-
-        if (metadata_a->kind == RayCast::FixtureKind::Collider &&
-            metadata_b->kind == RayCast::FixtureKind::Collider) {
-            b2Vec2 point(-999.0f, -999.0f);
-            b2Vec2 normal(-999.0f, -999.0f);
-            if (is_enter) {
-                b2WorldManifold world_manifold;
-                contact->GetWorldManifold(&world_manifold);
-                point = world_manifold.points[0];
-                normal = world_manifold.normal;
-            }
-
-            ComponentManager::QueueCollisionEvent(
-                metadata_a->actor, metadata_b->actor, FromBox2D(point), FromBox2D(relative_velocity),
-                FromBox2D(normal), is_enter);
-            ComponentManager::QueueCollisionEvent(
-                metadata_b->actor, metadata_a->actor, FromBox2D(point), FromBox2D(relative_velocity),
-                FromBox2D(normal), is_enter);
-            return;
-        }
-
-        if (metadata_a->kind == RayCast::FixtureKind::Trigger &&
-            metadata_b->kind == RayCast::FixtureKind::Trigger) {
-            const Vector2 sentinel(-999.0f, -999.0f);
-            ComponentManager::QueueTriggerEvent(
-                metadata_a->actor, metadata_b->actor, sentinel, FromBox2D(relative_velocity),
-                sentinel, is_enter);
-            ComponentManager::QueueTriggerEvent(
-                metadata_b->actor, metadata_a->actor, sentinel, FromBox2D(relative_velocity),
-                sentinel, is_enter);
-        }
-    }
-};
-
-RigidbodyContactListener g_contact_listener;
+// Rotations are built and read in double precision and rounded to float.
+// Box2D's b2MakeRot approximation is off by up to ~0.1 degree, which would be
+// visible in authored rotations. Like the Box2D 2.4 body angle this relies on
+// the platform's libm; see ADR 008.
+b2Rot RotationFromRadians(float radians) {
+    const double angle = radians;
+    return {static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
+}
+float RadiansOf(b2Rot rotation) {
+    return static_cast<float>(std::atan2(static_cast<double>(rotation.s), static_cast<double>(rotation.c)));
+}
 
 float ClockwiseDegreesToBox2DRadians(float rotation_degrees) {
-    return rotation_degrees * (b2_pi / 180.0f);
+    return rotation_degrees * (B2_PI / 180.0f);
 }
 
 float Box2DRadiansToClockwiseDegrees(float rotation_radians) {
-    return rotation_radians * (180.0f / b2_pi);
+    return rotation_radians * (180.0f / B2_PI);
 }
 
 b2BodyType ParseBodyType(const std::string &body_type) {
@@ -226,75 +186,154 @@ b2BodyType ParseBodyType(const std::string &body_type) {
     throw std::invalid_argument("Rigidbody body type must be dynamic/static/kinematic");
 }
 
-void CreateColliderFixture(Rigidbody &rigidbody) {
-    if (rigidbody.body == nullptr || !rigidbody.has_collider) return;
-
-    b2FixtureDef fixture_def;
-    fixture_def.isSensor = false;
-    fixture_def.density = rigidbody.density;
-    fixture_def.friction = rigidbody.friction;
-    fixture_def.restitution = rigidbody.bounciness;
-
-    if (rigidbody.collider_type == "circle") {
-        b2CircleShape shape;
-        shape.m_radius = rigidbody.radius;
-        fixture_def.shape = &shape;
-        b2Fixture *fixture = rigidbody.body->CreateFixture(&fixture_def);
-        RayCast::RegisterFixture(fixture, rigidbody.actor,
-                                 RayCast::FixtureKind::Collider);
-        return;
+// Colliders produce contact events with other colliders. Triggers are sensors
+// that detect only other triggers, as sensor visitors. Phantoms only give a
+// shapeless body mass and are invisible to events and ray casts.
+void CreateShape(Rigidbody &rigidbody, RayCast::FixtureKind kind, bool circle,
+                 float width, float height, float radius) {
+    b2ShapeDef shape_def = b2DefaultShapeDef();
+    shape_def.density = rigidbody.density;
+    shape_def.isSensor = kind != RayCast::FixtureKind::Collider;
+    shape_def.enableSensorEvents = kind == RayCast::FixtureKind::Trigger;
+    shape_def.enableContactEvents = kind == RayCast::FixtureKind::Collider;
+    if (kind == RayCast::FixtureKind::Collider) {
+        shape_def.material.friction = rigidbody.friction;
+        shape_def.material.restitution = rigidbody.bounciness;
     }
-
-    b2PolygonShape shape;
-    shape.SetAsBox(rigidbody.width * 0.5f, rigidbody.height * 0.5f);
-    fixture_def.shape = &shape;
-    b2Fixture *fixture = rigidbody.body->CreateFixture(&fixture_def);
-    RayCast::RegisterFixture(fixture, rigidbody.actor,
-                             RayCast::FixtureKind::Collider);
+    b2ShapeId shape;
+    if (circle) {
+        const b2Circle geometry{{0.0f, 0.0f}, radius};
+        shape = b2CreateCircleShape(rigidbody.body, &shape_def, &geometry);
+    } else {
+        const b2Polygon geometry = b2MakeBox(width * 0.5f, height * 0.5f);
+        shape = b2CreatePolygonShape(rigidbody.body, &shape_def, &geometry);
+    }
+    RayCast::RegisterShape(shape, rigidbody.actor, kind);
 }
 
+// ---------------------------------------------------------------------------
+// Contact and trigger events
+//
+// Box2D reports touches after each step. Callbacks run from a copy of those
+// events, so Lua may change the world while they are delivered. Contacts ended
+// by a user operation between steps (disable, retype, destroy) are reported
+// after the next step.
+// ---------------------------------------------------------------------------
 
-void CreateTriggerFixture(Rigidbody &rigidbody) {
-    if (rigidbody.body == nullptr || !rigidbody.has_trigger) return;
+struct PendingEvent {
+    bool trigger = false;
+    bool enter = false;
+    ActorHandle receiver;
+    ActorHandle other;
+    Vector2 point;
+    Vector2 relative_velocity;
+    Vector2 normal;
+};
 
-    b2FixtureDef trigger_fixture_def;
-    trigger_fixture_def.isSensor = true;
-    trigger_fixture_def.density = rigidbody.density;
+// Two overlapping triggers, one per sensing direction. A pair is reported
+// while both bodies are enabled and at least one is dynamic, the rule Box2D
+// 2.4 contacts followed; sensors in Box2D 3 ignore body type.
+struct TriggerPair {
+    b2ShapeId sensor;
+    b2ShapeId visitor;
+    bool reported = false;
+};
+struct TriggerState { std::map<std::pair<std::uint64_t, std::uint64_t>, TriggerPair> pairs; };
+TriggerState &Triggers() { return World::Current().State<TriggerState>(); }
 
-    if (rigidbody.trigger_type == "circle") {
-        b2CircleShape shape;
-        shape.m_radius = rigidbody.trigger_radius;
-        trigger_fixture_def.shape = &shape;
-        b2Fixture *fixture = rigidbody.body->CreateFixture(&trigger_fixture_def);
-        RayCast::RegisterFixture(fixture, rigidbody.actor,
-                                 RayCast::FixtureKind::Trigger);
-        return;
-    }
-
-    b2PolygonShape shape;
-    shape.SetAsBox(rigidbody.trigger_width * 0.5f,
-                   rigidbody.trigger_height * 0.5f);
-    trigger_fixture_def.shape = &shape;
-    b2Fixture *fixture = rigidbody.body->CreateFixture(&trigger_fixture_def);
-    RayCast::RegisterFixture(fixture, rigidbody.actor,
-                             RayCast::FixtureKind::Trigger);
+ActorHandle HandleOf(const RayCast::FixtureMetadata &metadata) {
+    return metadata.actor != nullptr ? ActorHandle(metadata.actor) : metadata.actor_handle;
 }
 
-void CreatePhantomFixture(Rigidbody &rigidbody) {
-    if (rigidbody.body == nullptr || rigidbody.has_collider || rigidbody.has_trigger) {
-        return;
+Vector2 VelocityOf(b2ShapeId shape) {
+    if (!b2Shape_IsValid(shape)) return {};
+    return FromBox2D(b2Body_GetLinearVelocity(b2Shape_GetBody(shape)));
+}
+
+bool ShouldReportTrigger(const TriggerPair &pair) {
+    if (!b2Shape_IsValid(pair.sensor) || !b2Shape_IsValid(pair.visitor)) return false;
+    const b2BodyId a = b2Shape_GetBody(pair.sensor), b = b2Shape_GetBody(pair.visitor);
+    if (!b2Body_IsEnabled(a) || !b2Body_IsEnabled(b)) return false;
+    return b2Body_GetType(a) == b2_dynamicBody || b2Body_GetType(b) == b2_dynamicBody;
+}
+
+void CollectContactEvents(b2WorldId world, std::vector<PendingEvent> &events) {
+    const b2ContactEvents contacts = b2World_GetContactEvents(world);
+    const auto collide = [&](b2ShapeId shape_a, b2ShapeId shape_b, bool enter,
+                             const b2Manifold *manifold) {
+        const auto *a = RayCast::FindShapeMetadata(shape_a);
+        const auto *b = RayCast::FindShapeMetadata(shape_b);
+        if (a == nullptr || b == nullptr) return;
+        if (a->kind != RayCast::FixtureKind::Collider || b->kind != RayCast::FixtureKind::Collider) return;
+        Vector2 point = kSentinel, normal = kSentinel;
+        if (manifold != nullptr && manifold->pointCount > 0) {
+            point = FromBox2D(manifold->points[0].point);
+            normal = FromBox2D(manifold->normal);
+        }
+        const Vector2 relative = VelocityOf(shape_a) - VelocityOf(shape_b);
+        events.push_back({false, enter, HandleOf(*a), HandleOf(*b), point, relative, normal});
+        events.push_back({false, enter, HandleOf(*b), HandleOf(*a), point, relative, normal});
+    };
+    for (int i = 0; i < contacts.beginCount; ++i) {
+        const b2ContactBeginTouchEvent &event = contacts.beginEvents[i];
+        collide(event.shapeIdA, event.shapeIdB, true, &event.manifold);
     }
+    for (int i = 0; i < contacts.endCount; ++i) {
+        const b2ContactEndTouchEvent &event = contacts.endEvents[i];
+        collide(event.shapeIdA, event.shapeIdB, false, nullptr);
+    }
+}
 
-    b2PolygonShape phantom_shape;
-    phantom_shape.SetAsBox(rigidbody.width * 0.5f, rigidbody.height * 0.5f);
+void CollectTriggerEvents(b2WorldId world, std::vector<PendingEvent> &events) {
+    auto &pairs = Triggers().pairs;
+    const auto report = [&](const TriggerPair &pair, bool enter) {
+        const auto *sensor = RayCast::FindShapeMetadata(pair.sensor);
+        const auto *visitor = RayCast::FindShapeMetadata(pair.visitor);
+        if (sensor == nullptr || visitor == nullptr) return;
+        events.push_back({true, enter, HandleOf(*sensor), HandleOf(*visitor), kSentinel,
+                          VelocityOf(pair.sensor) - VelocityOf(pair.visitor), kSentinel});
+    };
+    const b2SensorEvents sensors = b2World_GetSensorEvents(world);
+    for (int i = 0; i < sensors.endCount; ++i) {
+        const b2SensorEndTouchEvent &event = sensors.endEvents[i];
+        const auto found = pairs.find({b2StoreShapeId(event.sensorShapeId), b2StoreShapeId(event.visitorShapeId)});
+        if (found == pairs.end()) continue;
+        if (found->second.reported) report(found->second, false);
+        pairs.erase(found);
+    }
+    for (int i = 0; i < sensors.beginCount; ++i) {
+        const b2SensorBeginTouchEvent &event = sensors.beginEvents[i];
+        const auto *sensor = RayCast::FindShapeMetadata(event.sensorShapeId);
+        const auto *visitor = RayCast::FindShapeMetadata(event.visitorShapeId);
+        if (sensor == nullptr || visitor == nullptr ||
+            sensor->kind != RayCast::FixtureKind::Trigger || visitor->kind != RayCast::FixtureKind::Trigger) continue;
+        pairs.try_emplace({b2StoreShapeId(event.sensorShapeId), b2StoreShapeId(event.visitorShapeId)},
+                          TriggerPair{event.sensorShapeId, event.visitorShapeId, false});
+    }
+    // Body type and enabled changes do not end sensor overlaps in Box2D 3.
+    for (auto &[key, pair] : pairs) {
+        const bool should = ShouldReportTrigger(pair);
+        if (should == pair.reported) continue;
+        report(pair, should);
+        pair.reported = should;
+    }
+}
 
-    b2FixtureDef phantom_fixture_def;
-    phantom_fixture_def.shape = &phantom_shape;
-    phantom_fixture_def.density = rigidbody.density;
-    phantom_fixture_def.isSensor = true;
-    b2Fixture *fixture = rigidbody.body->CreateFixture(&phantom_fixture_def);
-    RayCast::RegisterFixture(fixture, rigidbody.actor,
-                             RayCast::FixtureKind::Phantom);
+void DispatchPhysicsEvents(b2WorldId world) {
+    std::vector<PendingEvent> events;
+    CollectContactEvents(world, events);
+    CollectTriggerEvents(world, events);
+    // Direct native destruction stays rejected while callbacks run, so later
+    // events in this batch never refer to shapes a callback destroyed.
+    PhysicsMutationGuard dispatch;
+    for (const PendingEvent &event : events) {
+        if (event.trigger)
+            ComponentManager::QueueTriggerEvent(event.receiver, event.other, event.point,
+                                                event.relative_velocity, event.normal, event.enter);
+        else
+            ComponentManager::QueueCollisionEvent(event.receiver, event.other, event.point,
+                                                  event.relative_velocity, event.normal, event.enter);
+    }
 }
 
 } // namespace
@@ -330,42 +369,61 @@ void Rigidbody::ValidateConfiguration() const {
     if(has_collider) add(ShapeMass(width,height,radius,collider_type=="circle",density));
     if(has_trigger) add(ShapeMass(trigger_width,trigger_height,trigger_radius,trigger_type=="circle",density));
     if(!has_collider&&!has_trigger) add(ShapeMass(width,height,radius,false,density));
-    const auto predicted=Integration(total.mass,gravity_scale,Gravity(),0,0,b2Vec2_zero);
+    const auto predicted=Integration(total.mass,gravity_scale,Gravity(),0,0,Vector2());
     Geometry geometry;
     geometry.friction=has_collider?friction:0;
     geometry.restitution=has_collider?bounciness:0;
-    if(has_collider) geometry.extent=collider_type=="circle"?radius:std::hypot(static_cast<double>(width),height)*0.5+b2_polygonRadius;
-    if(has_trigger) geometry.extent=std::max(geometry.extent,trigger_type=="circle"?static_cast<double>(trigger_radius):std::hypot(static_cast<double>(trigger_width),trigger_height)*0.5+b2_polygonRadius);
-    if(!has_collider&&!has_trigger) geometry.extent=std::hypot(static_cast<double>(width),height)*0.5+b2_polygonRadius;
+    // Box2D 3 boxes have no skin radius.
+    if(has_collider) geometry.extent=collider_type=="circle"?radius:std::hypot(static_cast<double>(width),height)*0.5;
+    if(has_trigger) geometry.extent=std::max(geometry.extent,trigger_type=="circle"?static_cast<double>(trigger_radius):std::hypot(static_cast<double>(trigger_width),trigger_height)*0.5);
+    if(!has_collider&&!has_trigger) geometry.extent=std::hypot(static_cast<double>(width),height)*0.5;
     Motion(total.mass,total.inertia,geometry,predicted,0);
 }
 
-// global physics world lifecycle
-void Rigidbody::EnsurePhysicsWorld() {
-    if (RayCast::GetPhysicsWorld() != nullptr) return;
-    b2World *world = new b2World(b2Vec2(0.0f, 9.8f));
-    world->SetContactListener(&g_contact_listener);
-    RayCast::SetPhysicsWorld(world);
+// Box2D keeps all worlds in one process-wide array; creating and destroying
+// worlds is not thread-safe. Operations within one world need no lock.
+static std::mutex &WorldRegistryMutex() {
+    static std::mutex mutex;
+    return mutex;
 }
 
-// global physics world lifecycle
+// physics world lifecycle of the current World
+void Rigidbody::EnsurePhysicsWorld() {
+    if (RayCast::HasPhysicsWorld()) return;
+    b2WorldDef world_def = b2DefaultWorldDef();
+    world_def.gravity = {0.0f, 9.8f};
+    std::lock_guard lock(WorldRegistryMutex());
+    RayCast::SetPhysicsWorld(b2CreateWorld(&world_def));
+}
+
 void Rigidbody::DestroyPhysicsWorld() {
-    delete RayCast::GetPhysicsWorld();
+    if (RayCast::HasPhysicsWorld()) {
+        std::lock_guard lock(WorldRegistryMutex());
+        b2DestroyWorld(RayCast::GetPhysicsWorld());
+    }
     RayCast::ClearPhysicsState();
+    Triggers().pairs.clear();
     ++CurrentForceStep();
 }
 
-// global physics world lifecycle
 bool Rigidbody::HasPhysicsWorld() {
-    return RayCast::GetPhysicsWorld() != nullptr;
+    return RayCast::HasPhysicsWorld();
 }
 
-// global physics world lifecycle
+// Step once, then deliver the step's contact and trigger events.
 void Rigidbody::StepPhysicsWorld() {
-    b2World *world = RayCast::GetPhysicsWorld();
-    if (world == nullptr) return;
-    world->Step(kStep, 8, 3);
-    if(world->GetAutoClearForces()) ++CurrentForceStep();
+    if (!RayCast::HasPhysicsWorld()) return;
+    const b2WorldId world = RayCast::GetPhysicsWorld();
+    b2World_Step(world, kStep, kSubSteps);
+    ++CurrentForceStep();
+    RayCast::AdvanceStepIndex();
+    DispatchPhysicsEvents(world);
+    RayCast::ReleaseRetiredShapes(RayCast::GetStepIndex());
+}
+
+bool Rigidbody::HasBody() const {
+    return B2_IS_NON_NULL(body) && RayCast::HasPhysicsWorld() &&
+           body_world_ == RayCast::GetPhysicsWorld() && b2Body_IsValid(body);
 }
 
 bool Rigidbody::HasLiveRuntimeBinding() const {
@@ -375,63 +433,57 @@ bool Rigidbody::HasLiveRuntimeBinding() const {
     return current.isInstance<Rigidbody>() && LuaBoundary::Cast<Rigidbody *>(current) == this;
 }
 
-// Create the Box2D body and fixtures from the serialized runtime config.
+// Create the Box2D body and shapes from the serialized runtime config.
 void Rigidbody::OnStart() {
     // A Lua reference may outlive its owning actor. Lifecycle methods remain
-    // callable from scripts, but must never recreate fixtures with stale owners.
+    // callable from scripts, but must never recreate shapes with stale owners.
     if (!HasLiveRuntimeBinding()) return;
-    if (body != nullptr) return;
+    if (HasBody()) return;
     ValidateConfiguration();
     EnsurePhysicsWorld();
-    if(RayCast::GetPhysicsWorld()->IsLocked()) throw std::runtime_error("Rigidbody cannot create a body during a physics callback");
 
-    b2BodyDef body_def;
+    b2BodyDef body_def = b2DefaultBodyDef();
     body_def.type = ParseBodyType(GetEffectiveBodyType());
-    body_def.position.Set(x, y);
-    body_def.bullet = precise;
+    body_def.position = {x, y};
+    body_def.rotation = RotationFromRadians(ClockwiseDegreesToBox2DRadians(rotation));
+    body_def.isBullet = precise;
     body_def.gravityScale = gravity_scale;
     body_def.angularDamping = angular_friction;
-    body_def.angle = ClockwiseDegreesToBox2DRadians(rotation);
-    body_def.enabled = enabled;
+    body_def.isEnabled = enabled;
 
-    body = RayCast::GetPhysicsWorld()->CreateBody(&body_def);
+    body_world_ = RayCast::GetPhysicsWorld();
+    body = b2CreateBody(body_world_, &body_def);
 
-    CreateColliderFixture(*this);
-    CreateTriggerFixture(*this);
-    CreatePhantomFixture(*this);
+    if (has_collider)
+        CreateShape(*this, RayCast::FixtureKind::Collider, collider_type == "circle", width, height, radius);
+    if (has_trigger)
+        CreateShape(*this, RayCast::FixtureKind::Trigger, trigger_type == "circle",
+                    trigger_width, trigger_height, trigger_radius);
+    if (!has_collider && !has_trigger)
+        CreateShape(*this, RayCast::FixtureKind::Phantom, false, width, height, radius);
     accumulated_force_.SetZero();force_step_=CurrentForceStep();
 }
 
-// Destroy the backing Box2D body and unregister all fixture metadata.
+// Destroy the backing Box2D body and retire its shape records.
 void Rigidbody::OnDestroy() {
-    b2World *world = RayCast::GetPhysicsWorld();
-    if (body == nullptr || world == nullptr) return;
+    if (!HasBody()) { body = b2_nullBodyId; return; }
     if (PhysicsMutationGuard::IsActive())
-        throw std::runtime_error("Rigidbody.OnDestroy cannot run during a native contact mutation callback; use actor:RemoveComponent(body) or Actor.Destroy(actor) for deferred cleanup");
-    if (world->IsLocked())
-        throw std::runtime_error("Rigidbody.OnDestroy cannot run during a physics callback; use actor:RemoveComponent(body) or Actor.Destroy(actor) for deferred cleanup");
+        throw std::runtime_error("Rigidbody.OnDestroy cannot run during a physics contact callback; use actor:RemoveComponent(body) or Actor.Destroy(actor) for deferred cleanup");
 
-    for (b2Fixture *fixture = body->GetFixtureList(); fixture != nullptr;
-         fixture = fixture->GetNext()) {
-        RayCast::UnregisterFixture(fixture);
-    }
-    PhysicsMutationGuard mutation;
-    world->DestroyBody(body);
-    body = nullptr;
+    for (const b2ShapeId shape : Shapes(body)) RayCast::UnregisterShape(shape);
+    b2DestroyBody(body);
+    body = b2_nullBodyId;
     accumulated_force_.SetZero();force_step_=CurrentForceStep();
 }
 
 // runtime physics controls
 Vector2 Rigidbody::GetPosition() const {
-    if (body != nullptr) return FromBox2D(body->GetPosition());
-    return FromBox2D(b2Vec2(x, y));
+    if (HasBody()) return FromBox2D(b2Body_GetPosition(body));
+    return Vector2(x, y);
 }
 
-// runtime physics controls
 float Rigidbody::GetRotation() const {
-    if (body != nullptr) {
-        return Box2DRadiansToClockwiseDegrees(body->GetAngle());
-    }
+    if (HasBody()) return Box2DRadiansToClockwiseDegrees(RadiansOf(b2Body_GetRotation(body)));
     return rotation;
 }
 
@@ -442,171 +494,145 @@ std::string Rigidbody::GetEffectiveBodyType() const {
     return body_type;
 }
 
-// runtime physics controls
-void Rigidbody::AddForce(const Vector2 &force_in) {
-    const b2Vec2 force = ToBox2D(force_in);
+void Rigidbody::AddForce(const Vector2 &force) {
     FiniteVector(force);
-    if (body == nullptr) return;
-    if(body->GetType()!=b2_dynamicBody) return;
+    if (!HasBody()) return;
+    if(b2Body_GetType(body)!=b2_dynamicBody) return;
     const auto previous=force_step_==CurrentForceStep()?accumulated_force_:Vector2();
     const double next_x=static_cast<double>(previous.x)+force.x,next_y=static_cast<double>(previous.y)+force.y;
-    const auto predicted=Integration(body->GetMass(),body->GetGravityScale(),body->GetWorld()->GetGravity(),next_x,next_y,body->GetLinearVelocity());
-    PointSpeed(body,predicted,body->GetAngularVelocity());
-    body->ApplyForceToCenter(force, true);
+    const auto predicted=Integration(b2Body_GetMass(body),b2Body_GetGravityScale(body),Gravity(),next_x,next_y,FromBox2D(b2Body_GetLinearVelocity(body)));
+    PointSpeed(body,predicted,b2Body_GetAngularVelocity(body));
+    b2Body_ApplyForceToCenter(body, ToBox2D(force), true);
     accumulated_force_.Set(static_cast<float>(next_x),static_cast<float>(next_y));force_step_=CurrentForceStep();
 }
 
-// runtime physics controls
-void Rigidbody::SetVelocity(const Vector2 &velocity_in) {
-    const b2Vec2 velocity = ToBox2D(velocity_in);
+void Rigidbody::SetVelocity(const Vector2 &velocity) {
     FiniteVector(velocity);SquaredVector(velocity.x,velocity.y,"linear velocity exceeds finite squared-magnitude range");
-    if (body == nullptr) return;
+    if (!HasBody()) return;
     const auto force=force_step_==CurrentForceStep()?accumulated_force_:Vector2();
-    PointSpeed(body,velocity,body->GetAngularVelocity());
-    const auto predicted=Integration(body->GetMass(),body->GetGravityScale(),body->GetWorld()->GetGravity(),force.x,force.y,velocity);
-    PointSpeed(body,predicted,body->GetAngularVelocity());
-    body->SetLinearVelocity(velocity);
+    PointSpeed(body,velocity,b2Body_GetAngularVelocity(body));
+    const auto predicted=Integration(b2Body_GetMass(body),b2Body_GetGravityScale(body),Gravity(),force.x,force.y,velocity);
+    PointSpeed(body,predicted,b2Body_GetAngularVelocity(body));
+    b2Body_SetLinearVelocity(body, ToBox2D(velocity));
 }
 
-// runtime physics controls
-void Rigidbody::SetPosition(const Vector2 &position_in) {
-    const b2Vec2 position = ToBox2D(position_in);
+void Rigidbody::SetPosition(const Vector2 &position) {
     Position(position);
     const auto current=GetPosition();
     const bool same_position = NearlyEqual(current.x, position.x) && NearlyEqual(current.y, position.y);
-    if(!same_position) Unlocked(body);
     x = position.x;
     y = position.y;
 
-    if (body == nullptr) return;
+    if (!HasBody()) return;
     if (same_position) return;
-    body->SetTransform(position, body->GetAngle());
+    b2Body_SetTransform(body, ToBox2D(position), b2Body_GetRotation(body));
 }
 
-// runtime physics controls
 void Rigidbody::SetRotation(float degrees_clockwise) {
     ValidateNumericProperty("rotation",degrees_clockwise);
     const bool same_rotation = NearlyEqual(GetRotation(), degrees_clockwise);
-    if(!same_rotation) Unlocked(body);
     rotation = degrees_clockwise;
 
-    if (body == nullptr) return;
+    if (!HasBody()) return;
     if (same_rotation) return;
-    body->SetTransform(body->GetPosition(),
-                       ClockwiseDegreesToBox2DRadians(degrees_clockwise));
+    b2Body_SetTransform(body, b2Body_GetPosition(body),
+                        RotationFromRadians(ClockwiseDegreesToBox2DRadians(degrees_clockwise)));
 }
 
 void Rigidbody::SetEffectiveBodyType(const std::string &type_name) {
     if(type_name.empty()||type_name=="none") { effective_body_type=type_name;return; }
     const b2BodyType requested_type=ParseBodyType(type_name);
     // The hierarchy bridge calls this every tick. Pending authoring fields do
-    // not reconfigure existing fixtures, and a no-op must not validate them.
-    if(!body||body->GetType()==requested_type) { effective_body_type=type_name;return; }
-    Unlocked(body);
-    const auto mass=ActualMass(body); // Retype consumes actual fixtures, not pending raw config.
-    Position(body->GetPosition());
-    ValidateNumericProperty("rotation",Box2DRadiansToClockwiseDegrees(body->GetAngle()));
-    const auto velocity=requested_type==b2_staticBody?b2Vec2_zero:body->GetLinearVelocity();
-    const double angular=requested_type==b2_staticBody?0:body->GetAngularVelocity();
-    const auto predicted=Integration(requested_type==b2_dynamicBody?mass.mass:0,body->GetGravityScale(),body->GetWorld()->GetGravity(),0,0,velocity);
+    // not reconfigure existing shapes, and a no-op must not validate them.
+    if(!HasBody()||b2Body_GetType(body)==requested_type) { effective_body_type=type_name;return; }
+    const auto mass=ActualMass(body); // Retype consumes actual shapes, not pending raw config.
+    Position(FromBox2D(b2Body_GetPosition(body)));
+    ValidateNumericProperty("rotation",Box2DRadiansToClockwiseDegrees(RadiansOf(b2Body_GetRotation(body))));
+    const auto velocity=requested_type==b2_staticBody?Vector2():FromBox2D(b2Body_GetLinearVelocity(body));
+    const double angular=requested_type==b2_staticBody?0:b2Body_GetAngularVelocity(body);
+    const auto predicted=Integration(requested_type==b2_dynamicBody?mass.mass:0,b2Body_GetGravityScale(body),Gravity(),0,0,velocity);
     Motion(requested_type==b2_dynamicBody?mass.mass:0,requested_type==b2_dynamicBody?mass.inertia:0,Describe(body),predicted,angular);
-    PhysicsMutationGuard state_change;
-    body->SetType(requested_type);
+    b2Body_SetType(body, requested_type);
     effective_body_type = type_name;
     accumulated_force_.SetZero();force_step_=CurrentForceStep();
 }
 
 void Rigidbody::ApplyEnabledState() {
-    if (!body || body->IsEnabled() == enabled) return;
-    Unlocked(body);
-    PhysicsMutationGuard state_change;
-    body->SetEnabled(enabled);
+    if (!HasBody() || b2Body_IsEnabled(body) == enabled) return;
+    if (enabled) b2Body_Enable(body);
+    else b2Body_Disable(body);
 }
 
-
-// runtime physics controls
 void Rigidbody::SetAngularVelocity(float degrees_clockwise) {
     ValidateNumericProperty("rotation",degrees_clockwise);
     const auto radians=ClockwiseDegreesToBox2DRadians(degrees_clockwise);
     Require(static_cast<double>(radians)*radians<=kSquaredLimit,"angular velocity exceeds finite squared-magnitude range");
-    if (body == nullptr) return;
-    PointSpeed(body,body->GetLinearVelocity(),radians);
-    body->SetAngularVelocity(radians);
+    if (!HasBody()) return;
+    PointSpeed(body,FromBox2D(b2Body_GetLinearVelocity(body)),radians);
+    b2Body_SetAngularVelocity(body, radians);
 }
 
-// runtime physics controls
 void Rigidbody::SetGravityScale(float scale) {
     ValidateNumericProperty("gravity_scale",scale);
-    if(body) {
+    if(HasBody()) {
         const auto force=force_step_==CurrentForceStep()?accumulated_force_:Vector2();
-        const auto predicted=Integration(body->GetMass(),scale,body->GetWorld()->GetGravity(),force.x,force.y,body->GetLinearVelocity());
-        PointSpeed(body,predicted,body->GetAngularVelocity());
+        const auto predicted=Integration(b2Body_GetMass(body),scale,Gravity(),force.x,force.y,FromBox2D(b2Body_GetLinearVelocity(body)));
+        PointSpeed(body,predicted,b2Body_GetAngularVelocity(body));
     }
     gravity_scale = scale;
-    if (body == nullptr) return;
-    body->SetGravityScale(scale);
+    if (!HasBody()) return;
+    b2Body_SetGravityScale(body, scale);
 }
 
-// runtime physics controls
-void Rigidbody::SetUpDirection(Vector2 direction_in) {
-    const b2Vec2 direction = ToBox2D(direction_in);
+void Rigidbody::SetUpDirection(Vector2 direction) {
     FiniteVector(direction);
     if(direction.x==0&&direction.y==0) return;
-    Unlocked(body);
     const float new_angle_radians=static_cast<float>(std::atan2(static_cast<double>(direction.x),-static_cast<double>(direction.y)));
     rotation = Box2DRadiansToClockwiseDegrees(new_angle_radians);
 
-    if (body == nullptr) return;
-    body->SetTransform(body->GetPosition(), new_angle_radians);
+    if (!HasBody()) return;
+    b2Body_SetTransform(body, b2Body_GetPosition(body), RotationFromRadians(new_angle_radians));
 }
 
-// runtime physics controls
-void Rigidbody::SetRightDirection(Vector2 direction_in) {
-    const b2Vec2 direction = ToBox2D(direction_in);
+void Rigidbody::SetRightDirection(Vector2 direction) {
     FiniteVector(direction);
     if(direction.x==0&&direction.y==0) return;
-    Unlocked(body);
-    const float new_angle_radians=static_cast<float>(std::atan2(static_cast<double>(direction.x),-static_cast<double>(direction.y))-b2_pi/2.0);
+    const float new_angle_radians=static_cast<float>(std::atan2(static_cast<double>(direction.x),-static_cast<double>(direction.y))-B2_PI/2.0);
     rotation = Box2DRadiansToClockwiseDegrees(new_angle_radians);
 
-    if (body == nullptr) return;
-    body->SetTransform(body->GetPosition(), new_angle_radians);
+    if (!HasBody()) return;
+    b2Body_SetTransform(body, b2Body_GetPosition(body), RotationFromRadians(new_angle_radians));
 }
 
-// runtime physics controls
 Vector2 Rigidbody::GetVelocity() const {
-    if (body != nullptr) return FromBox2D(body->GetLinearVelocity());
-    return FromBox2D(b2Vec2(0.0f, 0.0f));
+    if (HasBody()) return FromBox2D(b2Body_GetLinearVelocity(body));
+    return Vector2(0.0f, 0.0f);
 }
 
-// runtime physics controls
 float Rigidbody::GetAngularVelocity() const {
-    if (body != nullptr) {
-        return Box2DRadiansToClockwiseDegrees(body->GetAngularVelocity());
+    if (HasBody()) {
+        return Box2DRadiansToClockwiseDegrees(b2Body_GetAngularVelocity(body));
     }
     return 0.0f;
 }
 
-// runtime physics controls
 float Rigidbody::GetGravityScale() const {
-    if (body != nullptr) return body->GetGravityScale();
+    if (HasBody()) return b2Body_GetGravityScale(body);
     return gravity_scale;
 }
 
-// runtime physics controls
 Vector2 Rigidbody::GetUpDirection() const {
-    const float angle = (body != nullptr) ? body->GetAngle()
-                                          : ClockwiseDegreesToBox2DRadians(rotation);
-    b2Vec2 result(glm::sin(angle), -glm::cos(angle));
+    const float angle = HasBody() ? RadiansOf(b2Body_GetRotation(body))
+                                  : ClockwiseDegreesToBox2DRadians(rotation);
+    Vector2 result(std::sin(angle), -std::cos(angle));
     result.Normalize();
-    return FromBox2D(result);
+    return result;
 }
 
-// runtime physics controls
 Vector2 Rigidbody::GetRightDirection() const {
-    const float angle = (body != nullptr) ? body->GetAngle()
-                                          : ClockwiseDegreesToBox2DRadians(rotation);
-    b2Vec2 result(glm::cos(angle), glm::sin(angle));
+    const float angle = HasBody() ? RadiansOf(b2Body_GetRotation(body))
+                                  : ClockwiseDegreesToBox2DRadians(rotation);
+    Vector2 result(std::cos(angle), std::sin(angle));
     result.Normalize();
-    return FromBox2D(result);
+    return result;
 }

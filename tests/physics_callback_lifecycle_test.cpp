@@ -95,7 +95,7 @@ void CheckMode(int mode) {
     Check(probe["called"].cast<int>().value() == 1 && probe["map_rejected"].cast<bool>().value() &&
           probe["body_rejected"].cast<bool>().value(), "real callback must reject both direct lifecycle calls");
     if (mode == 0) {
-        Check(map->HasAsset() && map->GetFixtureCount() == 4 && body->body != nullptr,
+        Check(map->HasAsset() && map->GetFixtureCount() == 4 && body->HasBody(),
               "rejected calls must preserve bodies and map state");
         const auto hit = RayCast::Cast({2.5f,-1},{0,1},8);
         Check(hit && hit->actor == engine.GetRuntimeActorByUID(10), "rejected calls must preserve raycast metadata");
@@ -103,9 +103,9 @@ void CheckMode(int mode) {
         engine.StepSimulation();
         Check(map->GetCell("ground",0,0) == 2, "rejected destroy must preserve queued cell edits");
     } else {
-        Check(body->body == nullptr && !map->HasAsset() && map->GetFixtureCount() == 0,
+        Check(!body->HasBody() && !map->HasAsset() && map->GetFixtureCount() == 0,
               "authorized deferred cleanup must finish outside locked world");
-        Check(RayCast::GetPhysicsWorld()->GetBodyCount() == 0, "deferred cleanup must leave no orphan bodies");
+        Check(RayCast::GetBodyCount() == 0, "deferred cleanup must leave no orphan bodies");
         Check(!RayCast::Cast({2.5f,-1},{0,1},8), "deferred cleanup must unregister fixtures");
         if (mode == 1)
             Check(engine.GetRuntimeActorByUID(2) && engine.GetRuntimeActorByUID(10),

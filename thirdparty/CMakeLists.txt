@@ -10,32 +10,6 @@ list(FILTER GAME_ENGINE_LUA_SOURCES EXCLUDE REGEX "/luac\\.c$")
 list(SORT GAME_ENGINE_LUA_HEADERS)
 list(SORT GAME_ENGINE_LUA_SOURCES)
 
-file(GLOB GAME_ENGINE_BOX2D_HEADERS CONFIGURE_DEPENDS
-    "${PROJECT_SOURCE_DIR}/thirdparty/box2d/*.h"
-)
-file(GLOB_RECURSE GAME_ENGINE_BOX2D_SOURCES CONFIGURE_DEPENDS
-    "${PROJECT_SOURCE_DIR}/thirdparty/box2d/src/*.cpp"
-)
-list(SORT GAME_ENGINE_BOX2D_HEADERS)
-list(SORT GAME_ENGINE_BOX2D_SOURCES)
-
-add_library(box2d_runtime STATIC)
-target_sources(
-    box2d_runtime
-    PRIVATE
-        ${GAME_ENGINE_BOX2D_SOURCES}
-        ${GAME_ENGINE_BOX2D_HEADERS}
-)
-target_include_directories(
-    box2d_runtime
-    PUBLIC
-        "${PROJECT_SOURCE_DIR}/thirdparty"
-    PRIVATE
-        "${PROJECT_SOURCE_DIR}/thirdparty/box2d/src"
-)
-target_compile_features(box2d_runtime PUBLIC cxx_std_11)
-set_target_properties(box2d_runtime PROPERTIES FOLDER "thirdparty")
-
 add_library(lua_runtime STATIC)
 target_sources(
     lua_runtime

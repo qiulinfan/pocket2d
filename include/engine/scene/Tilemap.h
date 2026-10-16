@@ -5,7 +5,7 @@
 #include "scene/ActorHandle.h"
 #include "shared/tilemap/TilemapAsset.h"
 #include "rendering/Renderer.h"
-#include "box2d/box2d.h"
+#include "physics/PhysicsIds.h"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -62,7 +62,7 @@ public:
 
     const Diagnostics &GetDiagnostics() const { return diagnostics_; }
     void ResetDiagnostics() { diagnostics_ = {}; }
-    b2Body *GetChunkBody(int chunk_x, int chunk_y) const;
+    b2BodyId GetChunkBody(int chunk_x, int chunk_y) const;
     std::size_t GetFixtureCount() const;
 
 private:
@@ -70,7 +70,7 @@ private:
     struct RowRun { int x, y, length; };
     struct Chunk {
         std::array<std::vector<TileRecord>, 2> tiles;
-        b2Body *body = nullptr;
+        b2BodyId body = b2_nullBodyId;
         bool collision_dirty = true;
     };
     TilemapAsset::Data data_;
@@ -86,7 +86,7 @@ private:
     bool committed_enabled_ = true;
     bool destroyed_ = false;
     bool committing_ = false;
-    b2World *physics_world_ = nullptr;
+    b2WorldId physics_world_ = b2_nullWorldId;
     Diagnostics diagnostics_;
 
     bool HasLiveBinding() const;
@@ -97,7 +97,9 @@ private:
                                              int chunk_x, int chunk_y);
     static std::vector<RowRun> BuildRuns(const TilemapAsset::Data &data,
                                         int chunk_x, int chunk_y);
-    void DestroyBody(b2Body *body);
+    bool OwnsLiveBodies() const;
+    static void DestroyChunkBody(b2BodyId &body);
+    void DestroyBody(b2BodyId &body);
     void ClearBodies();
 };
 

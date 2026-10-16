@@ -30,10 +30,15 @@ Tilemap::Tilemap(const Tilemap &other) : enabled(other.enabled), map_resource(ot
 Tilemap::~Tilemap() {
     // Runtime removal normally calls OnDestroy at its safe pre-physics boundary.
     // Native authoring/test instances also release their bodies when scoped out.
-    if (RayCast::GetPhysicsWorld() == physics_world_ && physics_world_ != nullptr &&
-        !physics_world_->IsLocked()) ClearBodies();
+    if (OwnsLiveBodies()) ClearBodies();
 }
 bool Tilemap::HasAsset() const { return initialized_ && !destroyed_; }
+// Chunk bodies belong to the physics world recorded at creation; after a world
+// is replaced their ids are stale and must not be touched.
+bool Tilemap::OwnsLiveBodies() const {
+    return B2_IS_NON_NULL(physics_world_) && RayCast::HasPhysicsWorld() &&
+           physics_world_ == RayCast::GetPhysicsWorld();
+}
 bool Tilemap::HasLiveBinding() const {
     if (destroyed_) return false;
     if (actor_handle.generation == 0) return true;
@@ -124,17 +129,14 @@ void Tilemap::AdoptPreparedState(Tilemap &prepared) {
     if (&prepared == this || committing_ || !HasLiveBinding())
         throw std::runtime_error("tilemap: adoption requires a live component outside commit");
     if (prepared.actor != nullptr || prepared.actor_handle.generation != 0 || prepared.destroyed_ ||
-        prepared.committing_ || prepared.physics_world_ != nullptr || !prepared.pending_.empty() || prepared.replacement_)
+        prepared.committing_ || B2_IS_NON_NULL(prepared.physics_world_) || !prepared.pending_.empty() || prepared.replacement_)
         throw std::runtime_error("tilemap: adoption requires a fresh detached prepared value");
-    if (auto *world = RayCast::GetPhysicsWorld(); world && world->IsLocked())
-        throw std::runtime_error("tilemap: adoption requires an unlocked world");
     if (revision_ == std::numeric_limits<std::uint64_t>::max())
         throw std::overflow_error("tilemap: revision exhausted");
-    // This is a destructive commit, not rollback on callback/allocation errors.
-    // Install the new base BEFORE EndContact can queue edits against it.
+    // This is a destructive commit, not rollback on allocation errors.
     struct CommitGuard { bool &value; CommitGuard(bool &flag) : value(flag) { value = true; } ~CommitGuard() { value = false; } } guard(committing_);
     auto old_chunks = std::move(chunks_);
-    auto *old_world = physics_world_;
+    const bool owned_old_bodies = OwnsLiveBodies();
     pending_.clear(); replacement_.reset();
     data_ = std::move(prepared.data_);
     chunks_ = std::move(prepared.chunks_);
@@ -143,26 +145,16 @@ void Tilemap::AdoptPreparedState(Tilemap &prepared) {
     initialized_ = prepared.initialized_;
     enabled = prepared.enabled; committed_enabled_ = enabled;
     map_resource = std::move(prepared.map_resource);
-    physics_world_ = nullptr;
+    physics_world_ = b2_nullWorldId;
     ++revision_;
     diagnostics_ = prepared.diagnostics_;
-    for (auto &chunk : chunks_) { chunk.body = nullptr; chunk.collision_dirty = true; }
+    for (auto &chunk : chunks_) { chunk.body = b2_nullBodyId; chunk.collision_dirty = true; }
     prepared.data_ = {};
     prepared.chunks_x_ = prepared.chunks_y_ = 0;
     prepared.pending_.clear(); prepared.replacement_.reset();
     prepared.initialized_ = false; prepared.destroyed_ = true;
-    // Do not clear pending_/replacement_/enabled after this loop: callbacks may
-    // have queued changes, which belong to the next CommitPending boundary.
-    if (old_world && old_world == RayCast::GetPhysicsWorld()) {
-        for (auto &chunk : old_chunks) {
-            if (!chunk.body || old_world != RayCast::GetPhysicsWorld()) continue;
-            for (auto *fixture = chunk.body->GetFixtureList(); fixture; fixture = fixture->GetNext())
-                RayCast::UnregisterFixture(fixture);
-            PhysicsMutationGuard mutation;
-            old_world->DestroyBody(chunk.body);
-            chunk.body = nullptr;
-        }
-    }
+    if (owned_old_bodies)
+        for (auto &chunk : old_chunks) DestroyChunkBody(chunk.body);
 }
 
 void Tilemap::ReplaceAsset(const TilemapAsset::Data &data) {
@@ -176,27 +168,27 @@ void Tilemap::OnStart() {
     if (!HasAsset() || !HasLiveBinding()) return;
     ValidatePlacement(origin_x_, origin_y_, 0);
 }
-void Tilemap::DestroyBody(b2Body *body) {
-    if (body == nullptr || physics_world_ == nullptr || RayCast::GetPhysicsWorld() != physics_world_) return;
-    for (auto *fixture = body->GetFixtureList(); fixture != nullptr; fixture = fixture->GetNext())
-        RayCast::UnregisterFixture(fixture);
-    PhysicsMutationGuard mutation;
-    physics_world_->DestroyBody(body);
+// Destroys a body of the current physics world and retires its shape records.
+void Tilemap::DestroyChunkBody(b2BodyId &body) {
+    if (B2_IS_NON_NULL(body) && b2Body_IsValid(body)) {
+        std::vector<b2ShapeId> shapes(static_cast<std::size_t>(b2Body_GetShapeCount(body)));
+        b2Body_GetShapes(body, shapes.data(), static_cast<int>(shapes.size()));
+        for (const b2ShapeId shape : shapes) RayCast::UnregisterShape(shape);
+        b2DestroyBody(body);
+    }
+    body = b2_nullBodyId;
+}
+void Tilemap::DestroyBody(b2BodyId &body) {
+    if (!OwnsLiveBodies()) { body = b2_nullBodyId; return; }
+    DestroyChunkBody(body);
 }
 void Tilemap::ClearBodies() {
-    if (physics_world_ != nullptr && RayCast::GetPhysicsWorld() == physics_world_ && physics_world_->IsLocked())
-        throw std::runtime_error("tilemap: physics mutation requires an unlocked world");
-    for (auto &chunk : chunks_) {
-        DestroyBody(chunk.body);
-        chunk.body = nullptr;
-    }
-    physics_world_ = nullptr;
+    for (auto &chunk : chunks_) DestroyBody(chunk.body);
+    physics_world_ = b2_nullWorldId;
 }
 void Tilemap::OnDestroy() {
     if (PhysicsMutationGuard::IsActive())
-        throw std::runtime_error("Tilemap.OnDestroy cannot run during a native contact mutation callback; use actor:RemoveComponent(map) or Actor.Destroy(actor) for deferred cleanup");
-    if (auto *world = RayCast::GetPhysicsWorld(); world != nullptr && world->IsLocked())
-        throw std::runtime_error("Tilemap.OnDestroy cannot run during a physics callback; use actor:RemoveComponent(map) or Actor.Destroy(actor) for deferred cleanup");
+        throw std::runtime_error("Tilemap.OnDestroy cannot run during a physics contact callback; use actor:RemoveComponent(map) or Actor.Destroy(actor) for deferred cleanup");
     if (committing_) throw std::runtime_error("tilemap: cannot destroy during commit");
     ClearBodies();
     pending_.clear(); replacement_.reset();
@@ -248,15 +240,12 @@ void Tilemap::CommitPending() { CommitPending(origin_x_, origin_y_, 0); }
 void Tilemap::CommitPending(float x, float y, float rotation) {
     if ((!HasAsset() && !replacement_) || !HasLiveBinding()) return;
     if (committing_) throw std::runtime_error("tilemap: recursive commit is not allowed");
-    // EndContact may run while bodies are disabled and may queue another flag
-    // change. Apply this one snapshot to every body and the rendered state.
+    // Apply one snapshot of the flag to every body and the rendered state.
     const bool next_enabled = enabled;
     ValidatePlacement(x, y, rotation);
-    if (auto *world = RayCast::GetPhysicsWorld(); world != nullptr && world->IsLocked())
-        throw std::runtime_error("tilemap: commit requires pre-physics safe boundary");
-    if (physics_world_ != nullptr && physics_world_ != RayCast::GetPhysicsWorld()) {
-        for (auto &chunk : chunks_) { chunk.body = nullptr; chunk.collision_dirty = true; }
-        physics_world_ = nullptr;
+    if (B2_IS_NON_NULL(physics_world_) && !OwnsLiveBodies()) {
+        for (auto &chunk : chunks_) { chunk.body = b2_nullBodyId; chunk.collision_dirty = true; }
+        physics_world_ = b2_nullWorldId;
     }
     const auto &candidate = replacement_ ? *replacement_ : data_;
     const int nx = (candidate.width + kChunkSize - 1) / kChunkSize;
@@ -268,7 +257,7 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
         bool collision;
         std::array<std::vector<TileRecord>, 2> tiles;
         std::vector<RowRun> runs;
-        b2Body *body = nullptr;
+        b2BodyId body = b2_nullBodyId;
     };
     std::vector<unsigned> dirty(static_cast<std::size_t>(nx) * ny, replacement_ ? 3u : 0u);
     for (const auto &[command, value] : pending_) {
@@ -289,7 +278,7 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
     for (std::size_t index = 0; index < dirty.size(); ++index) {
         const bool collision = replacement_ || (dirty[index] & 2u) != 0 || chunks_[index].collision_dirty;
         if (dirty[index] == 0 && !collision) continue;
-        Prepared work{index, dirty[index], collision, {}, {}, nullptr};
+        Prepared work{index, dirty[index], collision, {}, {}, b2_nullBodyId};
         const int start_x = static_cast<int>(index % nx) * kChunkSize;
         const int start_y = static_cast<int>(index / nx) * kChunkSize;
         const int end_x = std::min(start_x + kChunkSize, candidate.width);
@@ -321,20 +310,21 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
             if (!work.collision || work.runs.empty()) continue;
             Rigidbody::EnsurePhysicsWorld();
             physics_world_ = RayCast::GetPhysicsWorld();
-            b2BodyDef definition;
+            b2BodyDef definition = b2DefaultBodyDef();
             definition.type = b2_staticBody;
-            definition.position.Set(x, y);
-            definition.enabled = false;
-            work.body = physics_world_->CreateBody(&definition);
+            definition.position = {x, y};
+            definition.isEnabled = false;
+            work.body = b2CreateBody(physics_world_, &definition);
+            b2ShapeDef shape_def = b2DefaultShapeDef();
+            shape_def.material.friction = 0; shape_def.material.restitution = 0;
+            shape_def.enableContactEvents = true;
             for (const auto &run : work.runs) {
-                b2PolygonShape shape;
-                shape.SetAsBox(run.length * candidate.cell_size * 0.5f, candidate.cell_size * 0.5f,
-                    b2Vec2((run.x + run.length * 0.5f) * candidate.cell_size,
-                           (run.y + 0.5f) * candidate.cell_size), 0);
-                b2FixtureDef fixture;
-                fixture.shape = &shape; fixture.friction = 0; fixture.restitution = 0;
-                auto *created = work.body->CreateFixture(&fixture);
-                RayCast::RegisterFixture(created, actor, RayCast::FixtureKind::Collider);
+                const b2Polygon box = b2MakeOffsetBox(
+                    run.length * candidate.cell_size * 0.5f, candidate.cell_size * 0.5f,
+                    {(run.x + run.length * 0.5f) * candidate.cell_size, (run.y + 0.5f) * candidate.cell_size},
+                    b2Rot_identity);
+                const b2ShapeId created = b2CreatePolygonShape(work.body, &shape_def, &box);
+                RayCast::RegisterShape(created, actor, RayCast::FixtureKind::Collider);
             }
         }
     } catch (...) {
@@ -385,11 +375,12 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
     }
     origin_x_ = x; origin_y_ = y;
     committed_enabled_ = next_enabled;
-    for (auto &chunk : chunks_) if (chunk.body != nullptr) {
-        if (chunk.body->GetPosition() != b2Vec2(x, y)) chunk.body->SetTransform(b2Vec2(x, y), 0);
-        if (chunk.body->IsEnabled() != next_enabled) {
-            PhysicsMutationGuard mutation;
-            chunk.body->SetEnabled(next_enabled);
+    for (auto &chunk : chunks_) if (B2_IS_NON_NULL(chunk.body)) {
+        const b2Vec2 position = b2Body_GetPosition(chunk.body);
+        if (position.x != x || position.y != y) b2Body_SetTransform(chunk.body, {x, y}, b2Rot_identity);
+        if (b2Body_IsEnabled(chunk.body) != next_enabled) {
+            if (next_enabled) b2Body_Enable(chunk.body);
+            else b2Body_Disable(chunk.body);
         }
     }
     committing_ = false;
@@ -432,14 +423,15 @@ std::size_t Tilemap::QueueVisible(double min_x, double min_y, double max_x, doub
     for (const auto &draw : draws) Renderer::QueueSceneImageDraw(draw);
     return draws.size();
 }
-b2Body *Tilemap::GetChunkBody(int x, int y) const {
-    if (x < 0 || y < 0 || x >= chunks_x_ || y >= chunks_y_) return nullptr;
+b2BodyId Tilemap::GetChunkBody(int x, int y) const {
+    if (x < 0 || y < 0 || x >= chunks_x_ || y >= chunks_y_) return b2_nullBodyId;
     return chunks_[y * chunks_x_ + x].body;
 }
 std::size_t Tilemap::GetFixtureCount() const {
-    if (RayCast::GetPhysicsWorld() != physics_world_) return 0;
+    if (!OwnsLiveBodies()) return 0;
     std::size_t count = 0;
-    for (const auto &chunk : chunks_) if (chunk.body != nullptr)
-        for (auto *fixture = chunk.body->GetFixtureList(); fixture != nullptr; fixture = fixture->GetNext()) ++count;
+    for (const auto &chunk : chunks_)
+        if (B2_IS_NON_NULL(chunk.body) && b2Body_IsValid(chunk.body))
+            count += static_cast<std::size_t>(b2Body_GetShapeCount(chunk.body));
     return count;
 }

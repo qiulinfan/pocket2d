@@ -12,8 +12,14 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 namespace {
+// Number of touching Box2D contacts on a body.
+int Touching(b2BodyId body) {
+    std::vector<b2ContactData> contacts(static_cast<std::size_t>(b2Body_GetContactCapacity(body)));
+    return b2Body_GetContactData(body, contacts.data(), static_cast<int>(contacts.size()));
+}
 void Check(bool value, const char *message) { if (!value) throw std::runtime_error(message); }
 void Lua(lua_State *state, const char *source) {
     const int top = lua_gettop(state);
@@ -97,9 +103,9 @@ void Run() {
     auto *early = LuaBoundary::Cast<Rigidbody *>(early_ref); auto *late = LuaBoundary::Cast<Rigidbody *>(late_ref);
     auto *state = early_ref.state();
     Step(engine, 1);
-    Check(early->enabled && early->body != nullptr && Field(early_probe, "starts") == 1,
+    Check(early->enabled && early->HasBody() && Field(early_probe, "starts") == 1,
           "OnStart activation did not start initially disabled body/script");
-    auto *early_body = early->body; const float first_x = early->GetPosition().x;
+    auto early_body = early->body; const float first_x = early->GetPosition().x;
     Step(engine, 5);
     Check(early->GetPosition().x > first_x + 0.1f,
           "OnStart enabled body failed to advance: physics hierarchy remained disabled");
@@ -108,16 +114,16 @@ void Run() {
     Check(std::abs(transform->x - early->GetPosition().x) < 0.001f &&
           engine.GetRuntimePhysicsHierarchyStateByUID(2).effective_body_type == "dynamic",
           "enabled dynamic motion did not update Transform/cache");
-    Check(late->body == nullptr && Field(late_probe, "starts") == 0 &&
+    Check(!late->HasBody() && Field(late_probe, "starts") == 0 &&
           !ManagerDetail::FindComponentRecord(3, "body")->on_start_called &&
           !ManagerDetail::FindComponentRecord(3, "probe")->on_start_called,
           "disabled component consumed its one-shot pending start");
-    const int bodies = RayCast::GetPhysicsWorld()->GetBodyCount();
+    const int bodies = RayCast::GetBodyCount();
     Lua(state, "late.enabled=true;Actor.Find('late'):GetComponent('ActivationProbe').enabled=true");
     Step(engine, 1);
-    Check(late->body && Field(late_probe, "starts") == 1 && RayCast::GetPhysicsWorld()->GetBodyCount() == bodies + 1,
+    Check(late->HasBody() && Field(late_probe, "starts") == 1 && RayCast::GetBodyCount() == bodies + 1,
           "later activation did not create exactly one body/start");
-    auto *late_body = late->body; const float late_x = late->GetPosition().x;
+    auto late_body = late->body; const float late_x = late->GetPosition().x;
     Step(engine, 5);
     Check(late->GetPosition().x > late_x + 0.05f && Field(late_probe, "starts") == 1,
           "late body is not moving or its Start repeated");
@@ -128,18 +134,18 @@ void Run() {
       transform.x=10;transform.y=0;early:SetPosition(Vector2(10,0))
     )");
     Step(engine, 1); const auto stopped = early->GetPosition(); const int enters = Field(early_probe, "enters");
-    Check(early->body == early_body && !early_body->IsEnabled() && early_body->GetContactList() == nullptr,
+    Check(early->body == early_body && !b2Body_IsEnabled(early_body) && Touching(early_body) == 0,
           "disabling body did not suspend Box2D contacts without reconstruction");
     Step(engine, 3);
     Check(early->GetPosition() == stopped && Field(early_probe, "enters") == enters,
           "disabled body moved or generated collision enter");
     Lua(state, "early.enabled=true"); Step(engine, 2);
-    Check(early->body == early_body && early_body->IsEnabled() && Field(early_probe, "enters") > enters,
+    Check(early->body == early_body && b2Body_IsEnabled(early_body) && Field(early_probe, "enters") > enters,
           "reenabled body did not recover real collision participation");
     Check(Field(early_probe, "starts") == 1, "reenable restarted already-started script");
-    Check(early_body->GetContactList() && early_body->GetContactList()->contact->IsTouching(),
+    Check(Touching(early_body) > 0,
           "guard regression requires a real touching Box2D contact");
-    auto *wall_body = wall->body;
+    auto wall_body = wall->body;
     const int before_guard_exits = Field(early_probe, "exits");
     Lua(state, R"(
       Actor.Find('controller'):GetComponent('ActivationControl').drive=false
@@ -150,7 +156,7 @@ void Run() {
     Check(Field(early_probe, "exits") == before_guard_exits + 1 && Field(early_probe, "rejections") == 2,
           "activation EndContact must reject direct destruction of current and adjacent bodies");
     Check(early->body == early_body && wall->body == wall_body &&
-          RayCast::GetPhysicsWorld()->GetBodyCount() == bodies + 1,
+          RayCast::GetBodyCount() == bodies + 1,
           "rejected EndContact destruction changed native body identity or lifetime");
     Lua(state, "early.enabled=true"); Step(engine, 1);
 
@@ -159,20 +165,20 @@ void Run() {
         Lua(state, "late.enabled=true;Actor.Find('late'):GetComponent('ActivationProbe').enabled=true"); Step(engine, 2);
     }
     Check(late->body == late_body && Field(late_probe, "starts") == 1 &&
-          RayCast::GetPhysicsWorld()->GetBodyCount() == bodies + 1, "activation churn leaked/recreated bodies or repeated Start");
+          RayCast::GetBodyCount() == bodies + 1, "activation churn leaked/recreated bodies or repeated Start");
     Lua(state, R"(
       Actor.Find('controller'):GetComponent('ActivationControl').drive=false
       local transform=Actor.Find('early'):GetComponent('Transform')
       transform.x=2;transform.y=5;early:SetPosition(Vector2(2,5));early.body_type='kinematic'
     )");
     Step(engine, 1);
-    Check(early->body == early_body && early_body->GetType() == b2_kinematicBody &&
+    Check(early->body == early_body && b2Body_GetType(early_body) == b2_kinematicBody &&
           engine.GetRuntimePhysicsHierarchyStateByUID(2).effective_body_type == "kinematic",
           "Lua body_type write did not update actual body and hierarchy cache");
     Check(early->GetPosition() == Vector2(2, 5), "kinematic body did not follow authored Transform");
     Lua(state, "early.body_type='dynamic';Actor.Find('controller'):GetComponent('ActivationControl').drive=true");
     Step(engine, 4);
-    Check(early_body->GetType() == b2_dynamicBody && early->GetPosition().x > 2.05f &&
+    Check(b2Body_GetType(early_body) == b2_dynamicBody && early->GetPosition().x > 2.05f &&
           std::abs(transform->x - early->GetPosition().x) < 0.001f,
           "dynamic body_type restoration did not resume physics-owned motion");
     // Recreate contact, then request both supported deferred cleanup paths from
@@ -184,22 +190,22 @@ void Run() {
       saved_wall=Actor.Find('wall')
     )");
     Step(engine, 1);
-    Check(early_body->GetContactList() && early_body->GetContactList()->contact->IsTouching(),
+    Check(Touching(early_body) > 0,
           "deferred cleanup regression requires a real touching Box2D contact");
     const int before_deferred_exits = Field(early_probe, "exits");
     Lua(state, "Actor.Find('early'):GetComponent('ActivationProbe').exit_mode='deferred';early.enabled=false");
     Step(engine, 1);
     Check(Field(early_probe, "exits") == before_deferred_exits + 1 && Field(early_probe, "deferred_requests") == 2,
           "EndContact did not accept both deferred component and actor destruction requests");
-    Check(early->body == nullptr && wall->body == nullptr &&
+    Check(!early->HasBody() && !wall->HasBody() &&
           ComponentManager::GetComponentByKey(2, "body").isNil() &&
           ComponentManager::GetComponentByKey(4, "body").isNil() &&
-          RayCast::GetPhysicsWorld()->GetBodyCount() == bodies - 1,
+          RayCast::GetBodyCount() == bodies - 1,
           "deferred EndContact cleanup failed to remove exactly the two native bodies");
     Lua(state, "assert(not saved_wall:IsValid());assert(Actor.Find('early'):IsValid())");
     Step(engine, 3);
     Check(Field(early_probe, "exits") == before_deferred_exits + 1 &&
-          RayCast::GetPhysicsWorld()->GetBodyCount() == bodies - 1,
+          RayCast::GetBodyCount() == bodies - 1,
           "destroyed bodies participated in later physics or cleanup repeated");
     Check(ComponentManager::GetRuntimeErrorCount() == 0, "activation callbacks reported runtime errors");
 }

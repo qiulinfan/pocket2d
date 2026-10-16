@@ -95,8 +95,8 @@ void Rejection() {
     const ActorHandle handle(source);
     auto source_good = ComponentManager::GetComponentByKey(1, "a_good");
     auto source_body = ComponentManager::GetComponentByKey(1, "b_body");
-    auto *body = source_body.cast<Rigidbody *>().value()->body;
-    Check(body != nullptr, "source must have a real Box2D body before rejection");
+    auto body = source_body.cast<Rigidbody *>().value()->body;
+    Check(B2_IS_NON_NULL(body), "source must have a real Box2D body before rejection");
     const auto before = State(engine);
     for (const std::string name : {"BadDefault", "MissingType", "BadBody", "BadParticles",
                                   "MissingMap", "MissingAnimation", "MissingTarget", "SharedTarget"}) {
@@ -146,7 +146,7 @@ void Rejection() {
     Check(animation["current_clip"].cast<std::string>().value() == "idle" && animation["frame"].cast<int>().value() == 1,
           "valid native animation must be initialized before Instantiate returns");
     engine.StepSimulation();
-    Check(ComponentManager::GetComponentByKey(repaired.cast<ActorHandle>().value().uid, "z_bad").cast<Rigidbody *>().value()->body != nullptr,
+    Check(ComponentManager::GetComponentByKey(repaired.cast<ActorHandle>().value().uid, "z_bad").cast<Rigidbody *>().value()->HasBody(),
           "repaired native spawn did not create its real body on deferred start");
     Check(ComponentManager::GetRuntimeErrorCount() == 0, "caught preparation failure poisoned runtime");
 }

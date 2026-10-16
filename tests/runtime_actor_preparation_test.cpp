@@ -69,7 +69,7 @@ void PreparationRejectsWithoutPublication() {
     const auto before=State(engine);
     const auto source=ComponentManager::FindActorByName("source");
     const auto generation=source.cast<ActorHandle>().value().generation;
-    const auto *physics=RayCast::GetPhysicsWorld();
+    const auto physics = RayCast::GetPhysicsWorld();
     const auto reject=[&](Actor actor,const std::string &fragment) {
         std::string error;
         auto token=PrepareRuntimeActor(std::move(actor),error);

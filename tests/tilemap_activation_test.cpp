@@ -11,8 +11,14 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 namespace {
+// Number of touching Box2D contacts on a body.
+int Touching(b2BodyId body) {
+    std::vector<b2ContactData> contacts(static_cast<std::size_t>(b2Body_GetContactCapacity(body)));
+    return b2Body_GetContactData(body, contacts.data(), static_cast<int>(contacts.size()));
+}
 namespace fs = std::filesystem;
 void Check(bool condition, const std::string &message) { if (!condition) throw std::runtime_error(message); }
 void Write(const fs::path &path, const std::string &text) {
@@ -92,8 +98,8 @@ void Run(const std::string &mode) {
     auto *body = LuaBoundary::Cast<Rigidbody *>(body_ref); auto *map = LuaBoundary::Cast<Tilemap *>(map_ref);
     const ActorHandle map_owner(engine.GetRuntimeActorByUID(2));
     engine.StepSimulation(); engine.StepSimulation();
-    Check(Integer(probe, "enters") >= 1 && body->body && body->body->GetContactList(), "fixture did not establish a real body/map contact");
-    auto *original_body = body->body; const int body_count = RayCast::GetPhysicsWorld()->GetBodyCount();
+    Check(Integer(probe, "enters") >= 1 && body->HasBody() && Touching(body->body) > 0, "fixture did not establish a real body/map contact");
+    auto original_body = body->body; const int body_count = RayCast::GetBodyCount();
     Check(body_count == 2 && map->GetCell("solid",0,0) == 1, "unexpected fixture body/map state");
     Lua(probe.state(), "Actor.Find('player'):GetComponent('Probe').request=true");
     engine.StepSimulation();
@@ -102,24 +108,24 @@ void Run(const std::string &mode) {
     if (mode == "guard_map" || mode == "guard_body") {
         Check(Boolean(probe,"rejected"), mode + ": unsafe direct destruction was accepted");
         Check(map_owner.IsValid() && map->GetCell("solid",0,0) == 1 && body->body == original_body &&
-              RayCast::GetPhysicsWorld()->GetBodyCount() == body_count, mode + ": rejection changed native participants/data");
+              RayCast::GetBodyCount() == body_count, mode + ": rejection changed native participants/data");
         Check(body_ref.rawequal(ComponentManager::GetComponentByKey(1,"body")) &&
               map_ref.rawequal(ComponentManager::GetComponentByKey(2,"map")), "rejection replaced native userdata");
         if (mode == "guard_map") {
-            Check(!body->body->IsEnabled(), "requested body disable did not complete");
+            Check(!b2Body_IsEnabled(body->body), "requested body disable did not complete");
             const auto hit=RayCast::Cast(Vector2(-1,0.5f),Vector2(1,0),3);
             Check(hit && hit->actor_handle.uid==2, "blocked map destruction removed collision geometry");
-        } else Check(body->body->IsEnabled() && !map->enabled, "requested map disable or surviving body state is wrong");
+        } else Check(b2Body_IsEnabled(body->body) && !map->enabled, "requested map disable or surviving body state is wrong");
     } else if (mode == "deferred_map") {
         Check(!map_owner.IsValid() && engine.GetRuntimeActorByUID(2)==nullptr &&
-              RayCast::GetPhysicsWorld()->GetBodyCount()==body_count-1, "deferred map deletion did not safely finish");
+              RayCast::GetBodyCount()==body_count-1, "deferred map deletion did not safely finish");
     } else if (mode == "deferred_body") {
-        Check(ComponentManager::GetComponentByKey(1,"body").isNil() && body->body==nullptr &&
-              RayCast::GetPhysicsWorld()->GetBodyCount()==body_count-1, "deferred body removal did not safely finish");
+        Check(ComponentManager::GetComponentByKey(1,"body").isNil() && !body->HasBody() &&
+              RayCast::GetBodyCount()==body_count-1, "deferred body removal did not safely finish");
     } else if (mode == "queued_cell") {
         Check(Integer(probe,"during_cell")==1 && map->GetCell("solid",0,0)==1,
               "callback cell edit committed inside the active contact traversal");
-    } else Check(map->GetCell("solid",0,0)==1 && RayCast::GetPhysicsWorld()->GetBodyCount()==body_count,
+    } else Check(map->GetCell("solid",0,0)==1 && RayCast::GetBodyCount()==body_count,
                  "public OnStart unexpectedly changed live collision geometry");
     engine.StepSimulation();
     if (mode == "queued_cell") Check(map->GetCell("solid",0,0)==0, "queued cell edit did not commit at the next normal boundary");

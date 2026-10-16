@@ -3,9 +3,10 @@
 
 #include "core/World.h"
 
-// Owner-thread-only scope for native operations that synchronously destroy
-// Box2D contacts while the world is unlocked. Public destruction entry points
-// reject reentry; internal cleanup may nest scopes. This is not a thread lock.
+// Scope in which physics contact and trigger callbacks are being delivered.
+// Public destruction entry points (Rigidbody/Tilemap OnDestroy, scene edits)
+// reject direct native destruction inside it; deferred removal through
+// RemoveComponent or Actor.Destroy stays available. This is not a thread lock.
 // The depth is per World.
 class PhysicsMutationGuard {
 public:

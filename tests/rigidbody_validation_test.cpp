@@ -31,10 +31,10 @@ void Configuration() {
     Reject([] { Rigidbody::ValidateNumericProperty("density", 1e-100); });
     Rigidbody body; body.has_trigger = false;
     body.width = 0; Reject([&] { body.OnStart(); });
-    Check(body.body == nullptr && !Rigidbody::HasPhysicsWorld(), "invalid shape created physics world");
+    Check(!body.HasBody() && !Rigidbody::HasPhysicsWorld(), "invalid shape created physics world");
     body.width = 1; body.density = 1e-40f;
     Reject([&] { body.OnStart(); });
-    Check(body.body == nullptr, "unsafe inverse mass created body");
+    Check(!body.HasBody(), "unsafe inverse mass created body");
     body.density = 0; body.ValidateConfiguration(); // Box2D zero-density fallback remains valid.
     body.density = 1; body.gravity_scale = 1e38f;
     Reject([&] { body.ValidateConfiguration(); });
@@ -45,12 +45,12 @@ void Configuration() {
     body.friction = -1; Reject([&] { body.ValidateConfiguration(); }); body.friction = 0.3f;
     body.bounciness = 1e38f; Reject([&] { body.ValidateConfiguration(); }); body.bounciness = 0.3f;
     body.angular_friction = -1; Reject([&] { body.ValidateConfiguration(); }); body.angular_friction = 0.3f;
-    body.OnStart(); Check(body.body != nullptr, "valid configuration could not start after rejection");
+    body.OnStart(); Check(body.HasBody(), "valid configuration could not start after rejection");
     body.OnDestroy(); Rigidbody::DestroyPhysicsWorld();
 }
 void MethodsAndForces() {
     Rigidbody body; body.has_trigger = false; body.gravity_scale = 0; body.OnStart();
-    auto *native = body.body;
+    auto native = body.body;
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const float inf = std::numeric_limits<float>::infinity();
     Reject([&] { body.SetPosition({nan, 0}); });
@@ -72,10 +72,10 @@ void MethodsAndForces() {
     Check(body.GetPosition() == Vector2(), "raw position unexpectedly changed live body");
     body.SetPosition({10, 0});
     Check(body.GetPosition() == Vector2(10, 0), "SetPosition compared pending field instead of live pose");
-    const float live_mass = body.body->GetMass();
+    const float live_mass = b2Body_GetMass(body.body);
     body.density = 1e-40f; // Pending configuration is invalid for a future reconstruction.
     body.SetEffectiveBodyType("dynamic");
-    Check(body.body == native && body.body->GetMass() == live_mass && body.density == 1e-40f,
+    Check(body.body == native && b2Body_GetMass(body.body) == live_mass && body.density == 1e-40f,
           "no-op effective type consumed pending configuration");
     Reject([&] { body.ValidateConfiguration(); });
     body.density = 1;
@@ -110,10 +110,10 @@ void MomentumCombination() {
     light.OnDestroy();
     Rigidbody heavy; heavy.has_trigger = false; heavy.gravity_scale = 0; heavy.density = 1e20f;
     heavy.ValidateConfiguration(); heavy.OnStart();
-    auto *native = heavy.body;
-    const float mass = native->GetMass();
+    auto native = heavy.body;
+    const float mass = b2Body_GetMass(native);
     Reject([&] { heavy.SetVelocity(velocity); });
-    Check(heavy.body == native && native->GetMass() == mass && heavy.GetVelocity() == Vector2() &&
+    Check(heavy.body == native && b2Body_GetMass(native) == mass && heavy.GetVelocity() == Vector2() &&
           heavy.GetPosition() == Vector2(),
           "rejected mass/velocity product changed live body");
     heavy.SetVelocity({1, 0});
@@ -136,8 +136,8 @@ struct Fixture {
 void LuaTypesAndStaleReferences() {
     Fixture fixture; Engine engine; engine.InitializeHeadless(); engine.StepSimulation();
     auto instance = ComponentManager::GetComponentByKey(1, "body"); auto *state = instance.state();
-    auto *body = instance.cast<Rigidbody *>().value(); auto *native = body->body;
-    Check(native != nullptr && body->width == 0.001f && body->height == 0.001f,
+    auto *body = instance.cast<Rigidbody *>().value(); auto native = body->body;
+    Check(B2_IS_NON_NULL(native) && body->width == 0.001f && body->height == 0.001f,
           "scene preparation rejected minimum dimensions");
     Lua(state, R"(
       r=Actor.Find('owner'):GetComponent('Rigidbody')
@@ -163,11 +163,11 @@ void LuaTypesAndStaleReferences() {
     )");
     Check(body->body == native && body->GetPosition() == Vector2(2, 3), "Lua rejection or valid control replaced body");
     ComponentManager::RemoveComponent(1, instance); ComponentManager::FinalizeFrameMutations();
-    Check(body->body == nullptr, "removed Rigidbody kept native body");
-    const auto count = RayCast::GetPhysicsWorld()->GetBodyCount();
+    Check(!body->HasBody(), "removed Rigidbody kept native body");
+    const auto count = RayCast::GetBodyCount();
     body->OnStart(); body->SetPosition({1, 1}); body->SetVelocity({1, 1});
     body->SetGravityScale(0); body->AddForce({1, 1});
-    Check(body->body == nullptr && RayCast::GetPhysicsWorld()->GetBodyCount() == count,
+    Check(!body->HasBody() && RayCast::GetBodyCount() == count,
           "stale Rigidbody reference resurrected native body");
 }
 }

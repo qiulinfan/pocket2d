@@ -80,7 +80,7 @@ void RejectedScenesKeepWorld() {
     auto old=ComponentManager::GetComponentByKey(1,"logic");auto *state=old.state();
     auto body_ref=ComponentManager::GetComponentByKey(1,"body");auto *body=body_ref.cast<Rigidbody *>().value();
     auto *old_actor=engine.GetRuntimeActorByUID(1);ActorHandle handle(old_actor);
-    auto *world=RayCast::GetPhysicsWorld();auto *native_body=body->body;const auto position=body->GetPosition();
+    auto world = RayCast::GetPhysicsWorld();auto native_body = body->body;const auto position=body->GetPosition();
     const int frame=FrameClock::GetFrameNumber();
     Lua(state,"old_instance=Actor.Find('old'):GetComponent('Stable');old_bag=old_instance.bag;DestroyedOld=0");
     const auto reject=[&](const Actor::ComponentSpec &spec){
@@ -88,7 +88,7 @@ void RejectedScenesKeepWorld() {
         Check(!accepted,"invalid scene component accepted: "+spec.type);
         Check(!engine.GetLastSceneLoadError().empty(),"scene rejection lost diagnostic");
         Check(FrameClock::GetFrameNumber()==frame && engine.GetRuntimeActorByUID(1)==old_actor && handle.IsValid(),"rejected scene invalidated old actor/frame/index");
-        Check(RayCast::GetPhysicsWorld()==world && body->body==native_body && world->GetBodyCount()==1 &&
+        Check(RayCast::GetPhysicsWorld()==world && body->body==native_body && RayCast::GetBodyCount()==1 &&
               body->GetPosition().x==position.x && body->GetPosition().y==position.y,"rejected scene altered native physics");
         Lua(state,R"(
           assert(Actor.Find("old"):GetComponent("Stable")==old_instance and old_instance.bag==old_bag)
@@ -166,7 +166,7 @@ void HostNativeEditsPreserveOldInstances() {
     Engine engine;engine.InitializeHeadless();engine.StepSimulation();
     const auto *owner=engine.GetRuntimeActorByUID(1);ActorHandle handle(owner);
     const auto specs=owner->component_specs;
-    auto body_ref=ComponentManager::GetComponentByKey(1,"body");auto *body=body_ref.cast<Rigidbody *>().value();auto *native_body=body->body;
+    auto body_ref=ComponentManager::GetComponentByKey(1,"body");auto *body=body_ref.cast<Rigidbody *>().value();auto native_body = body->body;
     auto particle_ref=ComponentManager::GetComponentByKey(1,"particles");auto *particles=particle_ref.cast<ParticleSystem *>().value();
     auto script_ref=ComponentManager::GetComponentByKey(1,"logic");auto *state=script_ref.state();
     Lua(state,"edit_old_instance=Actor.Find('old'):GetComponent('Stable');edit_old_actor=edit_old_instance.actor;edit_old_bag=edit_old_instance.bag;DestroyedOld=0");

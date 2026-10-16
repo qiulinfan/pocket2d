@@ -97,17 +97,17 @@ struct Records {
 void DetachedAndCache() {
     Fixture fixture; Engine engine; engine.InitializeHeadless(); engine.StepSimulation();
     auto *old_actor = engine.GetRuntimeActorByUID(1);
-    auto old_body_ref = ComponentManager::GetComponentByKey(1, "body"); auto *old_body = old_body_ref.cast<Rigidbody *>().value()->body;
+    auto old_body_ref = ComponentManager::GetComponentByKey(1, "body"); auto old_body = old_body_ref.cast<Rigidbody *>().value()->body;
     auto *old_map = ComponentManager::GetTilemap(2, "map");
     auto *old_animation = ComponentManager::GetSpriteAnimation(2, "animation");
     auto sprite_ref = ComponentManager::GetComponentByKey(2, "sprite"); auto *old_sprite = sprite_ref.cast<SpriteRenderer *>().value();
-    auto *world = RayCast::GetPhysicsWorld(); const int bodies = world->GetBodyCount();
+    auto world = RayCast::GetPhysicsWorld(); const int bodies = RayCast::GetBodyCount();
     const auto pose_owner = old_sprite->GetAnimationOverrideOwner(); const int frame = FrameClock::GetFrameNumber();
     const auto actor_count = engine.GetActorCount(); const int stack_top = lua_gettop(ManagerDetail::Runtime().lua_state);
     const auto unchanged = [&] {
         Check(engine.GetActorCount() == actor_count && engine.GetRuntimeActorByUID(1) == old_actor &&
             old_body_ref.cast<Rigidbody *>().value()->body == old_body && RayCast::GetPhysicsWorld() == world &&
-            world->GetBodyCount() == bodies && old_map->GetCell("ground", 0, 0) == 2 &&
+            RayCast::GetBodyCount() == bodies && old_map->GetCell("ground", 0, 0) == 2 &&
             old_sprite->GetAnimationOverrideOwner() == pose_owner && FrameClock::GetFrameNumber() == frame &&
             lua_gettop(ManagerDetail::Runtime().lua_state) == stack_top, "detached preparation changed the running world");
     };

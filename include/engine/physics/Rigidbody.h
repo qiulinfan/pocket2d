@@ -2,7 +2,7 @@
 #define RIGIDBODY_H
 
 #include "scene/ActorHandle.h"
-#include "box2d/box2d.h"
+#include "physics/PhysicsIds.h"
 #include "core/Vector2.h"
 #include <string>
 
@@ -47,9 +47,11 @@ public:
     float friction = 0.3f;
     float bounciness = 0.3f;
 
-    // backing Box2D body pointer
-    // 底层 Box2D body 指针
-    b2Body *body = nullptr;
+    // backing Box2D body, b2_nullBodyId until OnStart
+    // 底层 Box2D body
+    b2BodyId body = b2_nullBodyId;
+    // Whether `body` is a live body of the current World's physics world.
+    bool HasBody() const;
 
     // Full serialized configuration and derived mass/inertia/gravity checks.
     // Numeric authoring setters validate one field; this validates combinations
@@ -83,8 +85,9 @@ public:
     Vector2 GetUpDirection() const;
     Vector2 GetRightDirection() const;
 
-    // global physics world lifecycle
-    // 全局物理世界生命周期
+    // physics world of the current World. StepPhysicsWorld also delivers the
+    // step's contact and trigger events.
+    // 当前 World 的物理世界生命周期
     static void EnsurePhysicsWorld();
     static void DestroyPhysicsWorld();
     static bool HasPhysicsWorld();
@@ -92,6 +95,9 @@ public:
 
 private:
     bool HasLiveRuntimeBinding() const;
+    // The physics world `body` was created in; world ids carry a generation,
+    // body ids do not.
+    b2WorldId body_world_ = b2_nullWorldId;
     Vector2 accumulated_force_{0.0f, 0.0f};
     std::uint64_t force_step_ = 0;
 };

@@ -2,6 +2,7 @@
 #define COMPONENT_MANAGER_H
 
 #include "scene/Actor.h"
+#include "scene/ActorHandle.h"
 #include "core/Vector2.h"
 #include <list>
 #include <filesystem>
@@ -105,13 +106,14 @@ public:
     static void StepPhysics();
     static void FinalizeFrameMutations();
 
-    // immediate physics event dispatch helpers
+    // immediate physics event dispatch helpers. A destroyed receiver gets no
+    // callback; a destroyed `other` is still reported, with an invalid handle.
     // 立即派发物理事件的辅助接口
-    static void QueueCollisionEvent(Actor *actor, Actor *other,
+    static void QueueCollisionEvent(const ActorHandle &actor, const ActorHandle &other,
                                     const Vector2 &point,
                                     const Vector2 &relative_velocity,
                                     const Vector2 &normal, bool is_enter);
-    static void QueueTriggerEvent(Actor *actor, Actor *other,
+    static void QueueTriggerEvent(const ActorHandle &actor, const ActorHandle &other,
                                   const Vector2 &point,
                                   const Vector2 &relative_velocity,
                                   const Vector2 &normal, bool is_enter);

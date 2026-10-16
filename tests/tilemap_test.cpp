@@ -162,11 +162,11 @@ void CollisionAndLifetime(const Fixture &fixture) {
     Actor owner; owner.uid = 10;
     Tilemap map; map.actor = &owner; map.Initialize(data); map.CommitPending();
     Check(map.GetFixtureCount() == 2, "one solid row merges into one fixture per chunk");
-    auto *left_body = map.GetChunkBody(0, 0);
-    auto *right_body = map.GetChunkBody(1, 0);
-    Check(left_body && right_body, "solid chunks own static bodies");
+    const b2BodyId left_body = map.GetChunkBody(0, 0);
+    const b2BodyId right_body = map.GetChunkBody(1, 0);
+    Check(B2_IS_NON_NULL(left_body) && B2_IS_NON_NULL(right_body), "solid chunks own static bodies");
     map.ResetDiagnostics(); map.SetCell("solid", 31, 0, 0); map.CommitPending();
-    Check(map.GetChunkBody(0, 0) != left_body && map.GetChunkBody(1, 0) == right_body,
+    Check(!(map.GetChunkBody(0, 0) == left_body) && map.GetChunkBody(1, 0) == right_body,
           "solid edit replaces only affected chunk body");
     Check(map.GetDiagnostics().collision_chunk_rebuilds == 1, "solid chunk rebuild count");
     Check(!RayCast::Cast({31.5f, -1}, {0, 1}, 3), "removed solid cell leaves raycast hole");
@@ -174,7 +174,7 @@ void CollisionAndLifetime(const Fixture &fixture) {
     Tilemap other; Actor other_owner; other_owner.uid = 11;
     other.actor = &other_owner; other.Initialize(data, 100, 0); other.CommitPending();
     map.enabled = false;
-    Check(map.GetChunkBody(1, 0)->IsEnabled() && !map.CollectVisible(0, 0, 64, 1).empty(),
+    Check(b2Body_IsEnabled(map.GetChunkBody(1, 0)) && !map.CollectVisible(0, 0, 64, 1).empty(),
           "desired disable must not hide rendering before collision commit");
     map.CommitPending();
     Check(!RayCast::Cast({32.5f, -1}, {0, 1}, 3), "disabled map removes collision proxies");
@@ -182,14 +182,14 @@ void CollisionAndLifetime(const Fixture &fixture) {
           "disabled map remains queryable without rendering");
     map.SetCell("solid", 32, 0, 0); map.CommitPending();
     map.enabled = true;
-    Check(!map.GetChunkBody(1, 0)->IsEnabled() && map.CollectVisible(0, 0, 64, 1).empty(),
+    Check(!b2Body_IsEnabled(map.GetChunkBody(1, 0)) && map.CollectVisible(0, 0, 64, 1).empty(),
           "desired enable must not reveal rendering before collision commit");
     map.CommitPending();
-    Check(map.GetChunkBody(1, 0)->IsEnabled() && !map.CollectVisible(0, 0, 64, 1).empty(),
+    Check(b2Body_IsEnabled(map.GetChunkBody(1, 0)) && !map.CollectVisible(0, 0, 64, 1).empty(),
           "enable commit changes rendering and collision together");
     Check(!RayCast::Cast({32.5f, -1}, {0, 1}, 3) && RayCast::Cast({33.5f, -1}, {0, 1}, 3),
           "reenabling uses current committed cells");
-    map.ResetDiagnostics(); auto *unchanged = map.GetChunkBody(1, 0);
+    map.ResetDiagnostics(); const b2BodyId unchanged = map.GetChunkBody(1, 0);
     map.CommitPending(0, 10);
     Check(map.GetChunkBody(1, 0) == unchanged && map.GetDiagnostics().collision_chunk_rebuilds == 0,
           "translation updates body transform without geometry rebuild");
@@ -202,77 +202,71 @@ void CollisionAndLifetime(const Fixture &fixture) {
     Check(RayCast::Cast({132.5f, -1}, {0, 1}, 3).has_value(), "destroying one map preserves another");
     other.OnDestroy();
 }
+b2BodyId CreatePlayer(b2WorldId world, float x, float y) {
+    b2BodyDef definition = b2DefaultBodyDef();
+    definition.type = b2_dynamicBody; definition.position = {x, y};
+    definition.gravityScale = 0; definition.fixedRotation = true;
+    const b2BodyId player = b2CreateBody(world, &definition);
+    b2ShapeDef shape = b2DefaultShapeDef();
+    const b2Circle circle{{0, 0}, 0.25f};
+    b2CreateCircleShape(player, &shape, &circle);
+    return player;
+}
+void Step(b2WorldId world) { b2World_Step(world, 1.0f / 60, 4); }
 void RealPassageAndCallback(const Fixture &fixture) {
     Rigidbody::DestroyPhysicsWorld();
     auto data = fixture.Data(8, 4);
     for (int y = 0; y < 4; ++y) data.solid.cells[y * 8 + 4] = 5;
     Actor owner; owner.uid = 10;
     Tilemap map; map.actor = &owner; map.Initialize(data); map.CommitPending();
-    auto *world = RayCast::GetPhysicsWorld();
-    b2BodyDef definition; definition.type = b2_dynamicBody; definition.position.Set(3.5f, 1.5f);
-    definition.gravityScale = 0; definition.fixedRotation = true;
-    auto *player = world->CreateBody(&definition);
-    b2CircleShape circle; circle.m_radius = 0.25f;
-    player->CreateFixture(&circle, 1);
-    for (int i = 0; i < 30; ++i) { player->SetLinearVelocity({6, 0}); world->Step(1.0f / 60, 8, 3); }
-    Check(player->GetPosition().x <= 3.80f, "real Box2D wall must stop player");
+    const b2WorldId world = RayCast::GetPhysicsWorld();
+    b2BodyId player = CreatePlayer(world, 3.5f, 1.5f);
+    for (int i = 0; i < 30; ++i) { b2Body_SetLinearVelocity(player, {6, 0}); Step(world); }
+    Check(b2Body_GetPosition(player).x <= 3.80f, "real Box2D wall must stop player");
     map.SetCell("solid", 4, 1, 0); map.CommitPending();
-    for (int i = 0; i < 30; ++i) { player->SetLinearVelocity({6, 0}); world->Step(1.0f / 60, 8, 3); }
-    Check(player->GetPosition().x > 4.5f, "real player must pass opened cell");
-    world->DestroyBody(player);
+    for (int i = 0; i < 30; ++i) { b2Body_SetLinearVelocity(player, {6, 0}); Step(world); }
+    Check(b2Body_GetPosition(player).x > 4.5f, "real player must pass opened cell");
+    b2DestroyBody(player);
     map.SetCell("solid", 4, 1, 5); map.CommitPending();
-    struct Listener : b2ContactListener {
-        Tilemap *map = nullptr; bool called = false; int during = 0;
-        void BeginContact(b2Contact *) override {
-            if (called) return;
-            called = true; map->SetCell("solid", 4, 1, 0);
-            during = *map->GetCell("solid", 4, 1);
-        }
-    } listener;
-    listener.map = &map; world->SetContactListener(&listener);
-    player = world->CreateBody(&definition); player->CreateFixture(&circle, 1);
-    for (int i = 0; i < 30 && !listener.called; ++i) {
-        player->SetLinearVelocity({6, 0}); world->Step(1.0f / 60, 8, 3);
+    // Contact events are handled after the step; an edit made while handling
+    // them stays pending until the next commit.
+    player = CreatePlayer(world, 3.5f, 1.5f);
+    bool called = false; int during = 0;
+    for (int i = 0; i < 30 && !called; ++i) {
+        b2Body_SetLinearVelocity(player, {6, 0}); Step(world);
+        if (b2World_GetContactEvents(world).beginCount == 0) continue;
+        called = true; map.SetCell("solid", 4, 1, 0);
+        during = *map.GetCell("solid", 4, 1);
     }
-    Check(listener.called && listener.during == 5 && map.GetCell("solid", 4, 1) == 5,
-          "physics callback writes must remain pending for the completed physics step");
+    Check(called && during == 5 && map.GetCell("solid", 4, 1) == 5,
+          "contact handler writes must remain pending for the completed physics step");
     map.CommitPending();
     Check(map.GetCell("solid", 4, 1) == 0, "next safe commit applies callback edit");
-    world->SetContactListener(nullptr); world->DestroyBody(player); map.OnDestroy();
+    b2DestroyBody(player); map.OnDestroy();
 }
 void EnabledCommitSnapshot(const Fixture &fixture) {
     Rigidbody::DestroyPhysicsWorld();
     auto data = fixture.Data(64, 1);
     data.solid.cells[1] = 5; data.solid.cells[33] = 5;
     Tilemap map; map.Initialize(data); map.CommitPending();
-    auto *world = RayCast::GetPhysicsWorld();
-    struct Listener : b2ContactListener {
-        Tilemap *map = nullptr; bool called = false;
-        void EndContact(b2Contact *) override { called = true; map->enabled = true; }
-    } listener;
-    listener.map = &map; world->SetContactListener(&listener);
-    struct ResetListener {
-        b2World *world;
-        ~ResetListener() { world->SetContactListener(nullptr); }
-    } reset_listener{world};
-    std::vector<b2Body *> players;
-    for (float x : {1.5f, 33.5f}) {
-        b2BodyDef body; body.type = b2_dynamicBody; body.position.Set(x, -0.1f);
-        auto *player = world->CreateBody(&body);
-        b2CircleShape circle; circle.m_radius = 0.25f;
-        player->CreateFixture(&circle, 1); players.push_back(player);
-    }
-    world->Step(1.0f / 60, 8, 3);
+    const b2WorldId world = RayCast::GetPhysicsWorld();
+    std::vector<b2BodyId> players;
+    for (float x : {1.5f, 33.5f}) players.push_back(CreatePlayer(world, x, -0.1f));
+    Step(world);
     map.enabled = false; map.CommitPending();
-    Check(listener.called && map.enabled, "EndContact must queue the next desired enabled value");
-    Check(!map.GetChunkBody(0, 0)->IsEnabled() && !map.GetChunkBody(1, 0)->IsEnabled() &&
+    Check(!b2Body_IsEnabled(map.GetChunkBody(0, 0)) && !b2Body_IsEnabled(map.GetChunkBody(1, 0)) &&
           map.CollectVisible(0, 0, 64, 1).empty(),
-          "one enabled snapshot must apply to all bodies and rendering despite callback writes");
+          "one enabled snapshot must apply to all bodies and rendering");
+    // Disabling ended both touches; Box2D reports that after the next step.
+    Step(world);
+    Check(b2World_GetContactEvents(world).endCount == 2, "disabling the map must end both contacts");
+    map.enabled = true;
+    Check(!b2Body_IsEnabled(map.GetChunkBody(0, 0)) && map.CollectVisible(0, 0, 64, 1).empty(),
+          "an enabled write from an end-contact handler waits for the next commit");
     map.CommitPending();
-    Check(map.GetChunkBody(0, 0)->IsEnabled() && map.GetChunkBody(1, 0)->IsEnabled() &&
+    Check(b2Body_IsEnabled(map.GetChunkBody(0, 0)) && b2Body_IsEnabled(map.GetChunkBody(1, 0)) &&
           !map.CollectVisible(0, 0, 64, 1).empty(), "callback enabled write applies on next commit");
-    world->SetContactListener(nullptr);
-    for (auto *player : players) world->DestroyBody(player);
+    for (const b2BodyId player : players) b2DestroyBody(player);
     map.OnDestroy();
 }
 } // namespace

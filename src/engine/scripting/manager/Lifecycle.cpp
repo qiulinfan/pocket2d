@@ -170,6 +170,14 @@ void DispatchContact(Actor::UID uid, const Collision &collision, const char *met
             targets.push_back(Snapshot(uid, *component));
     for (const auto &target : targets) Invoke(target, method, &collision);
 }
+// Physics events still reach actors whose destruction is pending this frame,
+// but never a destroyed actor or a later actor reusing the UID.
+Actor *FindEventActor(const ActorHandle &handle) {
+    const auto found = Runtime().actor_by_uid.find(handle.uid);
+    if (found == Runtime().actor_by_uid.end() || found->second == nullptr) return nullptr;
+    Actor *actor = found->second;
+    return !actor->runtime_destroyed && actor->runtime_generation == handle.generation ? actor : nullptr;
+}
 void DispatchCollisionEventToActor(const PendingCollisionEvent &event) {
     DispatchContact(event.actor_uid, event.collision, event.is_enter ? "OnCollisionEnter" : "OnCollisionExit",
                     event.is_enter ? &ComponentRecord::has_on_collision_enter : &ComponentRecord::has_on_collision_exit);
@@ -511,45 +519,39 @@ void ComponentManager::FinalizePrePhysicsDestructions() {
 }
 
 // immediate physics event dispatch helpers
-void ComponentManager::QueueCollisionEvent(Actor *actor, Actor *other, const Vector2 &point,
+void ComponentManager::QueueCollisionEvent(const ActorHandle &actor, const ActorHandle &other,
+                                     const Vector2 &point,
                                      const Vector2 &relative_velocity,
                                      const Vector2 &normal, bool is_enter) {
-    if (actor == nullptr || other == nullptr) return;
-
-    auto actor_it = Runtime().actor_by_uid.find(actor->uid);
-    if (actor_it == Runtime().actor_by_uid.end() || actor_it->second == nullptr) {
-        return;
-    }
+    Actor *receiver = FindEventActor(actor);
+    if (receiver == nullptr) return;
 
     Collision collision;
-    collision.other = other;
-    collision.other_handle = ActorHandle(other);
+    collision.other = FindEventActor(other);
+    collision.other_handle = other;
     collision.point = point;
     collision.relative_velocity = relative_velocity;
     collision.normal = normal;
     DispatchCollisionEventToActor(
-        PendingCollisionEvent(actor->uid, is_enter, collision));
+        PendingCollisionEvent(receiver->uid, is_enter, collision));
 }
 
 // immediate physics event dispatch helpers
-void ComponentManager::QueueTriggerEvent(Actor *actor, Actor *other, const Vector2 &point,
-                                   const Vector2 &relative_velocity,
-                                   const Vector2 &normal, bool is_enter) {
-    if (actor == nullptr || other == nullptr) return;
-
-    auto actor_it = Runtime().actor_by_uid.find(actor->uid);
-    if (actor_it == Runtime().actor_by_uid.end() || actor_it->second == nullptr) {
-        return;
-    }
+void ComponentManager::QueueTriggerEvent(const ActorHandle &actor, const ActorHandle &other,
+                                     const Vector2 &point,
+                                     const Vector2 &relative_velocity,
+                                     const Vector2 &normal, bool is_enter) {
+    Actor *receiver = FindEventActor(actor);
+    if (receiver == nullptr) return;
 
     Collision collision;
-    collision.other = other;
-    collision.other_handle = ActorHandle(other);
+    collision.other = FindEventActor(other);
+    collision.other_handle = other;
     collision.point = point;
     collision.relative_velocity = relative_velocity;
     collision.normal = normal;
     DispatchTriggerEventToActor(
-        PendingTriggerEvent(actor->uid, is_enter, collision));
+        PendingTriggerEvent(receiver->uid, is_enter, collision));
 }
 
 // per-frame lifecycle entry points

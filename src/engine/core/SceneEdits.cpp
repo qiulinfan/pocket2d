@@ -10,6 +10,7 @@
 #include "scene/Tilemap.h"
 #include "rendering/SpriteAnimation.h"
 #include "physics/Rigidbody.h"
+#include "physics/PhysicsMutationGuard.h"
 #include "physics/RayCast.h"
 #include "../scripting/manager/Internal.h"
 #include <rapidjson/encodings.h>
@@ -364,7 +365,7 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
     struct Transition {bool &flag;explicit Transition(bool &value):flag(value){flag=true;}~Transition(){flag=false;}} transition(scene_transition_active_);
     try {
         Require(Runtime().lua_state&&Runtime().scene_actors==&actors,"scene edit requires a bound runtime");
-        Require(!RayCast::GetPhysicsWorld()||!RayCast::GetPhysicsWorld()->IsLocked(),"scene edits cannot run during a physics callback");
+        Require(!PhysicsMutationGuard::IsActive(),"scene edits cannot run during a physics callback");
         Plan plan;BuildSnapshot(plan,actors);
         for(const auto &mutation:command.mutations) {
             plan.world_cache.clear();plan.affected_cache.clear();

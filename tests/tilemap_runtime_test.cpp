@@ -200,7 +200,7 @@ void TestPreloadRejectionPreservesWorld() {
         Map()->SetCell("ground",8,8,4);driver.Step(1);
         const auto generation=engine.GetRuntimeActorByUID(10)->runtime_generation;
         const auto count=engine.GetActorCount();
-        const auto bodies=RayCast::GetPhysicsWorld()->GetBodyCount();
+        const auto bodies=RayCast::GetBodyCount();
         auto candidate=SceneFormat::LoadSceneAsset("farm");
         candidate.scene_name="rejected_map_candidate";
         auto &terrain=candidate.actors.front();
@@ -215,7 +215,7 @@ void TestPreloadRejectionPreservesWorld() {
                   engine.GetRuntimeActorByUID(10)->runtime_generation==generation,
               "failed map scene load replaced old actor generations");
         Check(Map()->GetCell("ground",8,8)==4,"failed scene load lost old gameplay cell edits");
-        Check(RayCast::GetPhysicsWorld()!=nullptr && RayCast::GetPhysicsWorld()->GetBodyCount()==bodies,
+        Check(RayCast::HasPhysicsWorld() && RayCast::GetBodyCount()==bodies,
               "failed scene load destroyed old collision bodies");
         Check(engine.GetCurrentSceneName()=="farm","failed scene load changed active scene name");
         driver.Step(1);
@@ -261,7 +261,7 @@ void TestPreloadAssetRangePreservesWorld(const std::filesystem::path &fixture) {
         driver.Step(1);
         const auto generation=engine.GetRuntimeActorByUID(10)->runtime_generation;
         const auto actor_count=engine.GetActorCount();
-        const auto body_count=RayCast::GetPhysicsWorld()->GetBodyCount();
+        const auto body_count=RayCast::GetBodyCount();
         const auto revision=Map()->GetRevision();
         auto candidate=SceneFormat::LoadSceneAsset("farm");
         candidate.scene_name=item.name;
@@ -281,7 +281,7 @@ void TestPreloadAssetRangePreservesWorld(const std::filesystem::path &fixture) {
         Check(Map()->GetCell("ground",8,8)==4 && Map()->GetRevision()==revision &&
                   Map()->map_resource=="farm.tilemap.json",
               std::string(item.name)+": failed preload lost old map state");
-        Check(RayCast::GetPhysicsWorld()!=nullptr && RayCast::GetPhysicsWorld()->GetBodyCount()==body_count,
+        Check(RayCast::HasPhysicsWorld() && RayCast::GetBodyCount()==body_count,
               std::string(item.name)+": failed preload destroyed old bodies");
         Check(engine.GetCurrentSceneName()=="farm",std::string(item.name)+": failed preload changed scene identity");
         driver.Step(1);
@@ -306,12 +306,12 @@ void TestDisableAndRemoveCollision() {
     auto expired_map=ComponentManager::GetComponentByKey(10,"map");
     Check(ComponentManager::SetRuntimeComponentPropertyValue(3,"logic","enabled",false),"could not stop fixture logic before deleting its map");
     Check(engine.DeleteRuntimeActorByUID(10),"map actor removal failed");
-    Check(RayCast::GetPhysicsWorld()->GetBodyCount()==1,"deleting map leaked chunk bodies");
+    Check(RayCast::GetBodyCount()==1,"deleting map leaked chunk bodies");
     driver.Step(30,{SDL_SCANCODE_RIGHT});
     Check(PlayerX()>8.5f,"deleted map left active wall collision");
     Check(!expired_map.cast<Tilemap *>().value()->SetCell("solid",16,9,5),"expired map accepted a mutation");
     expired_map.cast<Tilemap *>().value()->OnStart();expired_map.cast<Tilemap *>().value()->CommitPending();
-    Check(RayCast::GetPhysicsWorld()->GetBodyCount()==1,"expired map resurrected collision bodies");
+    Check(RayCast::GetBodyCount()==1,"expired map resurrected collision bodies");
 }
 
 void TestRejectedPreloadDoesNotPoisonRebuild(const std::filesystem::path &fixture) {

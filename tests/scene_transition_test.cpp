@@ -188,7 +188,7 @@ void TestEditorSelection(){
  // native/Lua identities while checking that stronger coordinator contract.
  const auto reference=Probe();const luabridge::LuaRef inventory=reference["bag"];
  const auto body_reference=ComponentManager::GetComponentByKey(1,"body");
- auto *native_body=body_reference.cast<Rigidbody *>().value()->body;
+ auto native_body = body_reference.cast<Rigidbody *>().value()->body;
  const auto position=body_reference.cast<Rigidbody *>().value()->GetPosition();
  const int starts_before=Value("starts"),updates_before=Value("updates"),destroys_before=Global("DESTROYS");
  Check(!author.SetComponentType(0,"probe","MissingComponent"),"synchronized authoring accepted an invalid new type");

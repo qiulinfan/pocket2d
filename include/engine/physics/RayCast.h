@@ -1,9 +1,10 @@
 #ifndef RAYCAST_H
 #define RAYCAST_H
 
-#include "box2d/box2d.h"
 #include "core/Vector2.h"
+#include "physics/PhysicsIds.h"
 #include "scene/ActorHandle.h"
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -20,37 +21,50 @@ struct HitResult {
 };
 
 enum class FixtureKind {
-    // normal collider fixture
+    // normal collider shape
     // 普通碰撞体
     Collider,
 
-    // sensor-only trigger fixture
+    // sensor-only trigger shape
     // 仅触发事件的 trigger
     Trigger,
 
-    // placeholder fixture, ignored by raycast hit results
-    // 占位 fixture, 不会作为 raycast 命中结果返回
+    // placeholder shape, ignored by raycast hit results
+    // 占位 shape, 不会作为 raycast 命中结果返回
     Phantom,
 };
 
 struct FixtureMetadata {
-    // owning actor and logical fixture type
-    // 所属 actor 和逻辑 fixture 类型
+    // owning actor and logical shape type. The handle stays meaningful after
+    // the actor is destroyed, when Box2D may still report end events.
+    // 所属 actor 和逻辑 shape 类型
     Actor *actor = nullptr;
+    ActorHandle actor_handle;
     FixtureKind kind = FixtureKind::Collider;
 };
 
-// global physics world accessors
-// 全局物理世界访问接口
-b2World *GetPhysicsWorld();
-void SetPhysicsWorld(b2World *world);
+// The current World's Box2D world, or b2_nullWorldId when it has none.
+// 当前 World 的物理世界
+b2WorldId GetPhysicsWorld();
+bool HasPhysicsWorld();
+void SetPhysicsWorld(b2WorldId world);
+// Forget the world and all shape records without destroying the world.
 void ClearPhysicsState();
+// Number of bodies in the current physics world (0 without a world).
+int GetBodyCount();
 
-// register and query fixture metadata
-// 注册和查询 fixture 元数据
-void RegisterFixture(b2Fixture *fixture, Actor *actor, FixtureKind kind);
-void UnregisterFixture(b2Fixture *fixture);
-const FixtureMetadata *FindFixtureMetadata(const b2Fixture *fixture);
+// register and query shape metadata
+// 注册和查询 shape 元数据
+void RegisterShape(b2ShapeId shape, Actor *actor, FixtureKind kind);
+// Call before destroying a shape. Box2D reports the end of its contacts after
+// the next step, so the record stays resolvable until that step's events have
+// been dispatched; see ReleaseRetiredShapes.
+void UnregisterShape(b2ShapeId shape);
+const FixtureMetadata *FindShapeMetadata(b2ShapeId shape);
+// Called once per step: records retired before `step_index` are dropped.
+void ReleaseRetiredShapes(std::uint64_t step_index);
+std::uint64_t GetStepIndex();
+void AdvanceStepIndex();
 
 // nearest hit only
 // 只返回最近命中

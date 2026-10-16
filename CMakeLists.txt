@@ -33,6 +33,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(GameEngineSDL)
 game_engine_ensure_sdl()
+include(GameEngineBox2D)
 
 add_library(game_engine_vendor_headers INTERFACE)
 target_compile_definitions(game_engine_vendor_headers INTERFACE
@@ -91,7 +92,7 @@ target_include_directories(
 target_link_libraries(
     engine_runtime
     PUBLIC
-        box2d_runtime
+        box2d::box2d
         game_engine_sdl_headers
         game_engine_vendor_headers
         Threads::Threads

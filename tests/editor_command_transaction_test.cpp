@@ -71,7 +71,7 @@ struct Identity {
     luabridge::LuaRef nested = good["state"];
     luabridge::LuaRef body = ComponentManager::GetComponentByKey(1, "body");
     ActorHandle actor{Runtime().actor_by_uid.at(1)};
-    b2Body *native_body = body.cast<Rigidbody *>().value()->body;
+    b2BodyId native_body = body.cast<Rigidbody *>().value()->body;
     void AssertRetained(const Engine &engine) const {
         Check(actor.IsValid() && actor.Resolve() == engine.GetRuntimeActorByUID(1), "original Actor identity changed");
         auto current = ComponentManager::GetComponentByKey(1, "good");
@@ -233,7 +233,7 @@ void TestSessionCoordinator() {
     Check(session.TogglePlayPause() && session.IsPlayModePaused(), "pause play snapshot");
     const auto paused_frame = FrameClock::GetFrameNumber();
     Identity play_identity;
-    Check(play_identity.native_body != nullptr, "paused play must retain an actual initialized Box2D body");
+    Check(B2_IS_NON_NULL(play_identity.native_body), "paused play must retain an actual initialized Box2D body");
     auto &play_document = session.GetSceneDocument();
     SceneFormat::SceneEditCommand play_receipt;
     Check(play_document.SetActorName(0, "paused_play_edit", &play_receipt), "paused play document edit rejected");
