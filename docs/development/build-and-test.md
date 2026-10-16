@@ -72,11 +72,10 @@ Benchmark output belongs under ignored `build/`. Report workload counts,
 compiler/build mode and repeated timing distributions. Do not turn machine
 speed thresholds into correctness tests.
 
-Dear ImGui core and SDL3 backends come from upstream `v1.92.8-docking`, commit
-`b61e56346a92cfcaf1f43a545ca37b0b32239654`. Its license and the existing local
-`imconfig.h` are retained. The older SDL2 vendor files are no longer linked;
-removing historical vendor packages and producing distributable bundles remain
-packaging work, not proof of cross-platform readiness.
+Dear ImGui core and SDL backends come from upstream tag `v1.93.0-docking`,
+unmodified, with its license and stock `imconfig.h`. The historical SDL2 vendor
+packages have been removed; producing distributable bundles remains packaging
+work, not proof of cross-platform readiness.
 
 A bounded graphical smoke can save the engine's rendered target before
 presentation and exit without leaving a window open:

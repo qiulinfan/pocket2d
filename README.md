@@ -1,7 +1,7 @@
 # <img src="docs/icon.png" alt="Pocket2D icon" width="10%"> Pocket2D
 
-Pocket2D is a cross-platform 2D runtime + editor game engine, written in C++17 on top of
-SDL2, Lua, Box2D, Dear ImGui, and JSON scene assets. It hosts Lua for game logic scripting.
+Pocket2D is a cross-platform 2D runtime + editor game engine, written in C++26 on top of
+SDL3, Lua, Box2D 3, Dear ImGui, and JSON scene assets. It hosts Lua for game logic scripting.
 It is a variant of the [A2 Engine](https://a2engine.org/). For basic usage, check the documentation of A2 engine for the APIs.
 
 Pocket2D Lua API documentation lives here:
