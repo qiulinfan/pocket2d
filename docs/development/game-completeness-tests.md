@@ -1,7 +1,7 @@
 # 整游戏完整度测试：Village_Rim 迁移与 PocketTerraria
 
 日期：2026-10-16。两个项目都在 `Projects/` 下（引擎仓库忽略，各自是本地 Git 仓库，
-不推送）：`Projects/VillageRim` 迁移 Unity 版 Village_Rim 的真实世界，
+不推送）：`Projects/VillageRim` 迁移 Unity 版 Village_Rim 的真实世界（`pocket import unity` 导入），
 `Projects/PocketTerraria` 用引擎从零做一个类泰拉瑞亚沙盒（Boss 只做克苏鲁之眼）。
 目的不是交付完整游戏，而是用真实内容找出引擎缺口。两者都有通过 agent 协议、
 用真实输入（动作、按键、鼠标）游玩的 playtest。
@@ -50,20 +50,21 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
 | 没有寻路（VR，原 NavMesh） | `Physics.FindPath`：网格 A*，静态碰撞体与实心 tile 阻挡，部分路径 |
 | Lua 光照每帧 ~1,450 次绘制（PT） | `Tilemap:ComputeLight` 原生光照写入 `dynamic:` 动态图片；PT headless 1.18 → 0.076 ms/帧 |
 | 物品 kind 固定、无图标（PT） | 新增 `tool`/`placeable`/`consumable` 与 `icon` 字段 |
+| Tilemap 只有 ground/solid 两层（VR、PT） | 至多 6 个额外命名装饰层（各有排序，只有 solid 碰撞）；PT 背景墙改用独立 `walls` 层 |
+| Unity 导入器只在游戏项目里（VR） | `pocket import unity`：场景与 prefab 实例、tilemap、精灵、碰撞体、实体；VR 重新导入逐字节一致 |
 
 （VR = Village_Rim，PT = PocketTerraria。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
-## 仍存在的缺口
+## 仍存在的缺口与暂不修改的原因
 
-- **Tilemap 只有 ground/solid 两层**：Village_Rim 的 49 个 Unity tilemap 对应 49 个 actor；
-  泰拉瑞亚的背景墙和树干共用 ground 层。Unity Sprite 形状碰撞近似为整格；有缩放/旋转的
-  tilemap（2 个）被忽略。
-- **新实例化的 actor 下一帧才 OnStart**：同一帧内 OnStart 设置的字段为空，agent 观测也为空值。
-  这是现有生命周期设计（类似 Unity 的 Start），脚本需在使用前检查。
-- **agent 指令预算按请求计算**：长 step 需拆分或用 `--instruction-budget` 调大；属于设计内的隔离。
-- **Unity 导入器位于 Village_Rim 项目内**（`tools/import_unity_world.py`），尚未成为 `pocket import unity`。
-- **Village_Rim 未迁移**：对话/任务、背包与快捷栏 UI、祭坛与元素、入侵、Boss、农场、存档、音频；
-  原工程玩家出生点位于水面碰撞体内（运行时另有放置逻辑，未迁移）。
+- **新实例化的 actor 下一帧才 OnStart**：与 Unity 的 `Start` 语义一致（Unity 另有立即执行的
+  `Awake`）。同一帧内 OnStart 设置的字段为空，agent 观测也为空值；脚本可把初值写成类型默认字段，
+  或在使用前检查。是否增加立即执行的 `OnAwake` 回调，需要单独评估生命周期影响。
+- **agent 指令预算按请求计算**：属于 worker 隔离设计；长 step 拆分或用 `--instruction-budget` 调大。
+- **导入近似**：Unity Sprite 形状碰撞按整格；有缩放/旋转的 tilemap、九宫格精灵和 trigger 只记录在
+  `import_report.json`。
+- **Village_Rim 未迁移的玩法**：对话/任务、背包与快捷栏 UI、祭坛与元素、入侵、Boss、农场、存档、音频；
+  原工程玩家出生点位于水面碰撞体内（运行时另有放置逻辑，未迁移）。这些是内容移植，不是已知的引擎缺口。
 
 ## 性能
 
