@@ -1109,6 +1109,7 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 std::optional<EventBus::PublishedEvent> matched_event;
                 for (int i = 0; i < frames && engine->IsRunning() && !matched; ++i) {
                     const auto scene_attempt = engine->GetSceneLoadAttemptRevision();
+                    ScriptBudget::ReplenishForTick();
                     engine->StepSimulation();
                     ++advanced;
                     if (engine->RequiresSceneReset() && !engine->GetLastSceneEditError().empty())

@@ -147,6 +147,11 @@ void BeginRequest() {
     }
 }
 
+void ReplenishForTick() {
+    if (Budget().request_depth != 0 && Budget().failure == Failure::None)
+        Budget().remaining = Budget().limits.instruction_limit;
+}
+
 void EndRequest() {
     if (Budget().request_depth != 0) --Budget().request_depth;
 }

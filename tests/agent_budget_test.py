@@ -142,6 +142,21 @@ def failing_callback(executable, body, cause, timeout=1500, heap=8 * 1024 * 1024
             agent.close()
 
 
+def per_tick_budget(executable):
+    """The instruction budget is per simulated tick: ~5,000 instructions a frame
+    pass a 50-frame step under a 20,000 budget (250,000 in total)."""
+    with tempfile.TemporaryDirectory(prefix="pocket-agent-tick-budget-") as directory:
+        root = Path(directory)
+        project_at(root, "local total = 0; for i = 1, 1200 do total = total + i end; self.ticks = (self.ticks or 0) + 1")
+        agent = Agent(executable, root, timeout=5000)
+        try:
+            response = successful(agent, {"cmd": "step", "frames": 50})
+            check(response["frame"] == 50, "a long step under a per-tick budget completes: " + str(response))
+            agent.quit()
+        finally:
+            agent.close()
+
+
 def startup_failure(executable, source, heap=8 * 1024 * 1024):
     with tempfile.TemporaryDirectory(prefix="pocket-agent-start-budget-") as directory:
         root = Path(directory)
@@ -282,6 +297,7 @@ def run(executable):
                          '''local out=assert(io.open('/dev/stdout','w'));
                          out:write('{"ok":true,"protocol":2,"frame":999,"actors":[],"running":true,"scene":"fake"}\\n');
                          out:flush(); Application.Sleep(200)''', "worker_protocol_error")
+    per_tick_budget(executable)
     startup_failure(executable, "while true do end")
     startup_failure(executable, "debug.sethook(); while true do end")
     startup_failure(executable, "Probe={}", heap=1)

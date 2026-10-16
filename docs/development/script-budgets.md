@@ -18,14 +18,14 @@
 
 | 限额 | 默认值 | 实际限制范围 |
 | --- | --- | --- |
-| `instruction-budget` | 50,000,000 | 一个 worker 请求作用域内、Lua count hook 报告的 VM 指令。预算模式 hook interval 为 1；同一作用域的生命周期、嵌套事件和协程共享计数。不是 C++ 指令、解析时间或墙钟时间。 |
+| `instruction-budget` | 50,000,000 | Lua count hook 报告的 VM 指令：`step`/`run_until` 每推进一个模拟 tick 重新补满（按 tick 计），其他请求按整个请求作用域计。预算模式 hook interval 为 1；同一作用域的生命周期、嵌套事件和协程共享计数。不是 C++ 指令、解析时间或墙钟时间。长 step 不会因帧数累计超限，单个失控 tick 仍会失败。 |
 | `lua-heap-budget` | 64 MiB | Lua allocator 请求的存活字节；包括 Lua table/string/userdata 分配。不是进程 RSS，也不包含 allocator 额外开销、C++ 容器、SDL 纹理、Box2D、native userdata 内部另行分配的缓冲。 |
 | `request-timeout-ms` | 5,000 ms | supervisor 为完整命令设置的单一 deadline；覆盖向 worker 写入、等待执行/响应、读取响应及相应校验。初始化、reset 和 quit 也受监控。 |
 | 输入长度 | 64 KiB | 一条公共 JSONL 命令，不含换行。超长行在固定上限缓冲之外只丢弃字节，直到行结束，然后返回错误；不会污染下一条命令。 |
 | worker 响应长度 | 16 MiB | 一条内部响应的累计管道数据，包含启动握手中的初始观察。超限强制销毁 worker。 |
 | JSON 嵌套 | 64 层 | 公共命令和 worker 响应先检查深度，再使用迭代解析及 UTF-8 校验。非法或过深的 worker JSON 不递归进入宿主对象序列化。 |
 
-指令预算在最外层 `RequestScope` 才重置。较大的 hook interval 会遗漏短协程退出时尚未用完的局部倒计数，因此当前选择 interval 1；`lua_budget_test` 用大量短协程验证它们累计消耗同一配额。可信图形模式的零限额不安装 hook。预算是执行成本，不能宣传为免费检查。
+指令预算在最外层 `RequestScope` 开始时重置，`step`/`run_until` 在每个 tick 前再补满（`ScriptBudget::ReplenishForTick`，不清除已发生的失败）。较大的 hook interval 会遗漏短协程退出时尚未用完的局部倒计数，因此当前选择 interval 1；`lua_budget_test` 用大量短协程验证它们累计消耗同一配额。可信图形模式的零限额不安装 hook。预算是执行成本，不能宣传为免费检查。
 
 heap 越限采用严格、粘性的失败语义：一次分配请求将超过 cap 时，allocator 拒绝它并记录失败。即使 Lua emergency GC 后重试成功，或脚本用 `pcall` 吞下 OOM，宿主仍把该请求视为失败。free/shrink 仍可执行。请求结束只清理作用域，失败原因保留供协议层检查；新请求开始才重置指令计数/失败标志，Lua 的已有存活分配不会凭空归零。
 

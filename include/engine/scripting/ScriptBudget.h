@@ -31,6 +31,10 @@ void CloseState(lua_State *state);
 // short-lived coroutines cannot discard a partially elapsed hook interval.
 void BeginRequest();
 void EndRequest();
+// Restores the full instruction allowance inside a request, at the start of
+// each simulated tick, so a step's budget is per tick: a runaway tick still
+// fails, but a long multi-frame step does not. Never clears a failure.
+void ReplenishForTick();
 Failure GetFailure();
 const char *FailureMessage();
 std::size_t HeapBytesUsed();
