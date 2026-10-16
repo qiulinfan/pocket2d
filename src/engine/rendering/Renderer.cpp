@@ -12,6 +12,7 @@
 #include "glm/glm.hpp"
 #include "SDL3_image/SDL_image.h"
 #include <algorithm>
+#include <bit>
 #include <mutex>
 #include <deque>
 #include <filesystem>
@@ -78,18 +79,25 @@ Uint8 ClampByteU8(int value) {
     return static_cast<Uint8>(ClampByte(value));
 }
 
-// Draw order: ascending sorting_order, then submission order. Sorting 64-bit
-// keys (biased order, index) gives the stable order without moving requests.
-void BuildDrawOrder(const std::vector<ImageDrawRequest> &requests,
-                    std::vector<std::uint64_t> &order) {
+// Maps a float to an unsigned integer with the same ordering.
+std::uint32_t SortableFloatBits(float value) {
+    if (!(value == value) || value == 0.0f) value = 0.0f;  // NaN and -0 sort as 0
+    const auto bits = std::bit_cast<std::uint32_t>(value);
+    return (bits & 0x80000000u) ? ~bits : (bits | 0x80000000u);
+}
+
+// Draw order: ascending sorting_order, then sort_y, then submission order.
+// Sorting keys gives the stable order without moving requests.
+void BuildDrawOrder(const std::vector<ImageDrawRequest> &requests, std::vector<DrawOrderKey> &order) {
     order.resize(requests.size());
     for (std::size_t i = 0; i < requests.size(); ++i) {
         const auto biased = static_cast<std::uint32_t>(requests[i].sorting_order) ^ 0x80000000u;
-        order[i] = (static_cast<std::uint64_t>(biased) << 32) | static_cast<std::uint32_t>(i);
+        order[i] = {(static_cast<std::uint64_t>(biased) << 32) | SortableFloatBits(requests[i].sort_y),
+                    static_cast<std::uint32_t>(i)};
     }
     std::sort(order.begin(), order.end());
 }
-std::size_t OrderIndex(std::uint64_t key) { return static_cast<std::uint32_t>(key); }
+std::size_t OrderIndex(const DrawOrderKey &key) { return key.index; }
 
 bool CompareParticleBatchRequests(const ParticleBatchRequest &a,
                                   const ParticleBatchRequest &b) {
@@ -669,7 +677,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
     }
     SDL_SetRenderScale(renderer, output_scale_x, output_scale_y);
 
-    for (const std::uint64_t key : queues.ui_draw_order) {
+    for (const DrawOrderKey &key : queues.ui_draw_order) {
         const ImageDrawRequest &request = queues.ui_draw_requests[OrderIndex(key)];
         float texture_w = 0.0f;
         float texture_h = 0.0f;

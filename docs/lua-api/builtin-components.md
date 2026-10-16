@@ -47,6 +47,9 @@ engine and is not directly exposed as writable Lua properties.
 ### Notes
 
 - `sprite` is the image resource name, for example `images/Run.png`
+- draw order is ascending `sorting_order`; with `auto_sorting_order` set,
+  sprites of the same `sorting_order` also sort by world y (lower on screen
+  draws in front, top-down y-sorting). Remaining ties keep submission order.
 - spritesheet slicing comes from project metadata in `.engine/project/spritesheets.json`
 - custom gameplay components can store sub-sprite references as encoded strings,
   but `SpriteRenderer` itself still uses separate row / column fields

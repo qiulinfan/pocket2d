@@ -34,6 +34,10 @@ struct ImageDrawRequest {
     int b = 255;
     int a = 255;
     int sorting_order = 0;
+    // Secondary draw key within one sorting_order (ascending; world y for
+    // auto-sorted sprites, so lower sprites draw in front). Ties keep
+    // submission order.
+    float sort_y = 0.0f;
 
     // Optional spritesheet selection. Rows/columns describe the project-level
     // grid metadata; row/column select one cell using 1-based indexing.
@@ -41,6 +45,16 @@ struct ImageDrawRequest {
     int spritesheet_columns = 1;
     int sprite_row = 1;
     int sprite_column = 1;
+};
+
+// (sorting_order, sort_y) packed into one sortable integer, plus the request
+// index that breaks ties in submission order.
+struct DrawOrderKey {
+    std::uint64_t key = 0;
+    std::uint32_t index = 0;
+    friend bool operator<(const DrawOrderKey &a, const DrawOrderKey &b) {
+        return a.key != b.key ? a.key < b.key : a.index < b.index;
+    }
 };
 
 struct PixelDrawRequest {
@@ -176,8 +190,8 @@ struct RenderQueueState {
     std::vector<ParticleBatchRequest> scene_particle_batches;
     std::vector<ImageDrawRequest> ui_draw_requests;
     // Draw order scratch, reused across frames; see BuildDrawOrder.
-    std::vector<std::uint64_t> scene_draw_order;
-    std::vector<std::uint64_t> ui_draw_order;
+    std::vector<DrawOrderKey> scene_draw_order;
+    std::vector<DrawOrderKey> ui_draw_order;
     std::vector<PixelDrawRequest> pixel_draw_requests;
     std::vector<TextDrawRequest> text_draw_requests;
 };

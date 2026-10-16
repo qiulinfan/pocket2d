@@ -66,7 +66,8 @@ void SpriteRenderer::QueueDraw(float world_x, float world_y, float rotation_degr
     request.g = g;
     request.b = b;
     request.a = a;
-    request.sorting_order = auto_sorting_order ? static_cast<int>(world_y) : sorting_order;
+    request.sorting_order = sorting_order;
+    request.sort_y = auto_sorting_order ? world_y : 0.0f;
     if (animation_pose_) {
         request.spritesheet_rows = animation_pose_->rows;
         request.spritesheet_columns = animation_pose_->columns;
