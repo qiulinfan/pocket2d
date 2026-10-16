@@ -5,12 +5,13 @@ Each scenario is solved by a scripted policy that only chooses held keys, the
 same interface an RL agent or LLM player gets. The scenarios are data under
 tests/fixtures/two_world_village/scenarios.
 """
+import json
 from pathlib import Path
 import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients/python"))
-from pocket2d import PocketEnv, Scenario, ScenarioError, find_actor, read_property  # noqa: E402
+from pocket2d import PocketEnv, Scenario, ScenarioError, VectorPocketEnv, find_actor, read_property  # noqa: E402
 
 
 def check(condition, message):
@@ -194,6 +195,21 @@ def run(executable, project):
             check(episode.done and episode.info["outcome"] == "success", "route closed: %r" % episode.info)
         finally:
             env.close()
+        # Vectorized: two runtimes in parallel, next-step autoreset.
+        short = Scenario.from_dict({**{k: v for k, v in json.loads(
+            (project / "scenarios/plant_and_harvest.scenario.json").read_text()).items()}, "max_frames": 3})
+        vector = VectorPocketEnv(executable, project, short, 2, save_dir=saves)
+        try:
+            observations, infos = vector.reset(seed=5)
+            check([o["seed"] for o in observations] == [5, 6], "per-environment seeds")
+            for step in range(3):
+                observations, rewards, terminated, truncated, infos = vector.step([["right"], ["left"]])
+            check(truncated == [True, True] and [i["frame"] for i in infos] == [3, 3], "both truncate at max_frames")
+            observations, rewards, terminated, truncated, infos = vector.step([["right"], ["left"]])
+            check([i["autoreset"] for i in infos] == [True, True] and [o["frame"] for o in observations] == [0, 0]
+                  and rewards == [0.0, 0.0], "next-step autoreset")
+        finally:
+            vector.close()
     print("scenario Gym client regressions passed")
 
 

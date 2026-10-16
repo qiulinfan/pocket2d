@@ -68,5 +68,9 @@ client for direct protocol use.
 
 `tests/scenario_env_test.py` solves all three village scenarios with scripted
 key policies and checks reward accounting and episode reproducibility.
-Vectorized environments, PettingZoo multi-agent channels and LLM-player
+`VectorPocketEnv(executable, project, scenario, num_envs)` runs one runtime
+process per sub-environment and steps them in parallel threads. Its `reset`
+and `step` return per-environment lists (observations are not stacked), seeds
+are `seed + i`, and autoreset follows Gymnasium 1.x's next-step mode
+(`infos[i]["autoreset"]`). PettingZoo multi-agent channels and LLM-player
 evaluation are not implemented yet.
