@@ -126,6 +126,14 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   renderer, main-thread CPU median: fixed 4.03 → 3.74 ms, scrolling 4.65 →
   4.04 ms. A further attempt to cache actor and component pointers in the
   per-kind lists showed no measurable gain and was not kept.
+- Text draws through SDL_ttf 3's renderer text engine: laid-out `TTF_Text`
+  objects share one glyph atlas per renderer instead of rasterizing a surface
+  and creating a texture per string, and the text cache evicts in one pass.
+  `text_benchmark` (280 `Text.Draw` per frame, 240 changing each frame,
+  Release, two runs per backend): main-thread CPU p50 5.29/5.47 ms
+  (gpu/metal) before, 3.48–4.08 / 3.15–3.30 ms after. Against the old path,
+  26 of 518,400 pixels differ at glyph edges by at most 18/255; no pixel test
+  covers text.
 
 ## Completed and verified in this slice
 

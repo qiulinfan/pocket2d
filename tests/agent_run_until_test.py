@@ -22,6 +22,7 @@ def write_project(root):
         self.ticks = self.ticks + 1
         self.actor:GetComponent("Transform").x = self.ticks
         Event.Publish("tick", self.ticks)
+        Text.Draw("tick " .. self.ticks, 4, 4, "missing-font-uses-system", 12, 255, 255, 255, 255)
         if self.ticks == 10 then
           Event.Publish("tick_10", {count = self.ticks, at = Vector2(1.5, 2), who = self.actor,
             fn = function() end, list = {1, 2, 3}, deep = {a = {b = {c = {d = 1}}}}})
@@ -118,6 +119,10 @@ def run(executable):
             check([(e["type"], e["payload"]) for e in stepped["events"]] == [("tick", 13), ("tick", 14), ("tick", 15)],
                   "every event type in order")
             check("events" not in successful(agent, {"cmd": "step"}), "events are opt-in")
+            # Text through the glyph atlas survives offscreen renderer re-creation.
+            for size in ({"width": 64, "height": 48}, {"width": 32, "height": 24}, {"width": 64, "height": 48}):
+                check(successful(agent, {"cmd": "step", "image": size})["image"]["width"] == size["width"],
+                      "image with text at %r" % size)
             result = successful(agent, {"cmd": "run_until", "max_frames": 5, "events": ["tick"],
                                         "until": [{"event": "never"}]})
             check(len(result["events"]) == 5, "run_until reports events too")

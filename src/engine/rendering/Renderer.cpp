@@ -150,10 +150,8 @@ bool IsPivotBoundOutsideViewport(const SDL_FRect &dst, const SDL_FPoint &pivot,
 }
 
 void DestroyCachedTextTexture(CachedTextTexture &cached) {
-    if (cached.texture != nullptr) {
-        SDL_DestroyTexture(cached.texture);
-        cached.texture = nullptr;
-    }
+    if (cached.text != nullptr) TTF_DestroyText(cached.text);
+    cached.text = nullptr;
 }
 
 SDL_Texture *CreateDefaultParticleTexture(SDL_Renderer *renderer) {
@@ -212,34 +210,35 @@ RenderQueueState &Renderer::Queues() {
 
 void Renderer::PruneTextCache() {
     const Uint32 now = SDL_GetTicks();
-
     for (auto it = text_cache.begin(); it != text_cache.end();) {
         CachedTextTexture &cached = it->second;
-        const Uint32 age = now - cached.last_used_timestamp;
-        if (cached.last_used_timestamp != 0 &&
-            age > kTextCacheUnusedLifetimeMs) {
+        if (cached.last_used_timestamp != 0 && now - cached.last_used_timestamp > kTextCacheUnusedLifetimeMs) {
             DestroyCachedTextTexture(cached);
             it = text_cache.erase(it);
             continue;
         }
         ++it;
     }
-
-    while (text_cache.size() > kMaxTextCacheEntries) {
-        auto oldest_it = text_cache.end();
-        for (auto it = text_cache.begin(); it != text_cache.end(); ++it) {
-            if (oldest_it == text_cache.end() ||
-                it->second.last_used_timestamp <
-                    oldest_it->second.last_used_timestamp) {
-                oldest_it = it;
-            }
-        }
-        if (oldest_it == text_cache.end()) {
-            break;
-        }
-        DestroyCachedTextTexture(oldest_it->second);
-        text_cache.erase(oldest_it);
+    if (text_cache.size() <= kMaxTextCacheEntries) return;
+    // Evict the least recently used entries in one pass.
+    std::vector<std::pair<Uint32, std::string>> by_age;
+    by_age.reserve(text_cache.size());
+    for (const auto &[key, cached] : text_cache) by_age.emplace_back(cached.last_used_timestamp, key);
+    const std::size_t excess = text_cache.size() - kMaxTextCacheEntries;
+    std::nth_element(by_age.begin(), by_age.begin() + excess, by_age.end());
+    for (std::size_t i = 0; i < excess; ++i) {
+        const auto found = text_cache.find(by_age[i].second);
+        DestroyCachedTextTexture(found->second);
+        text_cache.erase(found);
     }
+}
+
+void Renderer::ResetTextEngine() {
+    for (auto &entry : text_cache) DestroyCachedTextTexture(entry.second);
+    text_cache.clear();
+    if (text_engine != nullptr) TTF_DestroyRendererTextEngine(text_engine);
+    text_engine = nullptr;
+    text_engine_renderer = nullptr;
 }
 
 // Initialize shared rendering backends and per-session caches.
@@ -256,6 +255,8 @@ void Renderer::Init() {
 
 // Release cached fonts, textures, and queued draw state for the session.
 void Renderer::Shutdown() {
+    // Text objects reference fonts and the engine's atlas; release them first.
+    ResetTextEngine();
     for (auto &font_family : font_cache) {
         for (auto &entry : font_family.second) {
             if (entry.second != nullptr) {
@@ -264,13 +265,6 @@ void Renderer::Shutdown() {
         }
     }
     font_cache.clear();
-
-    for (auto &entry : text_cache) {
-        if (entry.second.texture != nullptr) {
-            SDL_DestroyTexture(entry.second.texture);
-        }
-    }
-    text_cache.clear();
     Queues().text_draw_requests.clear();
 
     ClearCache();
@@ -700,57 +694,43 @@ void Renderer::RenderAndClearAllText(SDL_Renderer *renderer,
         std::max(safe_output_scale_x, safe_output_scale_y);
     SDL_SetRenderScale(renderer, safe_output_scale_x, safe_output_scale_y);
 
+    if (!Queues().text_draw_requests.empty() && text_engine_renderer != renderer) {
+        ResetTextEngine();
+        text_engine = TTF_CreateRendererTextEngine(renderer);
+        if (text_engine == nullptr)
+            LogRendererWarningOnce("ttf:engine", std::string("text engine unavailable: ") + SDL_GetError());
+        else text_engine_renderer = renderer;
+    }
+    // Glyph quads are laid out in output pixels at the rasterized size.
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
     for (const TextDrawRequest &req : Queues().text_draw_requests) {
-        if (req.font_size <= 0 || req.text.empty()) continue;
+        if (req.font_size <= 0 || req.text.empty() || text_engine == nullptr) continue;
 
         const int raster_font_size =
             std::max(1, static_cast<int>(std::lround(
                             static_cast<float>(req.font_size) *
                             raster_scale)));
-        std::ostringstream key_stream;
-        key_stream << req.font_name << '|'
-                   << raster_font_size << '|'
-                   << static_cast<int>(req.color.r) << ','
-                   << static_cast<int>(req.color.g) << ','
-                   << static_cast<int>(req.color.b) << ','
-                   << static_cast<int>(req.color.a) << '|'
-                   << req.text;
-        const std::string cache_key = key_stream.str();
+        std::string cache_key;
+        cache_key.reserve(req.font_name.size() + req.text.size() + 16);
+        cache_key.append(req.font_name).push_back('|');
+        cache_key.append(std::to_string(raster_font_size)).push_back('|');
+        cache_key.append(req.text);
 
         auto cache_it = text_cache.find(cache_key);
         if (cache_it == text_cache.end()) {
             TTF_Font *font = GetFont(req.font_name, raster_font_size);
             if (font == nullptr) continue;
-
-            SDL_Surface *surface =
-                TTF_RenderText_Blended(font, req.text.c_str(), req.text.size(), req.color);
-            if (surface == nullptr) continue;
-
-            SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-            if (texture != nullptr) {
-                SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-                CachedTextTexture cached;
-                cached.texture = texture;
-                cached.width = surface->w;
-                cached.height = surface->h;
-                cached.last_used_timestamp = SDL_GetTicks();
-                cache_it = text_cache.emplace(cache_key, cached).first;
-            }
-            SDL_DestroySurface(surface);
+            TTF_Text *text = TTF_CreateText(text_engine, font, req.text.c_str(), req.text.size());
+            if (text == nullptr) continue;
+            cache_it = text_cache.emplace(std::move(cache_key), CachedTextTexture{text, 0}).first;
         }
-
-        if (cache_it == text_cache.end()) continue;
-        if (cache_it->second.texture == nullptr) continue;
         cache_it->second.last_used_timestamp = SDL_GetTicks();
-
-        SDL_FRect dest = {static_cast<float>(req.x), static_cast<float>(req.y),
-                          static_cast<float>(cache_it->second.width) /
-                              safe_output_scale_x,
-                          static_cast<float>(cache_it->second.height) /
-                              safe_output_scale_y};
-        SDL_RenderTextureRotated(renderer, cache_it->second.texture, nullptr, &dest,
-                          0.0, nullptr, SDL_FLIP_NONE);
+        TTF_Text *text = cache_it->second.text;
+        TTF_SetTextColor(text, req.color.r, req.color.g, req.color.b, req.color.a);
+        TTF_DrawRendererText(text, static_cast<float>(req.x) * safe_output_scale_x,
+                             static_cast<float>(req.y) * safe_output_scale_y);
     }
+    SDL_SetRenderScale(renderer, safe_output_scale_x, safe_output_scale_y);
 
     Queues().text_draw_requests.clear();
 }
@@ -786,6 +766,8 @@ void Renderer::ClearImageTextureCache() {
 }
 
 void Renderer::ClearCache() {
+    // The text engine's atlas textures belong to its renderer too.
+    ResetTextEngine();
     ClearImageTextureCache();
     image_cache_resources_root.clear();
     Queues().scene_draw_requests.clear();

@@ -63,10 +63,9 @@ struct TextDrawRequest {
     int y = 0;
 };
 
+// Laid-out text drawn from the text engine's shared glyph atlas.
 struct CachedTextTexture {
-    SDL_Texture *texture = nullptr;
-    int width = 0;
-    int height = 0;
+    TTF_Text *text = nullptr;
     Uint32 last_used_timestamp = 0;
 };
 
@@ -152,6 +151,11 @@ private:
     static inline std::unordered_map<std::string, std::unordered_map<int, TTF_Font *>>
         font_cache;
     static inline std::unordered_map<std::string, CachedTextTexture> text_cache;
+    // SDL_ttf renderer text engine for text_engine_renderer; recreated with
+    // an empty text cache when text is drawn with another renderer.
+    static inline TTF_TextEngine *text_engine = nullptr;
+    static inline SDL_Renderer *text_engine_renderer = nullptr;
+    static void ResetTextEngine();
     // Per-World draw queues; see RenderQueueState below. The resource caches
     // above are process-wide and used only on the thread owning the renderer.
     static RenderQueueState &Queues();
