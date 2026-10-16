@@ -4,7 +4,10 @@
 
 thread_local World *World::bound_ = nullptr;
 
-World::World() = default;
+World::World() {
+    static std::atomic<std::uint64_t> next_id{1};
+    id_ = next_id.fetch_add(1, std::memory_order_relaxed);
+}
 
 World::~World() {
     // Bind this World while its states are destroyed: their destructors may

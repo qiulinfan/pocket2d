@@ -1,7 +1,9 @@
 #include "input/Input.h"
+#include "core/Log.h"
 #include "core/FrameClock.h"
 #include "core/World.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
@@ -52,18 +54,17 @@ bool ShouldLogInputDiagnostics() {
 void LogKeyboardEvent(const SDL_KeyboardEvent &event, SDL_Scancode resolved_key) {
     if (!ShouldLogInputDiagnostics()) return;
 
-    static int logged_events = 0;
-    if (logged_events >= 80) return;
-    ++logged_events;
+    static std::atomic<int> logged_events = 0;
+    if (logged_events.fetch_add(1) >= 80) return;
 
     const char *type = event.type == SDL_EVENT_KEY_DOWN ? "down" : "up";
-    std::cout << "input: key " << type
-              << " scancode=" << static_cast<int>(event.scancode)
-              << " resolved=" << static_cast<int>(resolved_key)
-              << " scancode_name=" << SDL_GetScancodeName(resolved_key)
-              << " keycode=" << event.key
-              << " key_name=" << SDL_GetKeyName(event.key)
-              << " repeat=" << static_cast<int>(event.repeat) << std::endl;
+    Log::Info("input", std::string("key ") + type +
+                           " scancode=" + std::to_string(static_cast<int>(event.scancode)) +
+                           " resolved=" + std::to_string(static_cast<int>(resolved_key)) +
+                           " scancode_name=" + SDL_GetScancodeName(resolved_key) +
+                           " keycode=" + std::to_string(event.key) +
+                           " key_name=" + SDL_GetKeyName(event.key) +
+                           " repeat=" + std::to_string(static_cast<int>(event.repeat)));
 }
 
 void LogWindowFocusEvent(const SDL_WindowEvent &event) {
@@ -75,7 +76,7 @@ void LogWindowFocusEvent(const SDL_WindowEvent &event) {
 
     const char *focus_state =
         event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "gained" : "lost";
-    std::cout << "input: window focus " << focus_state << std::endl;
+    Log::Info("input", std::string("window focus ") + focus_state);
 }
 } // namespace
 

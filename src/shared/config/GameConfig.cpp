@@ -1,4 +1,5 @@
 #include "shared/config/GameConfig.h"
+#include "core/Log.h"
 #include "shared/resources/ResourcePath.h"
 #include "shared/persistence/SaveStore.h"
 #include "rapidjson/document.h"
@@ -177,15 +178,11 @@ GameConfigData GameConfig::Read() {
 
     if (!std::filesystem::exists(resources_root) ||
         !std::filesystem::is_directory(resources_root)) {
-        std::cout << "warning: project folder missing ["
-                  << resources_root.string() << "]; using default config"
-                  << std::endl;
+        Log::Warning("config", "project folder missing [" + resources_root.string() + "]; using default config");
         return config;
     }
     if (!std::filesystem::exists(game_config_path)) {
-        std::cout << "warning: project game.config missing ["
-                  << game_config_path.string() << "]; using default config"
-                  << std::endl;
+        Log::Warning("config", "project game.config missing [" + game_config_path.string() + "]; using default config");
         return config;
     }
 
@@ -261,8 +258,7 @@ bool GameConfig::Write(const GameConfigData &config) {
 
     rapidjson::Document game_config;
     if (!TryReadJsonObjectFile(game_config_path, game_config)) {
-        std::cout << "error: unable to read [" << game_config_path << "]"
-                  << std::endl;
+        Log::Error("config", "unable to read [" + game_config_path.string() + "]");
         return false;
     }
     if (!game_config.IsObject()) {
@@ -271,8 +267,7 @@ bool GameConfig::Write(const GameConfigData &config) {
 
     rapidjson::Document rendering_config;
     if (!TryReadJsonObjectFile(rendering_config_path, rendering_config)) {
-        std::cout << "error: unable to read [" << rendering_config_path << "]"
-                  << std::endl;
+        Log::Error("config", "unable to read [" + rendering_config_path.string() + "]");
         return false;
     }
     if (!rendering_config.IsObject()) {
@@ -297,13 +292,11 @@ bool GameConfig::Write(const GameConfigData &config) {
                       config.zoom_factor > 0.0f ? config.zoom_factor : 1.0f);
 
     if (!WriteJsonFile(game_config_path, game_config)) {
-        std::cout << "error: unable to write [" << game_config_path << "]"
-                  << std::endl;
+        Log::Error("config", "unable to write [" + game_config_path.string() + "]");
         return false;
     }
     if (!WriteJsonFile(rendering_config_path, rendering_config)) {
-        std::cout << "error: unable to write [" << rendering_config_path << "]"
-                  << std::endl;
+        Log::Error("config", "unable to write [" + rendering_config_path.string() + "]");
         return false;
     }
     return true;

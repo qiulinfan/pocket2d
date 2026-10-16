@@ -33,6 +33,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(GameEngineSDL)
 game_engine_ensure_sdl()
+include(GameEngineTracy)
 include(GameEngineBox2D)
 
 add_library(game_engine_vendor_headers INTERFACE)
@@ -100,6 +101,10 @@ target_link_libraries(
         lua_runtime
 )
 game_engine_apply_cxx_warnings(engine_runtime)
+if(POCKET_ENABLE_TRACY)
+    target_link_libraries(engine_runtime PUBLIC TracyClient)
+    target_compile_definitions(engine_runtime PUBLIC POCKET_PROFILE)
+endif()
 set_target_properties(engine_runtime PROPERTIES FOLDER "engine")
 add_library(GameEngine::Runtime ALIAS engine_runtime)
 

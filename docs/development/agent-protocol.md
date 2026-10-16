@@ -44,6 +44,12 @@ native allocations or restrict filesystem/network access.
   for JavaScript/TypeScript clients; parent `"0"` means no parent.
   Optional `tilemaps` requests inspect bounded cells without advancing or
   committing pending edits; see the example below.
+- Observations (and `step` results) include `diagnostics`: engine log records
+  written since the previous observation, oldest first, each with `level`,
+  `category`, `frame` and `message` (at most 32 records, messages truncated to
+  512 bytes), and `diagnostics_dropped`, the number not shown. Categories
+  include `lua` (runtime errors), `script` (`Debug.Log`), `component`, `scene`,
+  `config`, `audio`, `render` and `input`.
 - `step` advances 1–3,600 fixed 1/60 s ticks. `keys` is the complete held key
   set; omitting it retains previous held state, while `[]` releases it. Key
   edges occur once at the start of the request. Invalid arguments are rejected

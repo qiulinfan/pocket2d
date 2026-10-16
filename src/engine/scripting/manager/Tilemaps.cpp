@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/Profile.h"
 #include "core/World.h"
 #include "Internal.h"
 #include "scripting/RuntimeActorAssets.h"
@@ -170,6 +171,7 @@ bool ComponentManager::SetTilemapResource(Actor::UID uid, const std::string &key
 }
 
 void ComponentManager::CommitTilemaps() {
+    POCKET_ZONE("CommitTilemaps");
     ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     for (Actor::UID uid : runtime.actor_uids_sorted) {
         const auto owner = runtime.actor_by_uid.find(uid);

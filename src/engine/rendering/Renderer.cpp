@@ -1,4 +1,6 @@
 #include "rendering/Renderer.h"
+#include "core/Profile.h"
+#include "core/Log.h"
 #include "core/World.h"
 #include "core/Engine.h"
 #include "rendering/SDLRenderHelper.h"
@@ -36,7 +38,7 @@ void LogRendererWarningOnce(const std::string &key,
     g_renderer_warning_keys.insert(key);
     g_renderer_last_warning = message;
     ++g_renderer_warning_count;
-    std::cout << "warning: " << g_renderer_last_warning << std::endl;
+    Log::Warning("render", g_renderer_last_warning);
 }
 
 std::string ResolveFontPath(const std::string &font_name) {
@@ -453,6 +455,7 @@ void Renderer::RenderFrame(SDL_Renderer *renderer, float camera_x,
                            float camera_y, float zoom_factor,
                            int camera_width, int camera_height,
                            float output_scale_x, float output_scale_y) {
+    POCKET_ZONE("Renderer::RenderFrame");
     const float safe_output_scale_x = SafeOutputScale(output_scale_x);
     const float safe_output_scale_y = SafeOutputScale(output_scale_y);
     RenderAndClearAllImages(renderer, camera_x, camera_y, zoom_factor,
@@ -741,6 +744,7 @@ const std::string &Renderer::GetLastResourceWarning() {
 }
 
 void Engine::render() {
+    POCKET_ZONE("Engine::render");
     // Rendering only fills the backbuffer. Presenting is owned by the outer
     // loop so runtime-only and editor-driven execution share one path.
     // 现在: render 只填充 backbuffer, PresentFrame 负责交换前后缓冲. 

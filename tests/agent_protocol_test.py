@@ -97,7 +97,14 @@ def run(executable, project):
         check(isinstance(uid, str) and uid.isdecimal(),
               "actor UID must be lossless for JavaScript/TypeScript clients")
         observed_again = successful(agent, {"cmd": "observe"})
-        check(initial == observed_again, "observation must not mutate simulation")
+        for observation in (initial, observed_again):
+            check(isinstance(observation.get("diagnostics"), list) and
+                  isinstance(observation.get("diagnostics_dropped"), int),
+                  "observations must report new engine diagnostics")
+        check(observed_again["diagnostics"] == [] and observed_again["diagnostics_dropped"] == 0,
+              "diagnostics are reported once")
+        strip = lambda o: {k: v for k, v in o.items() if k not in ("diagnostics", "diagnostics_dropped")}
+        check(strip(initial) == strip(observed_again), "observation must not mutate simulation")
 
         # Failures must be one response each and leave the process usable.
         for bad, raw in [("{bad json", True), ({"cmd": "unknown"}, False),

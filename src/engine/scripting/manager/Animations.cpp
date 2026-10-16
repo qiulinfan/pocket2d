@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/Profile.h"
 #include "core/World.h"
 #include "Internal.h"
 #include "scripting/RuntimeActorAssets.h"
@@ -183,6 +184,7 @@ void ComponentManager::ApplySpriteAnimationPoses() {
         if (Alive(animation)) animation.native->ApplyPose();
 }
 void ComponentManager::ProcessSpriteAnimations() {
+    POCKET_ZONE("ProcessSpriteAnimations");
     ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     struct Delivery { LiveAnimation animation; std::vector<SpriteAnimation::Event> events; };
     std::vector<Delivery> deliveries;

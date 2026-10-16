@@ -1,4 +1,5 @@
 #include "particles/ParticleManager.h"
+#include "core/Profile.h"
 #include "core/TaskExecutor.h"
 #include "core/World.h"
 #include "rendering/Renderer.h"
@@ -335,6 +336,7 @@ void ParticleManager::SpawnParticle(int emitter_id,
 
 // spawn, simulate, queue, render
 void ParticleManager::Update(float dt) {
+    POCKET_ZONE("ParticleManager::Update");
     bool has_large_emitter = false;
     for (const EmitterSlot &emitter : State().emitters) {
         if (emitter.active && emitter.runtime_enabled &&

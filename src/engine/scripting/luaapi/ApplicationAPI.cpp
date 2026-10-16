@@ -1,4 +1,5 @@
 #include "RegistrationDetail.h"
+#include "core/Log.h"
 #include "core/FrameClock.h"
 #include "core/Engine.h"
 #include "lua.hpp"
@@ -15,7 +16,7 @@ using APIRegistrationDetail::LuaState;
 using APIRegistrationDetail::BoundEngine;
 
 void CppLog(const std::string &message) {
-    std::cout << message << '\n';
+    Log::Info("script", message);
 }
 
 void InjectDebugAPI() {

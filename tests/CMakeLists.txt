@@ -9,6 +9,9 @@ pocket_runtime_test(runtime_step_test runtime_step_test.cpp)
 add_test(NAME runtime_step COMMAND runtime_step_test
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
 set_tests_properties(runtime_step PROPERTIES TIMEOUT 30)
+pocket_runtime_test(log_test log_test.cpp)
+add_test(NAME log COMMAND log_test)
+set_tests_properties(log PROPERTIES TIMEOUT 30)
 pocket_runtime_test(world_isolation_test world_isolation_test.cpp)
 add_test(NAME world_isolation_defense COMMAND world_isolation_test
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense" defense)

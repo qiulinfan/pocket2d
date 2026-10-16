@@ -42,6 +42,17 @@ Optional backend tests return 77 only when backend initialization is unavailable
 a rendering mismatch is a failure. The final optional argument writes a PNG of
 the generated test target, never the desktop.
 
+Engine diagnostics go to stderr as `level [category] message`;
+`POCKET_LOG_FORMAT=jsonl` writes one JSON object per line with level, category,
+World id, frame and message. Each World also keeps its last 256 records, which
+agent observations report.
+
+Configure with `-DPOCKET_ENABLE_TRACY=ON` to compile Tracy 0.14.1 zones into
+the engine and Box2D (`BOX2D_PROFILE`); Tracy runs on demand, so the build works
+without a connected profiler. Zones cover the gameplay step, Lua lifecycle,
+physics step and event dispatch, animation, tilemap commit, transform
+resolution, queueing and rendering; a frame mark ends each gameplay frame.
+
 Use Release for measurements:
 
 ```sh

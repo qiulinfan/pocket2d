@@ -1,6 +1,7 @@
 #include "app/runtime/AgentSession.h"
 #include "engine/core/Engine.h"
 #include "engine/core/World.h"
+#include "engine/core/Log.h"
 #include "engine/core/FrameClock.h"
 #include "engine/input/Input.h"
 #include "engine/scripting/ComponentManager.h"
@@ -108,6 +109,34 @@ std::vector<CellQueryResult> ReadTileQueries(const rapidjson::Value &queries) {
     return result;
 }
 
+// Engine diagnostics written since the previous observation, oldest first.
+// Bounded so responses stay within the worker response limit.
+struct DiagnosticsCursor { std::uint64_t seen = 0; };
+void WriteDiagnostics(Writer &out) {
+    constexpr std::size_t kMaxRecords = 32, kMaxMessage = 512;
+    auto &cursor = World::Current().State<DiagnosticsCursor>();
+    const std::uint64_t written = Log::WrittenCount();
+    const auto recent = Log::Recent();
+    const std::uint64_t fresh = written - cursor.seen;
+    const std::size_t available = static_cast<std::size_t>(std::min<std::uint64_t>(fresh, recent.size()));
+    const std::size_t shown = std::min(available, kMaxRecords);
+    out.Key("diagnostics"); out.StartArray();
+    for (std::size_t i = recent.size() - shown; i < recent.size(); ++i) {
+        const Log::Record &record = recent[i];
+        out.StartObject();
+        out.Key("level"); out.String(Log::LevelName(record.level));
+        out.Key("category"); out.String(record.category.c_str());
+        out.Key("frame"); out.Int(record.frame);
+        const std::string message = record.message.size() > kMaxMessage
+            ? record.message.substr(0, kMaxMessage) : record.message;
+        out.Key("message"); out.String(message.c_str(), static_cast<rapidjson::SizeType>(message.size()));
+        out.EndObject();
+    }
+    out.EndArray();
+    out.Key("diagnostics_dropped"); out.Uint64(fresh - shown);
+    cursor.seen = written;
+}
+
 std::string Observe(const Engine &engine, std::uint32_t seed,
                     const std::vector<CellQueryResult> *tile_queries = nullptr) {
     rapidjson::StringBuffer buffer;
@@ -182,6 +211,7 @@ std::string Observe(const Engine &engine, std::uint32_t seed,
         }
         out.EndArray();
     }
+    WriteDiagnostics(out);
     out.EndObject();
     return buffer.GetString();
 }

@@ -1,4 +1,5 @@
 #include "editor/core/EditorConfig.h"
+#include "core/Log.h"
 #include "shared/resources/ResourcePath.h"
 #include "rapidjson/document.h"
 #include "rapidjson/filereadstream.h"
@@ -28,7 +29,7 @@ void ReadJsonFile(const std::string &path, rapidjson::Document &out_document) {
 #endif
 
     if (file_pointer == nullptr) {
-        std::cout << "error: unable to open [" << path << "]" << std::endl;
+        Log::Error("editor", "unable to open [" + std::filesystem::path(path).string() + "]");
         exit(0);
     }
 
@@ -38,7 +39,7 @@ void ReadJsonFile(const std::string &path, rapidjson::Document &out_document) {
     std::fclose(file_pointer);
 
     if (out_document.HasParseError()) {
-        std::cout << "error parsing json at [" << path << "]" << std::endl;
+        Log::Error("editor", "error parsing json at [" + std::filesystem::path(path).string() + "]");
         exit(0);
     }
 }
@@ -254,8 +255,7 @@ void WriteProjectHistoryFile(const EditorConfigData &config) {
     std::ofstream output_file(kEditorProjectsConfigPath,
                               std::ios::out | std::ios::trunc);
     if (!output_file.is_open()) {
-        std::cout << "error: unable to write [" << kEditorProjectsConfigPath
-                  << "]" << std::endl;
+        Log::Error("editor", "unable to write [" + std::filesystem::path(kEditorProjectsConfigPath).string() + "]");
         exit(0);
     }
     output_file << buffer.GetString() << std::endl;
@@ -434,8 +434,7 @@ void EditorConfig::Write(const EditorConfigData &config) {
     std::ofstream output_file(kEditorConfigPath,
                               std::ios::out | std::ios::trunc);
     if (!output_file.is_open()) {
-        std::cout << "error: unable to write [" << kEditorConfigPath << "]"
-                  << std::endl;
+        Log::Error("editor", "unable to write [" + std::filesystem::path(kEditorConfigPath).string() + "]");
         exit(0);
     }
 

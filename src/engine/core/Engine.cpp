@@ -1,4 +1,6 @@
 #include "core/Engine.h"
+#include "core/Profile.h"
+#include "core/Log.h"
 #include "audio/AudioManager.h"
 #include "core/FrameClock.h"
 #include "scripting/ComponentManager.h"
@@ -134,8 +136,8 @@ SDL_Renderer *CreateConfiguredRenderer(SDL_Window *window) {
     if (ShouldLogRendererDiagnostics()) {
         int interval = 0;
         SDL_GetRenderVSync(renderer, &interval);
-        std::cout << "renderer: driver=" << SDL_GetRendererName(renderer)
-                  << " vsync=" << interval << std::endl;
+        Log::Info("render", std::string("driver=") + SDL_GetRendererName(renderer) +
+                                " vsync=" + std::to_string(interval));
     }
     return renderer;
 }
@@ -396,6 +398,7 @@ void Engine::RunSingleFrame(bool quit_requested_this_frame) {
 }
 
 void Engine::advanceGameplay() {
+    POCKET_ZONE("Engine::advanceGameplay");
     if(scene_transition_active_)throw std::logic_error("cannot advance gameplay during a scene transaction");
     processPendingSceneLoad();
     if(scene_reset_required_)return;
@@ -407,6 +410,7 @@ void Engine::advanceGameplay() {
 }
 
 void Engine::finishGameplayFrame() {
+    POCKET_FRAME_MARK();
     RecordGameplayFrame();
     ::Input::LateUpdate();
     FrameClock::AdvanceFrame();
@@ -414,6 +418,7 @@ void Engine::finishGameplayFrame() {
 
 void Engine::StepSimulation() {
     WorldScope world_scope(world_);
+    POCKET_ZONE("Engine::StepSimulation");
     if (!IsRunning() || !runtime_initialized_) return;
     advanceGameplay();
     if(scene_reset_required_)return;
@@ -434,6 +439,7 @@ Edit mode stays static by default; live preview may explicitly flush OnStart.
 void Engine::RunRenderFrozenFrame(bool quit_requested_this_frame,
                                   bool process_pending_on_start) {
     WorldScope world_scope(world_);
+    POCKET_ZONE("Engine::RunRenderFrozenFrame");
     
     if (!IsRunning()) return;
 
@@ -495,6 +501,7 @@ void Engine::ProcessSDLEvent(const SDL_Event &event,
 /* Present the current backbuffer to the window once drawing is complete. */
 void Engine::PresentFrame(bool advance_gameplay_frame) {
     WorldScope world_scope(world_);
+    POCKET_ZONE("Engine::PresentFrame");
     if (renderer == nullptr) return;
     SDLRenderHelper::SDL_RenderPresent(renderer, advance_gameplay_frame);
     RefreshPerformanceCounters();
@@ -629,7 +636,7 @@ bool Engine::DuplicateRuntimeActorByUID(Actor::UID actor_uid,
     } catch (const std::exception &failure) {
         if (prepared && prepared->CommitStarted()) ReportRuntimeActorPublicationFailure(failure.what());
         else last_runtime_actor_error_ = ScriptReloadCandidate::SanitizeDiagnosticText(failure.what());
-        std::cerr << "actor duplication rejected: " << last_runtime_actor_error_ << '\n';
+        Log::Warning("actor", "duplication rejected: " + last_runtime_actor_error_);
         return false;
     }
 }
@@ -871,6 +878,7 @@ void Engine::initialize() {
 }
 
 void Engine::update() {
+    POCKET_ZONE("Engine::update");
     /* Gameplay update is component-driven and always runs in this order. */
     ComponentManager::ProcessSpriteAnimations();
     if (scene_reset_required_) return;
@@ -904,6 +912,7 @@ boundary so actor destruction/creation never races the current update.
 (gameplay 请求的场景切换被延迟到下一帧边界, 这样 actor 销毁/创建就永远不会和当前 update 竞争)
 */
 void Engine::processPendingSceneLoad() {
+    POCKET_ZONE("Engine::processPendingSceneLoad");
     if(!has_pending_scene_load||scene_reset_required_||scene_transition_active_)return;
     SceneTransitionScope transition(scene_transition_active_);
     const auto requested=pending_scene_name;has_pending_scene_load=false;pending_scene_name.clear();
@@ -934,7 +943,7 @@ void Engine::processPendingSceneLoad() {
         InstallSceneComponents(*prepared.components,actors,first);
         ComponentManager::BindActorsForScene(actors);rebuildRuntimeActorUIDMap();
         current_scene_name=asset.scene_name;last_scene_load_error_.clear();
-        if(ShouldLogSceneDiagnostics())std::cout<<"scene_load: "<<current_scene_name<<" live_actors="<<CountLiveActors()<<" stored_actors="<<actors.size()<<std::endl;
+        if(ShouldLogSceneDiagnostics())Log::Info("scene","loaded "+current_scene_name+" live_actors="+std::to_string(CountLiveActors())+" stored_actors="+std::to_string(actors.size()));
     }catch(const std::exception &failure){failSceneCommit(failure.what());}
 }
 
@@ -985,14 +994,13 @@ void Engine::RefreshPerformanceCounters() {
         static_cast<float>(performance_gameplay_frames_) / elapsed_seconds;
 
     if (ShouldLogPerformanceDiagnostics()) {
-        std::cout << "perf: scene=" << current_scene_name
-                  << " gameplay_fps=" << displayed_gameplay_fps_
-                  << " render_fps=" << displayed_runtime_render_fps_
-                  << " live_actors=" << CountLiveActors()
-                  << " stored_actors=" << actors.size()
-                  << " audio_failures=" << AudioManager::GetAudioPlayFailureCount()
-                  << " music_failures=" << AudioManager::GetMusicPlayFailureCount()
-                  << std::endl;
+        Log::Info("perf", "scene=" + current_scene_name +
+                              " gameplay_fps=" + std::to_string(displayed_gameplay_fps_) +
+                              " render_fps=" + std::to_string(displayed_runtime_render_fps_) +
+                              " live_actors=" + std::to_string(CountLiveActors()) +
+                              " stored_actors=" + std::to_string(actors.size()) +
+                              " audio_failures=" + std::to_string(AudioManager::GetAudioPlayFailureCount()) +
+                              " music_failures=" + std::to_string(AudioManager::GetMusicPlayFailureCount()));
     }
 
     performance_sample_start_ticks_ = now;

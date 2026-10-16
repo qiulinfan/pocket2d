@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/Log.h"
 #include <stdexcept>
 #include "Internal.h"
 #include "shared/resources/ResourcePath.h"
@@ -134,7 +135,7 @@ void LogComponentTypeWarningOnce(const std::string &key,
     Settings().component_type_warning_keys.insert(key);
     Settings().component_type_last_warning = message;
     ++Settings().component_type_warning_count;
-    std::cout << "warning: " << Settings().component_type_last_warning << std::endl;
+    Log::Warning("component", Settings().component_type_last_warning);
 }
 
 

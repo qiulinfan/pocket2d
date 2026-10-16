@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include "core/Log.h"
 #include "shared/scene_format/SceneFormat.h"
 #include "scene/Scene.h"
 #include "shared/resources/ResourcePath.h"
@@ -514,8 +515,7 @@ bool SaveSceneAsset(const SceneAsset &scene_asset) {
     std::ofstream output_file(scene_asset.scene_path,
                               std::ios::out | std::ios::trunc);
     if (!output_file.is_open()) {
-        std::cout << "error: unable to write [" << scene_asset.scene_path.string()
-                  << "]" << std::endl;
+        Log::Error("scene", "unable to write [" + scene_asset.scene_path.string() + "]");
         return false;
     }
 

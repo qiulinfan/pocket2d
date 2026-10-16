@@ -21,6 +21,9 @@ public:
     World(const World &) = delete;
     World &operator=(const World &) = delete;
 
+    // Process-unique identifier, for diagnostics and agent sessions.
+    std::uint64_t GetId() const { return id_; }
+
     // The World bound on this thread, or this thread's default World.
     static World &Current() { return bound_ != nullptr ? *bound_ : ThreadDefault(); }
 
@@ -53,6 +56,7 @@ private:
     template <class T> static inline const std::size_t slot_index_ = NextSlotIndex();
     template <class T> [[gnu::noinline]] T &CreateState();
 
+    std::uint64_t id_;
     std::vector<std::unique_ptr<SlotBase>> slots_;
     std::vector<std::size_t> creation_order_;
 

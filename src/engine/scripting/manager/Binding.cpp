@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/Log.h"
 #include "Internal.h"
 #include "core/Engine.h"
 #include "rendering/SpriteRenderer.h"
@@ -544,7 +545,7 @@ void ComponentManager::InstantiateComponentForActor(
     if (!IsBuiltinComponentType(component_spec.type)) {
         const auto found = Runtime().component_type_tables.find(component_spec.type);
         if (found == Runtime().component_type_tables.end()) {
-            std::cout << "warning: failed to locate component " << component_spec.type << "; skipping component" << std::endl;
+            Log::Warning("component", "failed to locate component " + component_spec.type + "; skipping component");
             return;
         }
         prototype = found->second;
@@ -716,7 +717,7 @@ bool ComponentManager::SetComponentPropertyValue(
         lua_settop(Runtime().lua_state, stack_top);
         return false;
     } catch (const std::exception &error) {
-        std::cerr << "component property rejected: " << error.what() << '\n';
+        Log::Warning("component", std::string("property rejected: ") + error.what());
         return false;
     }
 
@@ -748,7 +749,7 @@ bool ComponentManager::SetRuntimeComponentPropertyValue(
         std::string preparation_error;
         prepared = PrepareRuntimeComponent(candidate, preparation_error);
         if (!prepared) {
-            std::cerr << "component property rejected: " << preparation_error << '\n';
+            Log::Warning("component", "property rejected: " + preparation_error);
             return false;
         }
     }

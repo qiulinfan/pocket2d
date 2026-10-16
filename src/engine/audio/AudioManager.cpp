@@ -1,4 +1,5 @@
 #include "audio/AudioManager.h"
+#include "core/Log.h"
 #include "core/World.h"
 #include "shared/resources/ResourcePath.h"
 #include "scene/Scene.h"
@@ -39,8 +40,7 @@ void LogPlaybackFailure(const char *kind, const std::string &audio_name,
                         int failure_count) {
     if (!ShouldLogAudioDiagnostics()) return;
     if (failure_count > 5 && (failure_count % 25) != 0) return;
-    std::cout << "warning: " << kind << " playback failed for ["
-              << audio_name << "]: " << SDL_GetError() << std::endl;
+    Log::Warning("audio", std::string(kind) + " playback failed for [" + audio_name + "]: " + SDL_GetError());
 }
 
 void LogAudioWarningOnce(const std::string &key, const std::string &message) {
@@ -50,7 +50,7 @@ void LogAudioWarningOnce(const std::string &key, const std::string &message) {
     g_audio_warning_keys.insert(key);
     g_audio_last_resource_warning = message;
     ++g_audio_resource_warning_count;
-    std::cout << "warning: " << g_audio_last_resource_warning << std::endl;
+    Log::Warning("audio", g_audio_last_resource_warning);
 }
 
 } // namespace
@@ -82,8 +82,7 @@ bool AudioManager::Init() {
                     [](MIX_Track *track) { return track != nullptr; });
     if (!tracks_ready) {
         if (!init_failure_logged) {
-            std::cout << "warning: audio disabled (failed to initialize mixer): "
-                      << SDL_GetError() << std::endl;
+            Log::Warning("audio", std::string("audio disabled (failed to initialize mixer): ") + SDL_GetError());
             init_failure_logged = true;
         }
         // DestroyMixer owns its tracks, including partial initialization.
@@ -102,9 +101,8 @@ bool AudioManager::Init() {
         actual_output_channels = actual.channels;
     }
     if (ShouldLogAudioDiagnostics()) {
-        std::cout << "audio: opened device at " << actual_output_frequency
-                  << " Hz, format " << actual_output_format << ", channels "
-                  << actual_output_channels << std::endl;
+        Log::Info("audio", "opened device at " + std::to_string(actual_output_frequency) + " Hz, format " +
+                               std::to_string(actual_output_format) + ", channels " + std::to_string(actual_output_channels));
     }
     
     initialized = true;

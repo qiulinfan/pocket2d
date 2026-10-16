@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/Profile.h"
 #include "physics/Rigidbody.h"
 #include "core/World.h"
 #include "physics/PhysicsMutationGuard.h"
@@ -412,6 +413,7 @@ bool Rigidbody::HasPhysicsWorld() {
 
 // Step once, then deliver the step's contact and trigger events.
 void Rigidbody::StepPhysicsWorld() {
+    POCKET_ZONE("Box2D step and events");
     if (!RayCast::HasPhysicsWorld()) return;
     const b2WorldId world = RayCast::GetPhysicsWorld();
     b2World_Step(world, kStep, kSubSteps);

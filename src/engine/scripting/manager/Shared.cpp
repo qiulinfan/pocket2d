@@ -1,4 +1,6 @@
 #include "scripting/LuaBoundary.h"
+#include "core/Profile.h"
+#include "core/Log.h"
 #include "Internal.h"
 #include "rendering/SpriteRenderer.h"
 #include "particles/ParticleSystem.h"
@@ -407,7 +409,7 @@ void ReportError(const std::string &actor_name,
     const LuaBoundary::Error bounded(actor_name + " : " + error_message);
     ++Errors().runtime_error_count;
     Errors().last_runtime_error = bounded.what();
-    std::cout << "\033[31m" << Errors().last_runtime_error << "\033[0m" << std::endl;
+    Log::Error("lua", Errors().last_runtime_error);
 }
 
 void ReportEventBusError(Actor::UID actor_uid,
@@ -450,6 +452,7 @@ void ComponentManager::ClearRuntimeErrors() {
 }
 
 void ComponentManager::QueueBuiltinRenderers(bool scene_backed_only) {
+    POCKET_ZONE("QueueBuiltinRenderers");
     ApplySpriteAnimationPoses();
     ManagerDetail::QueueBuiltinSpriteRendererDraws(scene_backed_only);
 }
@@ -530,6 +533,7 @@ private:
 } // namespace
 
 void ComponentManager::ResolveTransformHierarchy() {
+    POCKET_ZONE("ResolveTransformHierarchy");
     ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     WorldTransformResolver resolver;
     for (const auto &entry : runtime.actor_by_uid) {

@@ -1,4 +1,5 @@
 #include "scripting/LuaBoundary.h"
+#include "core/Profile.h"
 #include "Internal.h"
 #include "core/Engine.h"
 #include "scripting/ComponentManager.h"
@@ -258,6 +259,7 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
 
 // per-frame lifecycle entry points
 void ComponentManager::ProcessPendingOnStart() {
+    POCKET_ZONE("Lua OnStart");
     auto pending = std::move(Runtime().pending_on_start);
     Runtime().pending_on_start.clear();
     std::vector<CallbackTarget> targets;
@@ -299,6 +301,7 @@ void ComponentManager::ProcessPendingOnStart() {
 }
 
 void ComponentManager::ProcessOnUpdate() {
+    POCKET_ZONE("Lua OnUpdate");
     RuntimeState &runtime = Runtime();
     std::vector<CallbackTarget> targets;
     targets.reserve(runtime.on_update_components.size());
@@ -319,6 +322,7 @@ void ComponentManager::ProcessOnUpdate() {
 }
 
 void ComponentManager::ProcessOnLateUpdate() {
+    POCKET_ZONE("Lua OnLateUpdate");
     std::vector<CallbackTarget> targets;
     targets.reserve(Runtime().on_late_update_components.size());
     for (const auto &entry : Runtime().on_late_update_components)
@@ -329,6 +333,7 @@ void ComponentManager::ProcessOnLateUpdate() {
 
 // per-frame lifecycle entry points
 void ComponentManager::StepPhysics() {
+    POCKET_ZONE("StepPhysics");
     // Subscribe/Unsubscribe become visible at the very end of the frame,
     // after LateUpdate and before the physics step starts.
     EventBus::ApplyPendingOperations();
@@ -556,6 +561,7 @@ void ComponentManager::QueueTriggerEvent(const ActorHandle &actor, const ActorHa
 
 // per-frame lifecycle entry points
 void ComponentManager::FinalizeFrameMutations() {
+    POCKET_ZONE("FinalizeFrameMutations");
     // 帧末统一收口 runtime mutation:
     // 1) 激活本帧新建 actor (下一帧开始参与生命周期)
     // 2) 清理 removed 组件
