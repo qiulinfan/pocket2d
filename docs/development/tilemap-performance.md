@@ -75,7 +75,29 @@ frames each, p50 ranges in milliseconds per render-and-present frame:
 
 Native Tilemap results were unchanged (7.81–8.92 after). Every case at or
 below 16,384 sprites now sits at the same roughly 8 ms per-frame floor as the
-native path with 32 tiles, so that floor, not sprite submission, bounds those
-cases; it has not been attributed yet. At 65,536 sprites the remaining CPU time
-is mostly per-actor component lookup and Lua userdata casts in transform
-resolution and queueing, the target of native component pools.
+native path with 32 tiles. At 65,536 sprites the remaining CPU time is mostly
+per-actor component lookup and Lua userdata casts in transform resolution and
+queueing, the target of native component pools.
+
+### The 8 ms floor is display pacing
+
+Sampling the native 64×64 case put about 92% of main-thread samples in
+`SDL_FlushRenderer → METAL_ActivateRenderCommandEncoder`, waiting for the next
+`CAMetalLayer` drawable; `RunRenderFrozenFrame` was about 8%. The software
+renderer shows the same floor, and `POCKET_RENDER_VSYNC=0` does not change it.
+The OS hands out drawables at the display refresh rate (120 Hz here, 8.33 ms),
+so wall time per presented frame cannot fall below it.
+
+The benchmark therefore also reports `cpu_p50_ms`/`cpu_p95_ms`, the main
+thread's CPU time per frame, which excludes that wait. Fixed-camera Metal
+medians from one run after the sprite change:
+
+| Case | Wall p50 | CPU p50 |
+| --- | ---: | ---: |
+| Native Tilemap, any size (32 tiles) | 8.04 | 0.14 |
+| 4,096 sprites | 8.61 | 0.89 |
+| 16,384 sprites | 8.53 | 2.99 |
+| 65,536 sprites | 11.45 | 11.44 |
+
+Comparisons with other engines should use CPU (and GPU) time or uncapped
+offscreen rendering, not presented frame rate on a display-paced window.

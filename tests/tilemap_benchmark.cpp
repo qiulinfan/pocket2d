@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -18,6 +19,9 @@
 #include <vector>
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#endif
+#if defined(_WIN32)
+#include <windows.h>
 #endif
 
 namespace {
@@ -81,6 +85,19 @@ std::vector<unsigned char> ReadPixels(Engine &engine) {
                     static_cast<unsigned char *>(rgba->pixels) + y * rgba->pitch, static_cast<std::size_t>(rgba->w) * 4);
     SDL_DestroySurface(rgba); SDL_SetRenderTarget(renderer, nullptr); return result;
 }
+double ThreadCpuMs() {
+#if defined(_WIN32)
+    FILETIME creation, exit, kernel, user;
+    GetThreadTimes(GetCurrentThread(), &creation, &exit, &kernel, &user);
+    const auto ticks = [](const FILETIME &time) {
+        return (static_cast<unsigned long long>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
+    return (ticks(kernel) + ticks(user)) / 1e4;
+#else
+    timespec now{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
+    return now.tv_sec * 1000.0 + now.tv_nsec / 1e6;
+#endif
+}
 struct Result { std::vector<unsigned char> pixels; int samples = 0; };
 std::vector<Result> Measure(Fixture &fixture, bool native, int requested_samples,
                             const std::vector<Result> *reference = nullptr) {
@@ -101,6 +118,7 @@ std::vector<Result> Measure(Fixture &fixture, bool native, int requested_samples
     for (int scenario = 0; scenario < 4; ++scenario) {
         const char *label = scenario == 0 ? "fixed" : scenario == 1 ? "scrolling" : scenario == 2 ? "edit1" : "edit64";
         const int edits = scenario < 2 ? 0 : scenario == 2 ? 1 : 64;
+        double last_submit_ms = 0;
         auto frame = [&] {
             const int id = 3 + camera_tick % 2;
             for (int i = 0; i < edits; ++i) {
@@ -110,17 +128,22 @@ std::vector<Result> Measure(Fixture &fixture, bool native, int requested_samples
             }
             engine.SetCameraPosition(scenario == 1 ? 4.0f + static_cast<float>(std::sin(camera_tick * 0.1)) * 2 : 4.0f, 4.0f);
             ++camera_tick;
+            // Wall time includes waiting for a Metal drawable, which the OS hands
+            // out at the display refresh rate. Thread CPU time excludes that
+            // wait and measures the engine's own work for the frame.
+            const double cpu_start = ThreadCpuMs();
             engine.RunRenderFrozenFrame(false,false);
             Check(SDL_RenderTexture(engine.GetRenderer(), engine.GetRuntimeRenderTarget(), nullptr, nullptr), "present map texture");
             Check(SDL_RenderPresent(engine.GetRenderer()), "present benchmark frame");
+            last_submit_ms = ThreadCpuMs() - cpu_start;
         };
         for (int i = 0; i < 3; ++i) frame();
         if (map) map->ResetDiagnostics();
-        std::vector<double> timings;
+        std::vector<double> timings, submits;
         const int sample_count = reference ? (*reference)[scenario].samples : requested_samples;
         const auto budget_start = Clock::now();
         for (int i = 0; i < sample_count; ++i) {
-            const auto start = Clock::now(); frame(); timings.push_back(Ms(start));
+            const auto start = Clock::now(); frame(); timings.push_back(Ms(start)); submits.push_back(last_submit_ms);
             if (Ms(budget_start) > 30000 && !reference) break;
         }
         Result result{ReadPixels(engine), static_cast<int>(timings.size())};
@@ -141,14 +164,17 @@ std::vector<Result> Measure(Fixture &fixture, bool native, int requested_samples
         }
         if (map && edits) Check(map->GetCell("ground", edits == 1 ? 3 : 0, edits == 1 ? 3 : 0) ==
                                3 + (camera_tick - 1) % 2, "committed edit mismatch");
-        std::sort(timings.begin(),timings.end());
-        auto percentile = [&](double p) { return timings[std::min(timings.size()-1, static_cast<std::size_t>(std::ceil(p*timings.size())-1))]; };
+        std::sort(timings.begin(),timings.end()); std::sort(submits.begin(),submits.end());
+        auto percentile_of = [](const std::vector<double> &values, double p) {
+            return values[std::min(values.size()-1, static_cast<std::size_t>(std::ceil(p*values.size())-1))]; };
+        auto percentile = [&](double p) { return percentile_of(timings, p); };
         const auto diagnostics = map ? map->GetDiagnostics() : Tilemap::Diagnostics{};
         std::cout << (native ? "native" : "sprites") << ',' << fixture.data.width << ',' << label << ','
                   << timings.size() << ',' << cold_ms << ',' << percentile(0.50) << ',' << percentile(0.95) << ',' << percentile(0.99) << ','
                   << (native ? diagnostics.visible_tiles : fixture.data.ground.cells.size()) << ','
                   << diagnostics.render_chunk_rebuilds << ',' << diagnostics.collision_chunk_rebuilds << ',' << ResidentBytes() << ','
-                  << (timings.size() == static_cast<std::size_t>(requested_samples) ? "complete" : "budget_limited") << '\n';
+                  << (timings.size() == static_cast<std::size_t>(requested_samples) ? "complete" : "budget_limited") << ','
+                  << percentile_of(submits, 0.50) << ',' << percentile_of(submits, 0.95) << '\n';
         output.push_back(std::move(result));
     }
     return output;
@@ -163,9 +189,10 @@ int main(int argc, char **argv) {
         SDL_setenv_unsafe("POCKET_RENDER_DRIVER", backend.c_str(), 1); SDL_setenv_unsafe("POCKET_RENDER_VSYNC","0",1);
         Fixture fixture(size);
         std::cout << "# actual SDL3 render+present; ground-only/no physics; identical atlas/cells/view/output; exact pixels checked\n"
+                  << "# p*_ms are wall time including the display-paced drawable wait; cpu_* is main-thread CPU time per frame\n"
                   << "# warmup=3; GPU timestamps/allocations not instrumented; rss_bytes=0 means unavailable\n"
                   << "# rss is a same-process snapshot (allocator retention/reference pixels remain), not an isolated memory comparison\n"
-                  << "path,size,scenario,samples,cold_ms,p50_ms,p95_ms,p99_ms,queued_requests_last,render_rebuilds,collision_rebuilds,rss_bytes,status\n";
+                  << "path,size,scenario,samples,cold_ms,p50_ms,p95_ms,p99_ms,queued_requests_last,render_rebuilds,collision_rebuilds,rss_bytes,status,cpu_p50_ms,cpu_p95_ms\n";
         const auto baseline = Measure(fixture,false,samples); Measure(fixture,true,samples,&baseline);
         return 0;
     } catch (const std::exception &error) { std::cerr << "tilemap benchmark: " << error.what() << '\n'; return 1; }
