@@ -431,6 +431,31 @@
       }
     },
     {
+      "name": "checkpoint",
+      "access": "simulate",
+      "summary": "Name the current state: returns a checkpoint id (cp-N) and the frame. A checkpoint is the seed plus the step and run_until requests since the last reset; it is unavailable after a script reload or a failed step until the next reset. At most 64 are kept, oldest evicted.",
+      "params": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "restore",
+      "access": "simulate",
+      "summary": "Return to a checkpoint by starting a fresh runtime with its seed and replaying its requests (time grows with the frames replayed). Later requests continue from there, so restoring the same checkpoint twice explores two branches. The response is an observation plus restored {checkpoint, replayed}.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "checkpoint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkpoint"
+        ]
+      }
+    },
+    {
       "name": "quit",
       "access": "session",
       "summary": "Stop the runtime and end the session.",

@@ -87,6 +87,24 @@ Access: `simulate`.
 | --- | --- | --- | --- |
 | `seed` | integer (≥0, ≤4294967295) | no |  |
 
+## `checkpoint`
+
+Name the current state: returns a checkpoint id (cp-N) and the frame. A checkpoint is the seed plus the step and run_until requests since the last reset; it is unavailable after a script reload or a failed step until the next reset. At most 64 are kept, oldest evicted.
+
+Access: `simulate`.
+
+No parameters.
+
+## `restore`
+
+Return to a checkpoint by starting a fresh runtime with its seed and replaying its requests (time grows with the frames replayed). Later requests continue from there, so restoring the same checkpoint twice explores two branches. The response is an observation plus restored {checkpoint, replayed}.
+
+Access: `simulate`.
+
+| Parameter | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `checkpoint` | string | yes |  |
+
 ## `quit`
 
 Stop the runtime and end the session.

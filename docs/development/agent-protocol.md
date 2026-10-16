@@ -116,6 +116,18 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   included. Rendering never changes the simulation, and at the window size
   the frame matches graphical mode with the software renderer pixel for pixel
   (`agent_image_test`).
+- `checkpoint` names the current state and returns `checkpoint` (`cp-N`) and
+  `frame`. A checkpoint is the seed plus the successful `step` and
+  `run_until` requests since the last reset. `restore` with a checkpoint id
+  starts a fresh worker with that seed, replays those requests, checks that
+  it reached the same frame and returns an observation plus
+  `restored: {checkpoint, replayed}`. Later requests continue from there, so
+  restoring one checkpoint repeatedly explores different branches. Restoring
+  costs time proportional to the frames replayed (a Box2D 3.2 or `fork`-based
+  snapshot would make it constant; neither is used yet). After
+  `reload_scripts`, or a simulating request that failed after changing state,
+  `checkpoint` returns `checkpoint_unavailable` until the next reset. The host
+  keeps the 64 newest checkpoints; both commands are recorded in replays.
 - `reload_assets` reloads image files and the spritesheet metadata that changed
   on disk since they were loaded (missing images are retried); the next draw
   uses them. It does not advance time and returns an observation plus

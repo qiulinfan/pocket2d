@@ -6,6 +6,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include <algorithm>
+#include <map>
 #include <chrono>
 #include <iostream>
 #include <random>
@@ -373,6 +374,21 @@ struct AgentHost::Impl {
     int frame = 0;
     std::string description, initial_observation;
 
+    // Simulating requests since the last reset. A checkpoint copies this prefix
+    // and its seed; restoring replays it in a fresh worker, relying on
+    // deterministic stepping. Script reloads and failed simulating requests
+    // make the history unreplayable until the next reset.
+    struct Checkpoint {
+        std::uint32_t seed;
+        std::vector<std::string> history;
+        int frame;
+    };
+    std::vector<std::string> history;
+    bool history_replayable = true;
+    std::uint64_t checkpoint_count = 0;
+    std::map<std::string, Checkpoint> checkpoints; // at most kMaxCheckpoints
+    static constexpr std::size_t kMaxCheckpoints = 64;
+
     Impl(std::filesystem::path executable_in, std::filesystem::path project_in, std::uint32_t seed_in,
          AgentExecutionLimits limits_in)
         : executable(std::move(executable_in)), project(std::move(project_in)), seed(seed_in),
@@ -470,6 +486,60 @@ AgentHost::Reply AgentHost::Handle(const std::string &line, bool oversized) {
                             : Error("worker_cleanup_failed", "worker did not terminate", frame, true),
                      true, reaped ? 0 : 1);
     }
+    if (name == "checkpoint") {
+        if (!worker.Exists()) return reply(Error("worker_unavailable", "runtime unavailable; reset required", frame, true));
+        if (!host.history_replayable)
+            return reply(Error("checkpoint_unavailable",
+                               "the state since the last reset is not replayable (script reload or failed step); reset first",
+                               frame, false));
+        const std::string id = "cp-" + std::to_string(++host.checkpoint_count);
+        if (host.checkpoints.size() == Impl::kMaxCheckpoints) host.checkpoints.erase(host.checkpoints.begin());
+        host.checkpoints.emplace(id, Impl::Checkpoint{host.seed, host.history, frame});
+        rapidjson::Document document(rapidjson::kObjectType);
+        auto &allocator = document.GetAllocator();
+        document.AddMember("ok", true, allocator);
+        document.AddMember("protocol", PocketAgentProtocol::kVersion, allocator);
+        document.AddMember("checkpoint", rapidjson::Value(id.c_str(), allocator), allocator);
+        document.AddMember("frame", frame, allocator);
+        return reply(Serialize(document));
+    }
+    if (name == "restore") {
+        if (!request.HasMember("checkpoint") || !request["checkpoint"].IsString())
+            return reply(Error("invalid_request", "restore requires a checkpoint id", frame, false));
+        const auto found = host.checkpoints.find(request["checkpoint"].GetString());
+        if (found == host.checkpoints.end())
+            return reply(Error("invalid_request", "unknown or evicted checkpoint", frame, false));
+        const Impl::Checkpoint checkpoint = found->second;
+        try {
+            if (worker.Exists()) {
+                try {
+                    const Deadline grace = Clock::now() + std::chrono::milliseconds(100);
+                    worker.Exchange(R"({"cmd":"quit"})", grace);
+                    worker.WaitForExit(grace);
+                } catch (const WorkerFailure &) {}
+            }
+            host.seed = checkpoint.seed;
+            host.start(host.deadline());
+            for (const std::string &step : checkpoint.history) {
+                const auto replayed = ParseResponse(worker.Exchange(step, host.deadline()));
+                if (!replayed["ok"].GetBool()) throw WorkerFailure("restore_failed", "replaying the checkpoint failed");
+            }
+            auto document = ParseResponse(worker.Exchange(R"({"cmd":"observe"})", host.deadline()));
+            frame = document["frame"].GetInt();
+            if (frame != checkpoint.frame) throw WorkerFailure("restore_diverged", "replay reached a different frame");
+            host.history = checkpoint.history;
+            host.history_replayable = true;
+            rapidjson::Value restored(rapidjson::kObjectType);
+            restored.AddMember("checkpoint", rapidjson::Value(found->first.c_str(), document.GetAllocator()),
+                               document.GetAllocator());
+            restored.AddMember("replayed", static_cast<std::uint64_t>(checkpoint.history.size()), document.GetAllocator());
+            document.AddMember("restored", restored, document.GetAllocator());
+            return reply(Serialize(document));
+        } catch (const WorkerFailure &error) {
+            const bool reaped = worker.Stop();
+            return reply(Error(error.code, error.what(), frame, true, error.response), !reaped, reaped ? 0 : 1);
+        }
+    }
     if (name == "describe" && !worker.Exists()) {
         auto cached = ParseResponse(host.description);
         SetBool(cached, "runtime_available", false);
@@ -498,7 +568,26 @@ AgentHost::Reply AgentHost::Handle(const std::string &line, bool oversized) {
         }
         if (name != "reset") response = worker.Exchange(line, end);
         auto document = ParseResponse(response);
+        const int previous_frame = frame;
         if (document.HasMember("frame") && document["frame"].IsInt()) frame = document["frame"].GetInt();
+        const bool ok = document["ok"].GetBool();
+        if (name == "reset" && ok) {
+            host.history.clear();
+            host.history_replayable = true;
+        } else if (name == "step" || name == "run_until") {
+            if (ok) {
+                rapidjson::Document logged;
+                logged.CopyFrom(request, logged.GetAllocator());
+                logged.RemoveMember("id");
+                // Replay only needs the state change, not the observation.
+                logged.RemoveMember("image");
+                host.history.push_back(Serialize(logged));
+            } else if (frame != previous_frame || document.HasMember("requires_reset")) {
+                host.history_replayable = false;
+            }
+        } else if (name == "reload_scripts" && ok) {
+            host.history_replayable = false;
+        }
         if (name == "describe" && document["ok"].GetBool()) {
             AddExecutionLimits(document, host.limits);
             host.description = Serialize(document);

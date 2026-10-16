@@ -110,6 +110,10 @@ set_tests_properties(agent_hot_reload PROPERTIES TIMEOUT 60)
 add_test(NAME agent_batch_update COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_batch_update_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_batch_update PROPERTIES TIMEOUT 60)
+add_test(NAME agent_checkpoint COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/agent_checkpoint_test.py"
+    $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
+set_tests_properties(agent_checkpoint PROPERTIES TIMEOUT 120)
 add_test(NAME asset_import COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/asset_import_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(asset_import PROPERTIES TIMEOUT 180)

@@ -17,7 +17,7 @@
 
 namespace {
 using Document = rapidjson::Document;
-const std::set<std::string> kRecorded{"observe", "step", "run_until", "reset", "reload_scripts"};
+const std::set<std::string> kRecorded{"observe", "step", "run_until", "reset", "reload_scripts", "checkpoint", "restore"};
 
 std::string Serialize(const rapidjson::Value &value) {
     rapidjson::StringBuffer buffer;
