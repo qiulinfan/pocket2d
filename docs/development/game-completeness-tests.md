@@ -51,16 +51,14 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
 | Lua 光照每帧 ~1,450 次绘制（PT） | `Tilemap:ComputeLight` 原生光照写入 `dynamic:` 动态图片；PT headless 1.18 → 0.076 ms/帧 |
 | 物品 kind 固定、无图标（PT） | 新增 `tool`/`placeable`/`consumable` 与 `icon` 字段 |
 | Tilemap 只有 ground/solid 两层（VR、PT） | 至多 6 个额外命名装饰层（各有排序，只有 solid 碰撞）；PT 背景墙改用独立 `walls` 层 |
+| 新实例化的 actor 同帧内字段未初始化（VR、PT） | `OnAwake`：发布即执行（Instantiate/AddComponent 返回前，场景内先全部 awake 再 start） |
+| agent 指令预算按整个请求计，长 step 失败（PT） | `step`/`run_until` 每个 tick 补满预算，失控 tick 仍失败 |
 | Unity 导入器只在游戏项目里（VR） | `pocket import unity`：场景与 prefab 实例、tilemap、精灵、碰撞体、实体；VR 重新导入逐字节一致 |
 
 （VR = Village_Rim，PT = PocketTerraria。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
 ## 仍存在的缺口与暂不修改的原因
 
-- **新实例化的 actor 下一帧才 OnStart**：与 Unity 的 `Start` 语义一致（Unity 另有立即执行的
-  `Awake`）。同一帧内 OnStart 设置的字段为空，agent 观测也为空值；脚本可把初值写成类型默认字段，
-  或在使用前检查。是否增加立即执行的 `OnAwake` 回调，需要单独评估生命周期影响。
-- **agent 指令预算按请求计算**：属于 worker 隔离设计；长 step 拆分或用 `--instruction-budget` 调大。
 - **导入近似**：Unity Sprite 形状碰撞按整格；有缩放/旋转的 tilemap、九宫格精灵和 trigger 只记录在
   `import_report.json`。
 - **Village_Rim 未迁移的玩法**：对话/任务、背包与快捷栏 UI、祭坛与元素、入侵、Boss、农场、存档、音频；
