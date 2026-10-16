@@ -77,6 +77,34 @@ callbacks directly on the component or on a statically inherited prototype.
 Dispatch of discovered callbacks still uses protected runtime lookup. Dynamic
 data getters and protected runtime lookup of `OnAnimationEvent` remain supported.
 
+### Batched updates
+
+A component type may define `OnUpdateBatch(instances)` on its type table
+instead of a per-instance `OnUpdate`. Each frame, at the update-order position
+of the type's first started instance, the engine calls it once with an array
+of that type's live, enabled, started instances in update order. Instances
+are collected when the call starts; the array is reused between frames, so do
+not keep it. A Lua error stops the whole batch and is reported once as
+`Type.OnUpdateBatch`. This removes the per-instance protected call: the
+bunnymark's 50,000 movers spend about 7% less main-thread time
+(`bunnymark_benchmark ... batch`). Use it for many simple instances; keep
+`OnUpdate` when instances must interleave with other components exactly.
+
+```lua
+Mover = {
+    vx = 1,
+    OnUpdateBatch = function(movers)
+        for i = 1, #movers do
+            local self = movers[i]
+            self.transform:SetLocalPosition(self.transform.x + self.vx / 60, self.transform.y)
+        end
+    end
+}
+```
+
+`Transform:SetLocalPosition(x, y)` sets both local coordinates with one call,
+about a fifth cheaper than two property writes for per-frame movement.
+
 An initially disabled component keeps its `OnStart` pending until a frame-start
 boundary observes it enabled. Startup occurs once; disabling and reenabling an
 already-started component does not repeat it. Components enabled after that

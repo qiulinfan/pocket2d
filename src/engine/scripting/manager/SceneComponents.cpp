@@ -114,6 +114,8 @@ std::unique_ptr<ComponentRecord> PrepareComponentRecord(const Actor::ComponentSp
     if(spec.type=="ParticleSystem") LuaBoundary::Cast<ParticleSystem *>(instance)->ValidateConfiguration();
     std::array<bool,8> present{};
     for(std::size_t index=0;index<callbacks.size();++index) present[index]=StaticField(instance,callbacks[index]).isFunction();
+    // A type-level OnUpdateBatch also puts the instance in the update order.
+    present[2]=present[2]||StaticField(instance,"OnUpdateBatch").isFunction();
     return std::make_unique<ComponentRecord>(spec.key,spec.type,std::move(instance),present[0],present[1],present[2],present[3],present[4],present[5],present[6],present[7]);
 }
 void InstallPreparedComponent(Actor::UID uid,std::unique_ptr<ComponentRecord> record) {

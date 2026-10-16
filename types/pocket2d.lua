@@ -100,6 +100,9 @@ function _Vector2:Length() end
 ---@field y number # mutable
 ---@field rotation number # mutable
 local _Transform = {}
+---@param x number
+---@param y number
+function _Transform:SetLocalPosition(x, y) end
 
 ---Native opaque value; TypeScript nominal markers are compile-only.
 ---@class SpriteRenderer: Component

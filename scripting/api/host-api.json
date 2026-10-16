@@ -649,7 +649,23 @@
           "access": "mutable"
         }
       ],
-      "methods": [],
+      "methods": [
+        {
+          "name": "SetLocalPosition",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        }
+      ],
       "extends": "Component",
       "nominal": true
     },

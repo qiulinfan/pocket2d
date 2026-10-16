@@ -23,6 +23,11 @@ void SetComponentActor(Component *component, ActorHandle handle) {
     component->actor = handle.Resolve();
 }
 
+// One call instead of two property writes for per-frame movement.
+void SetTransformLocalPosition(Transform *value, float x, float y) {
+    value->x = x;
+    value->y = y;
+}
 float GetTransformRotation(const Transform *value) { return value->rotation; }
 void SetTransformRotation(Transform *value, float rotation) {
     if (value->actor_handle.IsValid() &&
@@ -41,6 +46,7 @@ void InjectTransformAPI() {
         .addPropertyReadWrite("x", &Transform::x)
         .addPropertyReadWrite("y", &Transform::y)
         .addProperty("rotation", &GetTransformRotation, &SetTransformRotation)
+        .addFunction("SetLocalPosition", &SetTransformLocalPosition)
         .endClass();
 }
 

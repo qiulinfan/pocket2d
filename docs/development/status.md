@@ -146,6 +146,13 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   and Stop buttons, the Runtime menu items and F5 each start and stop a
   separate play World. The editor app's own dock layout and window are still
   not exercised by these tests.
+- Lua execution model: component types may define `OnUpdateBatch(instances)`
+  for one call per type per frame, and `Transform:SetLocalPosition(x, y)` sets
+  both coordinates in one call. `bunnymark_benchmark` (Lua per-bunny gravity
+  and bounce, `gpu` renderer, Release): 50,000 bunnies main-thread CPU p50
+  19.1 ms with property writes, 15.0–15.4 ms with `SetLocalPosition`, and a
+  median of 14.2 ms with batching (six interleaved runs; thermal throttling
+  makes single runs vary by up to 4 ms).
 
 ## Completed and verified in this slice
 

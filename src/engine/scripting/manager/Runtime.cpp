@@ -239,6 +239,7 @@ void ComponentManager::Shutdown() {
     APIRegistration::BindEngine(nullptr);
     Runtime().runtime_add_component_counter = 0;
     Runtime().component_type_tables.clear();
+    Runtime().batch_update_lists.clear();
     Runtime().component_type_sources.clear();
     Runtime().component_source_cache.clear();
     Runtime().component_source_owners.clear();

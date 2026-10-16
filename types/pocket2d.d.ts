@@ -74,6 +74,7 @@ interface Transform extends Component {
     x: number;
     y: number;
     rotation: number;
+    SetLocalPosition(this: Transform, x: number, y: number): void;
 }
 
 interface SpriteRenderer extends Component {

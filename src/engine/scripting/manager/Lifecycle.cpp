@@ -8,6 +8,8 @@
 #include "scene/Transform.h"
 #include "../luaapi/RegistrationDetail.h"
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 #include <cmath>
 
 using namespace ManagerDetail;
@@ -181,6 +183,62 @@ void Invoke(CallbackTarget &target, const char *method, const Collision *collisi
         ReportError(GetActorNameByUID(target.uid), error);
     }
 }
+// Calls Type.OnUpdateBatch(instances) once with every live, enabled instance
+// of targets[first]'s type from `first` on, in update order. Instances are
+// read when the batch starts; a Lua error stops the whole batch.
+void InvokeBatch(RuntimeState &runtime, std::vector<CallbackTarget> &targets, std::size_t first) {
+    lua_State *state = runtime.lua_state;
+    const int top = lua_gettop(state);
+    struct Restore { lua_State *state; int top; ~Restore() { lua_settop(state, top); } } restore{state, top};
+    const std::string type = Alive(runtime, targets[first])->type;
+    try {
+        if (!lua_checkstack(state, 8)) throw LuaBoundary::Error("Lua batch could not reserve stack space");
+        const auto table = runtime.component_type_tables.find(type);
+        if (table == runtime.component_type_tables.end()) return;
+        table->second.push(state);
+        if (!lua_istable(state, -1)) return;
+        lua_pushliteral(state, "OnUpdateBatch");
+        lua_rawget(state, -2);
+        lua_remove(state, -2);
+        if (!lua_isfunction(state, -1)) return;
+        // Reuse the type's list table: a fresh table per frame is garbage
+        // proportional to the instance count.
+        auto list_ref = runtime.batch_update_lists.find(type);
+        if (list_ref == runtime.batch_update_lists.end()) {
+            lua_createtable(state, 0, 0);
+            list_ref = runtime.batch_update_lists.emplace(type, luabridge::LuaRef::fromStack(state)).first;
+        }
+        list_ref->second.push(state);
+        const int list = lua_gettop(state);
+        const lua_Integer previous = static_cast<lua_Integer>(lua_rawlen(state, list));
+        lua_Integer count = 0;
+        for (std::size_t index = first; index < targets.size(); ++index) {
+            ComponentRecord *component = Alive(runtime, targets[index]);
+            if (component == nullptr || component->type != type) continue;
+            component->instance_table.push(state);
+            bool enabled = true;
+            if (PushRawField(state, "enabled")) {
+                enabled = lua_type(state, -1) != LUA_TBOOLEAN || lua_toboolean(state, -1) != 0;
+                lua_pop(state, 1);
+            } else {
+                lua_pop(state, 1);
+                enabled = LuaBoundary::IsEnabled(ProtectedField(component->instance_table, "enabled"));
+                component->instance_table.push(state);
+                if (Alive(runtime, targets[index]) == nullptr) { lua_pop(state, 1); continue; }
+            }
+            if (enabled) lua_rawseti(state, list, ++count);
+            else lua_pop(state, 1);
+        }
+        for (lua_Integer index = previous; index > count; --index) {
+            lua_pushnil(state);
+            lua_rawseti(state, list, index);
+        }
+        LuaBoundary::ProtectedCall(state, 1, 0);
+    } catch (const LuaBoundary::Error &error) {
+        ReportError(type + ".OnUpdateBatch", error);
+    }
+}
+
 void DispatchContact(Actor::UID uid, const Collision &collision, const char *method,
                      bool ComponentRecord::*has_method) {
     const auto found = Runtime().actor_components.find(uid);
@@ -331,13 +389,39 @@ void ComponentManager::ProcessOnUpdate() {
         if (component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
     }
     Engine *engine = BoundEngine();
-    for (auto &target : targets) {
+    // Types whose table defines OnUpdateBatch(instances) are updated by one
+    // call at their first instance's place in the update order.
+    std::unordered_map<std::string, bool> batched;
+    std::unordered_set<std::string> batch_done;
+    const auto is_batched = [&](const ComponentRecord &component) {
+        if (IsBuiltinComponentType(component.type)) return false;
+        const auto [found, inserted] = batched.try_emplace(component.type, false);
+        if (inserted) {
+            const auto type = runtime.component_type_tables.find(component.type);
+            if (type != runtime.component_type_tables.end()) {
+                lua_State *state = runtime.lua_state;
+                const int top = lua_gettop(state);
+                type->second.push(state);
+                // Raw: no user metamethod runs outside a protected call.
+                found->second = lua_istable(state, -1) &&
+                                (lua_pushliteral(state, "OnUpdateBatch"), lua_rawget(state, -2)) == LUA_TFUNCTION;
+                lua_settop(state, top);
+            }
+        }
+        return found->second;
+    };
+    for (std::size_t index = 0; index < targets.size(); ++index) {
+        auto &target = targets[index];
         if (engine && engine->RequiresSceneReset()) return;
         auto *component = Alive(runtime, target);
         if (!component) continue;
         // Preserve original per-component ordering: earlier Lua updates can
         // change this emitter's enabled state during the same tick.
         SyncBuiltinParticleSystemState(*component);
+        if (is_batched(*component)) {
+            if (batch_done.insert(component->type).second) InvokeBatch(runtime, targets, index);
+            continue;
+        }
         Invoke(target, "OnUpdate");
     }
 }

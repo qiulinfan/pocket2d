@@ -220,6 +220,7 @@ ScriptReloadResult ComponentManager::ReloadScripts(const std::vector<std::string
             auto meta=luabridge::newTable(state);meta["__index"]=after;
             std::array<bool,8> callbacks_present{};
             for(std::size_t i=0;i<callbacks.size();++i)callbacks_present[i]=Raw(after,callbacks[i]).isFunction();
+            callbacks_present[2]=callbacks_present[2]||Raw(after,"OnUpdateBatch").isFunction();
             prepared.push_back({record.get(),std::move(meta),std::move(defaults),callbacks_present});
             future_flags.emplace(record.get(),callbacks_present);
             events.push_back({record->instance_table,replacements.at(record->type)});

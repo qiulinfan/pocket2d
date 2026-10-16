@@ -107,6 +107,9 @@ set_tests_properties(agent_image PROPERTIES TIMEOUT 120)
 add_test(NAME agent_hot_reload COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_hot_reload_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_hot_reload PROPERTIES TIMEOUT 60)
+add_test(NAME agent_batch_update COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/agent_batch_update_test.py" $<TARGET_FILE:game_engine>)
+set_tests_properties(agent_batch_update PROPERTIES TIMEOUT 60)
 add_test(NAME asset_import COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/asset_import_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(asset_import PROPERTIES TIMEOUT 180)
@@ -151,6 +154,7 @@ set_tests_properties(tilemap_render_software PROPERTIES TIMEOUT 30)
 pocket_runtime_test(tilemap_benchmark tilemap_benchmark.cpp)
 pocket_runtime_test(text_benchmark text_benchmark.cpp)
 pocket_runtime_test(physics_benchmark physics_benchmark.cpp)
+pocket_runtime_test(bunnymark_benchmark bunnymark_benchmark.cpp)
 add_test(NAME physics_threads COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/physics_threads_test.py" $<TARGET_FILE:physics_benchmark>)
 set_tests_properties(physics_threads PROPERTIES TIMEOUT 600)

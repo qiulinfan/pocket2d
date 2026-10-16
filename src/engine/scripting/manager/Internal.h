@@ -134,6 +134,8 @@ struct RuntimeState {
     lua_State *lua_state = nullptr;
     // component type registry：type 名 -> component type table (blueprint)
     std::unordered_map<std::string, luabridge::LuaRef> component_type_tables;
+    // Per-type instance lists reused by OnUpdateBatch calls.
+    std::unordered_map<std::string, luabridge::LuaRef> batch_update_lists;
     std::unordered_map<std::string, std::string> component_type_sources;
     // Every successfully loaded canonical source survives variant switches
     // until explicit reload replaces it or the project VM is shut down.
