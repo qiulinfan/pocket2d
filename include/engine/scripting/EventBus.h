@@ -2,6 +2,8 @@
 #define EVENTBUS_H
 
 #include "scene/Actor.h"
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <vector>
@@ -116,6 +118,18 @@ void Clear();
 // fully reset EventBus, including hooks
 // 完整重置 EventBus, 包括 hooks
 void Shutdown();
+
+// Agent observation of published event types, per World and off by default.
+// At most kPublishTraceLimit records are kept; older ones are dropped.
+struct PublishedEvent {
+    int frame = 0;
+    std::string type;
+};
+inline constexpr std::size_t kPublishTraceLimit = 4096;
+void SetPublishTracing(bool enabled);
+// Returns and clears the records since the last call; dropped receives the
+// number discarded for exceeding the limit.
+std::vector<PublishedEvent> TakePublishedEvents(std::uint64_t *dropped = nullptr);
 
 // publish immediately to current active subscribers
 // 立即发布给当前已经生效的订阅者

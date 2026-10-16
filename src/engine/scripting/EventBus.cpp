@@ -5,6 +5,9 @@
 #include "LuaBridge/LuaBridge.h"
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <deque>
+#include <iterator>
 #include <set>
 #include <unordered_set>
 #include <stdexcept>
@@ -59,6 +62,9 @@ struct EventBusState {
         event_subscriptions;
     std::vector<PendingEventOperation> pending_event_operations;
     unsigned dispatch_depth = 0;
+    bool trace_publishes = false;
+    std::deque<EventBus::PublishedEvent> published;
+    std::uint64_t published_dropped = 0;
 };
 EventBusState &Bus() { return World::Current().State<EventBusState>(); }
 struct DispatchScope {
@@ -286,8 +292,31 @@ void Shutdown() {
     Bus().hooks = Hooks();
 }
 
+void SetPublishTracing(bool enabled) {
+    Bus().trace_publishes = enabled;
+    if (!enabled) { Bus().published.clear(); Bus().published_dropped = 0; }
+}
+
+std::vector<PublishedEvent> TakePublishedEvents(std::uint64_t *dropped) {
+    if (dropped) *dropped = Bus().published_dropped;
+    Bus().published_dropped = 0;
+    auto &published = Bus().published;
+    std::vector<PublishedEvent> result(std::make_move_iterator(published.begin()),
+                                       std::make_move_iterator(published.end()));
+    published.clear();
+    return result;
+}
+
 // publish immediately to current active subscribers
 void Publish(const std::string &event_type, luabridge::LuaRef event_object) {
+    if (Bus().trace_publishes) {
+        auto &published = Bus().published;
+        if (published.size() == kPublishTraceLimit) {
+            published.pop_front();
+            ++Bus().published_dropped;
+        }
+        published.push_back({World::Current().frame_number, event_type});
+    }
     const DispatchScope dispatch;
     // Publish 是立即分发的: 只读取“当前已生效”的订阅表
     auto subscriptions_it = Bus().event_subscriptions.find(event_type);

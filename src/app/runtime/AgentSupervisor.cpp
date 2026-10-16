@@ -1,4 +1,5 @@
 #include "app/runtime/AgentSupervisor.h"
+#include "app/runtime/AgentProtocolSchema.h"
 #include <SDL3/SDL.h>
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -53,7 +54,7 @@ void ValidateResponse(const rapidjson::Value &response) {
         throw WorkerFailure("worker_protocol_error", "worker output was not a protocol JSON object");
     if (response["ok"].GetBool()) {
         if (!response.HasMember("protocol") || !response["protocol"].IsInt() ||
-            response["protocol"].GetInt() != 1)
+            response["protocol"].GetInt() != PocketAgentProtocol::kVersion)
             throw WorkerFailure("worker_protocol_error", "worker protocol version mismatch");
     } else if (!response.HasMember("error") || !response["error"].IsString()) {
         throw WorkerFailure("worker_protocol_error", "worker error response is missing its diagnostic");
@@ -107,6 +108,12 @@ void ValidateShape(const std::string &command, const rapidjson::Value &response)
         for (const auto &type : reload["types"].GetArray())
             if (!type.IsString() || type.GetStringLength() == 0)
                 throw WorkerFailure("worker_protocol_error", "worker reload result has an invalid type name");
+    } else if (command == "run_until") {
+        ValidateObservation(response);
+        if (!response.HasMember("run_until") || !response["run_until"].IsObject() ||
+            !response["run_until"].HasMember("reason") || !response["run_until"]["reason"].IsString() ||
+            !response["run_until"].HasMember("frames") || !response["run_until"]["frames"].IsInt())
+            throw WorkerFailure("worker_protocol_error", "worker run_until result has an invalid shape");
     } else if (command == "quit") {
         if (!response.HasMember("frame") || !response["frame"].IsInt() ||
             !response.HasMember("running") || !response["running"].IsBool() ||
@@ -164,7 +171,7 @@ std::string QuitResponse(int frame) {
     rapidjson::Document document;
     document.SetObject();
     document.AddMember("ok", true, document.GetAllocator());
-    document.AddMember("protocol", 1, document.GetAllocator());
+    document.AddMember("protocol", PocketAgentProtocol::kVersion, document.GetAllocator());
     document.AddMember("frame", frame, document.GetAllocator());
     document.AddMember("running", false, document.GetAllocator());
     return Serialize(document);
@@ -404,14 +411,29 @@ int RunAgentSupervisor(const std::filesystem::path &executable,
             std::cout << Error("invalid_request", "expected a JSON object with string cmd and nesting at most 64", frame, false) << std::endl;
             continue;
         }
+        // v2 clients may correlate responses with any string or integer id.
+        rapidjson::Value client_id;
+        if (request.HasMember("id") && (request["id"].IsString() || request["id"].IsInt64() || request["id"].IsUint64()))
+            client_id.CopyFrom(request["id"], request.GetAllocator());
+        const auto emit = [&](const std::string &response) {
+            if (client_id.IsNull()) { std::cout << response << std::endl; return; }
+            rapidjson::Document document;
+            document.Parse(response.data(), response.size());
+            if (!document.IsObject()) { std::cout << response << std::endl; return; }
+            document.RemoveMember("id");
+            rapidjson::Value id;
+            id.CopyFrom(client_id, document.GetAllocator());
+            document.AddMember("id", id, document.GetAllocator());
+            std::cout << Serialize(document) << std::endl;
+        };
         const std::string name(request["cmd"].GetString(), request["cmd"].GetStringLength());
         if (name.find('\0') != std::string::npos) {
-            std::cout << Error("invalid_request", "cmd must not contain a NUL byte", frame, false) << std::endl;
+            emit(Error("invalid_request", "cmd must not contain a NUL byte", frame, false));
             continue;
         }
         if (name == "_bootstrap" || request.HasMember("_pocket_request_id") ||
             request.HasMember("_initial_observation")) {
-            std::cout << Error("invalid_request", "private worker protocol fields are reserved", frame, false) << std::endl;
+            emit(Error("invalid_request", "private worker protocol fields are reserved", frame, false));
             continue;
         }
         if (name == "quit") {
@@ -425,16 +447,15 @@ int RunAgentSupervisor(const std::filesystem::path &executable,
                 }
             }
             const bool reaped = worker.Stop();
-            std::cout << (reaped ? QuitResponse(frame)
-                                : Error("worker_cleanup_failed", "worker did not terminate", frame, true))
-                      << std::endl;
+            emit(reaped ? QuitResponse(frame)
+                        : Error("worker_cleanup_failed", "worker did not terminate", frame, true));
             return reaped ? 0 : 1;
         }
         if (name == "describe" && !worker.Exists()) {
             auto cached = ParseResponse(description);
             SetBool(cached, "runtime_available", false);
             SetBool(cached, "requires_reset", true);
-            std::cout << Serialize(cached) << std::endl;
+            emit(Serialize(cached));
             continue;
         }
         try {
@@ -442,7 +463,7 @@ int RunAgentSupervisor(const std::filesystem::path &executable,
             std::string response;
             if (name == "reset") {
                 if (request.HasMember("seed") && !request["seed"].IsUint()) {
-                    std::cout << Error("invalid_request", "seed must be uint32", frame, false) << std::endl;
+                    emit(Error("invalid_request", "seed must be uint32", frame, false));
                     continue;
                 }
                 if (request.HasMember("seed")) seed = request["seed"].GetUint();
@@ -457,7 +478,7 @@ int RunAgentSupervisor(const std::filesystem::path &executable,
                 }
                 response = start(end);
             } else if (!worker.Exists()) {
-                std::cout << Error("worker_unavailable", "runtime unavailable; reset required", frame, true) << std::endl;
+                emit(Error("worker_unavailable", "runtime unavailable; reset required", frame, true));
                 continue;
             }
             if (name != "reset") response = worker.Exchange(line, end);
@@ -471,14 +492,14 @@ int RunAgentSupervisor(const std::filesystem::path &executable,
             if (document.HasMember("requires_reset") && document["requires_reset"].IsBool() &&
                 document["requires_reset"].GetBool()) {
                 if (!worker.Stop()) {
-                    std::cout << Error("worker_cleanup_failed", "worker did not terminate", frame, true) << std::endl;
+                    emit(Error("worker_cleanup_failed", "worker did not terminate", frame, true));
                     return 1;
                 }
             }
-            std::cout << response << std::endl;
+            emit(response);
         } catch (const WorkerFailure &error) {
             const bool reaped = worker.Stop();
-            std::cout << Error(error.code, error.what(), frame, true, error.response) << std::endl;
+            emit(Error(error.code, error.what(), frame, true, error.response));
             if (!reaped) return 1;
         }
     }

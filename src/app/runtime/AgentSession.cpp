@@ -7,6 +7,8 @@
 #include "engine/scripting/ComponentManager.h"
 #include "engine/scripting/ScriptBudget.h"
 #include "engine/scripting/ScriptAPIContract.h"
+#include "engine/scripting/EventBus.h"
+#include "app/runtime/AgentProtocolSchema.h"
 #include "engine/scene/Tilemap.h"
 #include "shared/resources/ResourcePath.h"
 #include "rapidjson/document.h"
@@ -22,7 +24,9 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <optional>
 #include <type_traits>
+#include <variant>
 
 namespace {
 using Writer = rapidjson::Writer<rapidjson::StringBuffer>;
@@ -143,7 +147,7 @@ std::string Observe(const Engine &engine, std::uint32_t seed,
     Writer out(buffer);
     out.StartObject();
     out.Key("ok"); out.Bool(true);
-    out.Key("protocol"); out.Int(1);
+    out.Key("protocol"); out.Int(PocketAgentProtocol::kVersion);
     out.Key("frame"); out.Int(FrameClock::GetFrameNumber());
     out.Key("delta_time"); out.Double(FrameClock::GetDeltaTime());
     out.Key("seed"); out.Uint(seed);
@@ -311,10 +315,13 @@ std::string Describe(bool runtime_available) {
     Writer out(buffer);
     out.StartObject();
     out.Key("ok"); out.Bool(true);
-    out.Key("protocol"); out.Int(1);
+    out.Key("protocol"); out.Int(PocketAgentProtocol::kVersion);
     out.Key("commands"); out.StartArray();
-    for (const char *name : {"describe", "observe", "step", "reload_scripts", "reset", "quit"}) out.String(name);
+    for (const auto name : PocketAgentProtocol::kCommands)
+        out.String(name.data(), static_cast<rapidjson::SizeType>(name.size()));
     out.EndArray();
+    out.Key("command_schema");
+    out.RawValue(PocketAgentProtocol::kSchemaJson.data(), PocketAgentProtocol::kSchemaJson.size(), rapidjson::kObjectType);
     out.Key("simulation_hz"); out.Int(60);
     out.Key("step"); out.StartObject();
     out.Key("frames"); out.StartObject();
@@ -437,6 +444,148 @@ void ApplyMouse(Engine &engine, const MouseAction &before, const MouseAction &af
     }
 }
 
+// run_until stop conditions. Any condition holding after a tick stops the run.
+struct StopCondition {
+    enum class Kind { Event, Property, Exists } kind = Kind::Event;
+    std::string event;
+    std::string actor, component, property, op;
+    std::variant<double, std::string, bool> value;
+    bool exists = true;
+};
+
+std::string RequiredString(const rapidjson::Value &object, const char *key, const char *context) {
+    if (!object.HasMember(key) || !object[key].IsString() || object[key].GetStringLength() == 0)
+        throw std::invalid_argument(std::string(context) + "." + key + " must be a nonempty string");
+    return {object[key].GetString(), object[key].GetStringLength()};
+}
+
+std::vector<StopCondition> ReadConditions(const rapidjson::Value &command) {
+    if (!command.HasMember("until") || !command["until"].IsArray() ||
+        command["until"].Empty() || command["until"].Size() > 16)
+        throw std::invalid_argument("run_until.until must contain 1..16 conditions");
+    std::vector<StopCondition> result;
+    for (const auto &entry : command["until"].GetArray()) {
+        if (!entry.IsObject()) throw std::invalid_argument("each run_until condition must be an object");
+        StopCondition condition;
+        if (entry.HasMember("event")) {
+            condition.kind = StopCondition::Kind::Event;
+            condition.event = RequiredString(entry, "event", "condition");
+        } else if (entry.HasMember("actor_exists")) {
+            condition.kind = StopCondition::Kind::Exists;
+            condition.actor = RequiredString(entry, "actor_exists", "condition");
+            if (entry.HasMember("value")) {
+                if (!entry["value"].IsBool()) throw std::invalid_argument("condition.value for actor_exists must be a boolean");
+                condition.exists = entry["value"].GetBool();
+            }
+        } else if (entry.HasMember("actor")) {
+            condition.kind = StopCondition::Kind::Property;
+            condition.actor = RequiredString(entry, "actor", "condition");
+            condition.property = RequiredString(entry, "property", "condition");
+            if (entry.HasMember("component")) condition.component = RequiredString(entry, "component", "condition");
+            condition.op = RequiredString(entry, "op", "condition");
+            static const std::set<std::string> ops{"==", "!=", "<", "<=", ">", ">="};
+            if (!ops.count(condition.op)) throw std::invalid_argument("condition.op must be one of == != < <= > >=");
+            if (!entry.HasMember("value")) throw std::invalid_argument("condition.value is required");
+            const auto &value = entry["value"];
+            if (value.IsNumber() && std::isfinite(value.GetDouble())) condition.value = value.GetDouble();
+            else if (value.IsString()) condition.value = std::string(value.GetString(), value.GetStringLength());
+            else if (value.IsBool()) condition.value = value.GetBool();
+            else throw std::invalid_argument("condition.value must be a finite number, string or boolean");
+        } else {
+            throw std::invalid_argument("each run_until condition needs event, actor or actor_exists");
+        }
+        result.push_back(std::move(condition));
+    }
+    return result;
+}
+
+// An actor named by decimal UID, else the lowest live UID with that name.
+const Actor *FindActorRef(const Engine &engine, const std::string &reference) {
+    Actor::UID uid = 0;
+    const char *start = reference.data(), *end = start + reference.size();
+    const auto parsed = std::from_chars(start, end, uid);
+    const bool numeric = parsed.ec == std::errc{} && parsed.ptr == end;
+    const Actor *found = nullptr;
+    for (const auto &actor : engine.GetRuntimeActors()) {
+        if (actor.runtime_destroyed) continue;
+        if (numeric ? actor.uid == uid : actor.actor_name == reference)
+            if (found == nullptr || actor.uid < found->uid) found = &actor;
+    }
+    return found;
+}
+
+template<class T> bool Compare(const T &left, const std::string &op, const T &right) {
+    if (op == "==") return left == right;
+    if (op == "!=") return left != right;
+    if (op == "<") return left < right;
+    if (op == "<=") return left <= right;
+    if (op == ">") return left > right;
+    return left >= right;
+}
+
+bool PropertyHolds(const Engine &engine, const StopCondition &condition) {
+    const Actor *actor = FindActorRef(engine, condition.actor);
+    if (actor == nullptr) return false;
+    std::optional<Actor::ComponentPropertyValue> current;
+    if (condition.component.empty()) {
+        float x = 0, y = 0, rotation = 0;
+        if (!ComponentManager::TryGetRuntimeTransformWorld(actor->uid, x, y, rotation)) return false;
+        if (condition.property == "x") current = static_cast<double>(x);
+        else if (condition.property == "y") current = static_cast<double>(y);
+        else if (condition.property == "rotation") current = static_cast<double>(rotation);
+    } else {
+        for (auto &property : ComponentManager::GetRuntimeComponentProperties(actor->uid, condition.component))
+            if (property.name == condition.property) { current = std::move(property.value); break; }
+    }
+    if (!current) return false;
+    if (const auto *expected = std::get_if<double>(&condition.value)) {
+        if (const auto *number = std::get_if<double>(&*current)) return Compare(*number, condition.op, *expected);
+        if (const auto *integer = std::get_if<int>(&*current)) return Compare(static_cast<double>(*integer), condition.op, *expected);
+        return false;
+    }
+    if (const auto *expected = std::get_if<std::string>(&condition.value)) {
+        const auto *text = std::get_if<std::string>(&*current);
+        return text != nullptr && Compare(*text, condition.op, *expected);
+    }
+    const auto *flag = std::get_if<bool>(&*current);
+    const bool expected = std::get<bool>(condition.value);
+    return flag != nullptr && (condition.op == "==" ? *flag == expected : condition.op == "!=" ? *flag != expected : false);
+}
+
+std::string WithRunResult(const std::string &observation, const char *reason, int frames,
+                          std::optional<std::size_t> matched, const EventBus::PublishedEvent *event) {
+    rapidjson::Document response;
+    response.Parse(observation.data(), observation.size());
+    auto &allocator = response.GetAllocator();
+    rapidjson::Value result(rapidjson::kObjectType);
+    result.AddMember("reason", rapidjson::StringRef(reason), allocator);
+    result.AddMember("frames", frames, allocator);
+    if (matched) result.AddMember("condition", static_cast<std::uint64_t>(*matched), allocator);
+    else result.AddMember("condition", rapidjson::Value(rapidjson::kNullType), allocator);
+    if (event) {
+        rapidjson::Value matched_event(rapidjson::kObjectType);
+        matched_event.AddMember("type", rapidjson::Value(event->type.c_str(), allocator), allocator);
+        matched_event.AddMember("frame", event->frame, allocator);
+        result.AddMember("event", std::move(matched_event), allocator);
+    }
+    response.AddMember("run_until", std::move(result), allocator);
+    rapidjson::StringBuffer buffer;
+    Writer writer(buffer); response.Accept(writer);
+    return buffer.GetString();
+}
+
+struct RunSummary {
+    const char *reason;
+    int frames;
+    std::optional<std::size_t> condition;
+    std::optional<EventBus::PublishedEvent> event;
+};
+
+struct PublishTracing {
+    PublishTracing() { EventBus::SetPublishTracing(true); EventBus::TakePublishedEvents(); }
+    ~PublishTracing() { EventBus::SetPublishTracing(false); }
+};
+
 void EmitResponse(std::ostream &output, const std::string &json, const std::string &request_id = {}) {
     rapidjson::Document response;
     response.Parse(json.data(), json.size());
@@ -530,7 +679,8 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
             if (startup_request) throw std::runtime_error("internal worker bootstrap required");
             if (name == "quit") {
                 if (engine) engine->RequestQuit();
-                EmitResponse(responses, "{\"ok\":true,\"protocol\":1,\"running\":false,\"frame\":" +
+                EmitResponse(responses, "{\"ok\":true,\"protocol\":" + std::to_string(PocketAgentProtocol::kVersion) +
+                             ",\"running\":false,\"frame\":" +
                              std::to_string(FrameClock::GetFrameNumber()) + "}", request_id);
                 break;
             }
@@ -567,19 +717,35 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 EmitResponse(responses, ReloadResponse(*engine, seed, result), request_id);
                 continue;
             }
+            std::optional<RunSummary> run_summary;
             if (name == "reset") {
                 if (command.HasMember("seed")) {
                     if (!command["seed"].IsUint()) throw std::runtime_error("seed must be uint32");
                     seed = command["seed"].GetUint();
                 }
                 reset();
-            } else if (name == "step") {
+            } else if (name == "step" || name == "run_until") {
+                const bool run_until = name == "run_until";
                 int frames = 1;
-                if (command.HasMember("frames")) {
-                    if (!command["frames"].IsInt()) throw std::runtime_error("frames must be an integer");
-                    frames = command["frames"].GetInt();
+                std::vector<StopCondition> conditions;
+                if (run_until) {
+                    try {
+                        if (!command.HasMember("max_frames") || !command["max_frames"].IsInt() ||
+                            command["max_frames"].GetInt() < 1 || command["max_frames"].GetInt() > 36000)
+                            throw std::invalid_argument("run_until.max_frames must be an integer in [1, 36000]");
+                        frames = command["max_frames"].GetInt();
+                        conditions = ReadConditions(command);
+                    } catch (const std::invalid_argument &error) {
+                        EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
+                        continue;
+                    }
+                } else {
+                    if (command.HasMember("frames")) {
+                        if (!command["frames"].IsInt()) throw std::runtime_error("frames must be an integer");
+                        frames = command["frames"].GetInt();
+                    }
+                    if (frames < 1 || frames > 3600) throw std::runtime_error("frames must be in [1, 3600]");
                 }
-                if (frames < 1 || frames > 3600) throw std::runtime_error("frames must be in [1, 3600]");
                 auto next = command.HasMember("keys") ? ReadKeys(command["keys"]) : held;
                 auto next_mouse = mouse;
                 next_mouse.wheel = 0;
@@ -587,10 +753,16 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 if (!engine->IsRunning()) throw std::runtime_error("runtime stopped; reset required");
                 ApplyKeys(*engine, held, next); held = std::move(next);
                 ApplyMouse(*engine, mouse, next_mouse); mouse = std::move(next_mouse);
+                std::optional<PublishTracing> tracing;
+                if (run_until) tracing.emplace();
                 const int previous_errors = ComponentManager::GetRuntimeErrorCount();
-                for (int i = 0; i < frames && engine->IsRunning(); ++i) {
+                int advanced = 0;
+                std::optional<std::size_t> matched;
+                std::optional<EventBus::PublishedEvent> matched_event;
+                for (int i = 0; i < frames && engine->IsRunning() && !matched; ++i) {
                     const auto scene_attempt = engine->GetSceneLoadAttemptRevision();
                     engine->StepSimulation();
+                    ++advanced;
                     if (engine->RequiresSceneReset() && !engine->GetLastSceneEditError().empty())
                         throw std::runtime_error(engine->GetLastSceneEditError());
                     if (engine->RequiresSceneReset() && !engine->GetLastRuntimeActorError().empty())
@@ -602,7 +774,23 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                         throw SceneLoadFailure(engine->GetLastSceneLoadError(), engine->RequiresSceneReset());
                     if (ComponentManager::GetRuntimeErrorCount() != previous_errors)
                         throw std::runtime_error(ComponentManager::GetLastRuntimeError());
+                    if (!run_until) continue;
+                    const auto events = EventBus::TakePublishedEvents();
+                    for (std::size_t c = 0; c < conditions.size() && !matched; ++c) {
+                        const auto &condition = conditions[c];
+                        if (condition.kind == StopCondition::Kind::Event) {
+                            for (const auto &event : events)
+                                if (event.type == condition.event) { matched = c; matched_event = event; break; }
+                        } else if (condition.kind == StopCondition::Kind::Exists) {
+                            if ((FindActorRef(*engine, condition.actor) != nullptr) == condition.exists) matched = c;
+                        } else if (PropertyHolds(*engine, condition)) {
+                            matched = c;
+                        }
+                    }
                 }
+                if (run_until)
+                    run_summary = RunSummary{matched ? "condition" : engine->IsRunning() ? "max_frames" : "stopped",
+                                             advanced, matched, matched_event};
             } else if (name != "observe") {
                 throw std::runtime_error("unknown command: " + name);
             }
@@ -615,6 +803,10 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
             if (name == "observe" && command.HasMember("tilemaps")) {
                 const auto queries = ReadTileQueries(command["tilemaps"]);
                 EmitResponse(responses, Observe(*engine, seed, &queries), request_id);
+            } else if (run_summary) {
+                EmitResponse(responses, WithRunResult(Observe(*engine, seed), run_summary->reason, run_summary->frames,
+                                                      run_summary->condition,
+                                                      run_summary->event ? &*run_summary->event : nullptr), request_id);
             } else EmitResponse(responses, Observe(*engine, seed), request_id);
         } catch (const SceneLoadFailure &failure) {
             EmitResponse(responses, SceneLoadError(failure), request_id);

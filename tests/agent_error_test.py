@@ -99,7 +99,7 @@ def missing_scene_reset(executable, source):
                 rejected = agent.request(command)
                 check(not rejected["ok"] and rejected["frame"] == failed["frame"],
                       "failed reset must reject access without advancing a partial world")
-            check(successful(agent, {"cmd": "describe"})["protocol"] == 1,
+            check(successful(agent, {"cmd": "describe"})["protocol"] == 2,
                   "protocol discovery remains available after failed reset")
             quit_cleanly(agent)
         finally:
@@ -143,7 +143,7 @@ def run(executable, source):
         end }''')
         agent = Agent(executable, str(project))
         try:
-            check(successful(agent, {"cmd": "describe"})["protocol"] == 1, "protocol discovery")
+            check(successful(agent, {"cmd": "describe"})["protocol"] == 2, "protocol discovery")
             for request in [{"cmd": "step", "frames": 3601}, {"cmd": "step", "frames": 1.5},
                             {"cmd": "step", "keys": ["not-a-key"]},
                             {"cmd": "step", "keys": "right"}, {"cmd": "reset", "seed": -1}]:

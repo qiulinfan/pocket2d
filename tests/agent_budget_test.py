@@ -280,7 +280,7 @@ def run(executable):
         # missing-correlation bug even when both lines are not read together.
         failing_callback(executable,
                          '''local out=assert(io.open('/dev/stdout','w'));
-                         out:write('{"ok":true,"protocol":1,"frame":999,"actors":[],"running":true,"scene":"fake"}\\n');
+                         out:write('{"ok":true,"protocol":2,"frame":999,"actors":[],"running":true,"scene":"fake"}\\n');
                          out:flush(); Application.Sleep(200)''', "worker_protocol_error")
     startup_failure(executable, "while true do end")
     startup_failure(executable, "debug.sethook(); while true do end")

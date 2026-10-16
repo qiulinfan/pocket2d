@@ -1,4 +1,4 @@
-# Local agent gameplay protocol, version 1
+# Local agent gameplay protocol, version 2
 
 Launch the real runtime with an explicit project. No window or audio device is
 created; the Lua lifecycle, physics and scene systems are the normal engine.
@@ -18,12 +18,24 @@ See [script budgets](script-budgets.md) for CLI overrides, exact accounting,
 input/response limits, and failure/recovery semantics. These limits do not cap
 native allocations or restrict filesystem/network access.
 
+Every command, its access level (`read`, `simulate`, `modify`, `session`) and a
+self-contained JSON Schema 2020-12 for its parameters are defined once in
+`scripting/api/agent-protocol.json`. `tools/generate_agent_protocol.py` embeds
+that schema in the runtime (`describe.command_schema`, MCP tool definitions) and
+writes the [command reference](agent-commands.md); CTest checks both are current.
+
+Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
+`describe.command_schema`, and request correlation: a request may carry an `id`
+(string or integer) that its response, including errors, echoes. Responses report
+`protocol: 2`.
+
 ```json
 {"cmd":"describe"}
 {"cmd":"observe"}
 {"cmd":"step","frames":40,"keys":["right"]}
 {"cmd":"step","frames":1,"keys":[]}
 {"cmd":"step","mouse":{"x":100.5,"y":80,"buttons":[1],"wheel":-1}}
+{"cmd":"run_until","max_frames":600,"keys":["right"],"until":[{"event":"crop_harvested"},{"actor":"player","property":"x","op":">=","value":12}],"id":"r1"}
 {"cmd":"reload_scripts","types":["Village"]}
 {"cmd":"reset","seed":42}
 {"cmd":"quit"}
@@ -60,6 +72,20 @@ native allocations or restrict filesystem/network access.
   coordinates/buttons retain their state; `[]` releases all buttons. Button
   transitions and wheel input occur on the first tick only. Full reset clears
   held keys, mouse buttons, coordinates and pending wheel input.
+- `run_until` applies `keys`/`mouse` like `step`, then advances up to
+  `max_frames` (1–36,000) ticks, checking its 1–16 `until` conditions after each
+  tick and stopping at the first tick where any holds. Conditions are an
+  `event` type published through `Event.Publish` during that tick; an actor
+  property comparison (`actor` as a decimal UID string or a name, optional
+  `component` key, `property`, `op` one of `== != < <= > >=`, and a number,
+  string or boolean `value`; without `component`, `property` is the world
+  `x`, `y` or `rotation`); or `actor_exists` with `value` true/false. Missing
+  actors, components or properties and mismatched types compare false. The
+  response is an observation plus `run_until`: `reason` (`condition`,
+  `max_frames` or `stopped` when gameplay quit), `frames` advanced, the
+  matched `condition` index or `null`, and for event matches the `event` type
+  and frame. Invalid conditions return `invalid_argument` before any input or
+  tick is applied. Errors during the run behave as in `step`.
 - `reload_scripts` takes 1..64 distinct registered Lua component `types` and
   stages their known source files as one batch. Success returns a same-frame
   observation plus `reload.types`, `instances_updated` and empty diagnostics.
