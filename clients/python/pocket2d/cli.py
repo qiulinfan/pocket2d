@@ -317,7 +317,8 @@ def command_import_unity(options, project):
         print("pocket import: unity requires --assets (the Unity project's Assets directory)", file=sys.stderr)
         return 1
     try:
-        scene, report = import_unity(options.assets, options.source, project, options.name, options.skip_texture_folder)
+        scene, report = import_unity(options.assets, options.source, project, options.name, options.skip_texture_folder,
+                                     options.point_prefix)
     except ImportError:
         print("pocket import: unity needs Pillow (pip install pillow)", file=sys.stderr)
         return 1
@@ -416,6 +417,8 @@ def main(argv=None):
     importer.add_argument("--assets", help="Unity: the project's Assets directory (resolves GUIDs)")
     importer.add_argument("--skip-texture-folder", action="append", default=[],
                           help="Unity: skip sprites whose texture lives in a folder of this name (repeatable)")
+    importer.add_argument("--point-prefix", action="append", default=[],
+                          help="Unity: import GameObjects named with this prefix as SpawnMarker points (repeatable)")
     importer.set_defaults(handler=command_import)
     options = parser.parse_args(argv)
     if options.command == "import" and options.format == "ldtk" and not options.ground:

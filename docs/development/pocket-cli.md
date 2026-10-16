@@ -14,7 +14,7 @@ a built runtime: `--game PATH`, the `POCKET_GAME` environment variable, or
 | `pocket new DIRECTORY` | Creates a minimal project with an action map, a component, a scenario with a script, and `AGENTS.md` |
 | `pocket import aseprite SHEET.json --project P --name N` | Converts an Aseprite sprite-sheet export (array or hash JSON) into `animations/N.animation.json` and copies the sheet to `images/` |
 | `pocket import ldtk WORLD.ldtk --project P --name N --ground LAYER [--solid LAYER] [--level ID]` | Converts one LDtk level into `maps/N.tilemap.json` and copies its tileset to `images/` |
-| `pocket import unity SCENE.unity --assets ASSETS --project P --name N [--skip-texture-folder F ...]` | Converts a Unity 2D scene's tilemaps, sprites, colliders and entities into `scenes/N.scene`, `maps/`, `images/vr_tiles/` and `images/vr_props/` (needs Pillow) |
+| `pocket import unity SCENE.unity --assets ASSETS --project P --name N [--skip-texture-folder F ...] [--point-prefix P ...]` | Converts a Unity 2D scene's tilemaps, sprites, colliders and entities into `scenes/N.scene`, `maps/`, `images/vr_tiles/` and `images/vr_props/` (needs Pillow) |
 
 `--json` (check and test) prints one object per line with `severity`
 (`error`, `warning`, `info`), `code`, `file` relative to the project, and
@@ -55,7 +55,9 @@ schema.
   flips become negative scales); sorting layers become `layer index * 100000 +
   order` with y-sorting; solid Box/Circle/Capsule colliders become static
   bodies; GameObjects with a non-static Rigidbody2D become `SpawnMarker`
-  actors (the project defines that component). Scaled or rotated tilemaps,
+  actors (the project defines that component); `--point-prefix` also imports
+  empty GameObjects named with that prefix (spawn points) as `SpawnMarker`
+  actors of kind `point`. Scaled or rotated tilemaps,
   sliced sprites and triggers are reported in `import_report.json`, not
   converted. Scene actors with uid below 1000 survive re-imports. Verified on
   Village_Rim's Gameplay scene (49 tilemaps, 189 sprites, 111 colliders).

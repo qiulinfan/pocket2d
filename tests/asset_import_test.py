@@ -95,6 +95,7 @@ def unity_scene():
             "  m_Sprite: {fileID: 21300000, guid: %s, type: 3}\n  m_Color: {r: 1, g: 1, b: 1, a: 1}\n" % g["rock"] +
             "--- !u!61 &33\nBoxCollider2D:\n  m_GameObject: {fileID: 30}\n  m_Enabled: 1\n  m_IsTrigger: 0\n"
             "  m_Size: {x: 1, y: 2}\n  m_Offset: {x: 0, y: 1}\n" +
+            game_object % (50, "spawnPoint1") + transform % (51, 50, 7, 2, 0) +
             game_object % (40, "Hero") + transform % (41, 40, 0, -3, 0) +
             "--- !u!50 &42\nRigidbody2D:\n  m_GameObject: {fileID: 40}\n  m_BodyType: 0\n"
             "--- !u!212 &43\nSpriteRenderer:\n  m_GameObject: {fileID: 40}\n  m_Enabled: 1\n"
@@ -121,7 +122,7 @@ def run_unity(game, root):
     (project / "game.config").write_text('{"initial_scene":"imported"}')
     (project / "component_types/SpawnMarker.lua").write_text('SpawnMarker = {kind = ""}')
     pocket(game, "import", "unity", str(assets / "Scenes/test.unity"), "--assets", str(assets), "--project", str(project),
-           "--name", "imported")
+           "--name", "imported", "--point-prefix", "spawnPoint")
     actors = {actor["name"]: actor["components"] for actor in json.loads((project / "scenes/imported.scene").read_text())["actors"]}
     walls = json.loads((project / "maps/Walls_1.tilemap.json").read_text())
     check((walls["width"], walls["height"]) == (2, 1) and walls["layers"]["solid"]["cells"] == [1, 0] and
@@ -134,6 +135,8 @@ def run_unity(game, root):
     body = actors["Rock_collider"]["body"]
     check((body["body_type"], body["x"], body["width"], body["height"]) == ("static", 5, 1, 2) and abs(body["y"]) < 1e-9,
           "box colliders become static bodies with their offset: %r" % body)
+    check(actors["spawnPoint1"]["spawn"]["kind"] == "point" and actors["spawnPoint1"]["transform"]["x"] == 7 and
+          actors["spawnPoint1"]["transform"]["y"] == -2, "named empty objects become points: %r" % actors["spawnPoint1"])
     check(actors["Hero"]["spawn"]["kind"] == "Heroes" and actors["Hero"]["transform"]["y"] == 3,
           "Rigidbody2D entities become spawn markers: %r" % actors["Hero"])
     with Runtime(game, project, save_dir=root / "unity_saves") as runtime:

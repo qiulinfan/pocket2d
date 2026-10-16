@@ -595,7 +595,27 @@ def safe(name):
     return re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_") or "map"
 
 
-def import_unity(assets, scene, project, scene_name="world", skip_texture_folders=()):
+def import_points(world, transforms, names, entity_of, prefixes, actors, stats, next_uid):
+    """Active GameObjects named with one of the prefixes become marker actors
+    (SpawnMarker kind "point"): spawn points and other positions gameplay uses."""
+    if not prefixes:
+        return next_uid
+    for go_key, transform in sorted(transforms.items(), key=lambda item: str(item[0])):
+        name = names.get(go_key, "")
+        if not any(name.startswith(prefix) for prefix in prefixes):
+            continue
+        if not world.active(transform) or entity_of.get(transform) is not None:
+            continue
+        x, y, _, _, _ = world.world_transform(transform)
+        next_uid += 1
+        actors.append({"uid": next_uid, "name": name, "components": {
+            "transform": {"type": "Transform", "x": round(x, 4), "y": round(-y, 4)},
+            "spawn": {"type": "SpawnMarker", "kind": "point"}}})
+        stats["points"] += 1
+    return next_uid
+
+
+def import_unity(assets, scene, project, scene_name="world", skip_texture_folders=(), point_prefixes=()):
     """Imports the scene; returns (scene path, report dict)."""
     global Image
     from PIL import Image as pil_image
@@ -607,7 +627,7 @@ def import_unity(assets, scene, project, scene_name="world", skip_texture_folder
     actors = []
     used_names = defaultdict(int)
     stats = {"tilemaps": 0, "tiles": 0, "sprite_actors": 0, "sprites": 0, "colliders": 0, "entities": 0,
-             "skipped": 0, "triggers_skipped": 0}
+             "points": 0, "skipped": 0, "triggers_skipped": 0}
     layers = sorting_layers(assets)
     next_uid = 1000
     for key, (cls, fields) in sorted(world.objects.items(), key=lambda item: str(item[0])):
@@ -733,6 +753,7 @@ def import_unity(assets, scene, project, scene_name="world", skip_texture_folder
                                             tuple(skip_texture_folders))
     next_uid = import_colliders(world, *index, actors, stats, next_uid)
     next_uid = import_entities(world, *index, root_sprites, actors, stats, next_uid)
+    next_uid = import_points(world, *index, tuple(point_prefixes), actors, stats, next_uid)
     (project / "scenes").mkdir(parents=True, exist_ok=True)
     scene_path = project / "scenes" / (scene_name + ".scene")
     # Hand-authored actors (uid below the importer's range) survive re-imports.
