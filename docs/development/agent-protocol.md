@@ -118,6 +118,38 @@ distinction explicit. `describe` remains available from its last validated cache
 `step`/`observe` require successful reset. The internal worker command and fields
 `_bootstrap`, `_pocket_request_id`, and `_initial_observation` are reserved.
 
+## MCP server
+
+`--mcp` serves the same commands as [Model Context Protocol](https://modelcontextprotocol.io)
+tools over stdio (newline-delimited JSON-RPC 2.0), backed by the same supervised
+worker, limits and recovery rules as JSONL:
+
+```sh
+./build/sdl3-debug/game --headless --mcp --project tests/fixtures/village_defense --seed 42
+```
+
+A client configuration such as `.mcp.json` names that command and its arguments.
+
+- Every command except `quit` is a tool (`describe`, `observe`, `step`,
+  `run_until`, `reload_scripts`, `reset`). Tool input schemas are the command
+  parameter schemas; annotations mark `read` tools read-only. A call returns the
+  protocol response both as `structuredContent` and as JSON text, with
+  `isError` set when the response has `ok:false`. Unknown or disabled tools,
+  non-object arguments and the reserved argument names `cmd`, `id` and `_*` are
+  JSON-RPC `-32602` errors.
+- `--mcp-access` limits the offered tools to a comma list of `read`,
+  `simulate` and `modify` (default all three). Disabled tools are neither
+  listed nor callable.
+- The server supports both protocol eras. Requests carrying
+  `_meta["io.modelcontextprotocol/protocolVersion"] = "2026-07-28"` are served
+  statelessly with `resultType: "complete"`, and `server/discover` reports that
+  version; any other per-request version gets `-32022` with the supported list.
+  Legacy clients may send `initialize` (versions 2024-11-05 through
+  2025-11-25 are echoed; others receive 2025-11-25). Notifications are ignored;
+  batches are rejected.
+- The runtime is one World per server process. If the project fails to start,
+  tool calls report `worker_unavailable` until `reset` succeeds.
+
 ## Replay files
 
 `--record FILE` (with `--agent`) writes a replay as JSON lines: a header with

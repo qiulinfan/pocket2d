@@ -83,6 +83,17 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   under TSan the World isolation and editor play tests pass, while
   `agent_two_world_village` exceeds its agent deadline from instrumentation
   slowdown without race reports.
+- Agent protocol v2: one schema (`scripting/api/agent-protocol.json`) defines
+  the commands and generates the embedded schema and command reference;
+  requests may carry an echoed `id`; `run_until` stops on published events,
+  property comparisons or actor presence. `--record`/`--replay` write and
+  verify JSON-lines replays and report the first divergent record and JSON
+  pointer; a Debug recording replayed identically in Release over 1,020 frames
+  of two fixtures. `--mcp` serves the commands as MCP tools for both the
+  2026-07-28 per-request era and legacy `initialize` clients. 81 CTest cases
+  pass in Debug, Release and ASan/UBSan. Not yet done: snapshot/branching,
+  SyncTest-style rollback checks, multi-World handles over MCP, and an external
+  coding agent completing an authoring task through MCP.
 
 ## Completed and verified in this slice
 

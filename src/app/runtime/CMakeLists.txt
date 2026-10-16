@@ -5,6 +5,7 @@ add_executable(
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentSession.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentSupervisor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentReplay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AgentMcpServer.cpp"
     "${PROJECT_SOURCE_DIR}/include/app/runtime/RuntimeApp.h"
 )
 target_link_libraries(game_engine PRIVATE engine_runtime)

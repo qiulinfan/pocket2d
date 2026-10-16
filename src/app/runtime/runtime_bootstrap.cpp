@@ -2,10 +2,13 @@
 #include "app/runtime/AgentSession.h"
 #include "app/runtime/AgentSupervisor.h"
 #include "app/runtime/AgentReplay.h"
+#include "app/runtime/AgentMcpServer.h"
 #include "engine/scripting/ComponentManager.h"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <algorithm>
 #include <charconv>
+#include <set>
 #include <stdexcept>
 #include "engine/core/Engine.h"
 #include "shared/resources/ResourcePath.h"
@@ -89,7 +92,8 @@ void ApplyEditorSelectedProjectRootForRuntime() {
 int RuntimeApp::Run(int argc, char **argv) {
     std::ios::sync_with_stdio(false);
     try {
-        bool headless = false, agent = false, agent_worker = false;
+        bool headless = false, agent = false, agent_worker = false, mcp = false;
+        std::set<std::string> mcp_access{"read", "simulate", "modify"};
         AgentExecutionLimits limits;
         bool seed_provided = false;
         int frame_limit = 0;
@@ -103,6 +107,19 @@ int RuntimeApp::Run(int argc, char **argv) {
             if (arg == "--headless") headless = true;
             else if (arg == "--agent") agent = true;
             else if (arg == "--agent-worker") agent_worker = true;
+            else if (arg == "--mcp") mcp = true;
+            else if (arg == "--mcp-access" && i + 1 < argc) {
+                mcp_access.clear();
+                const std::string value = argv[++i];
+                for (std::size_t start = 0; start <= value.size();) {
+                    const std::size_t end = std::min(value.find(',', start), value.size());
+                    const std::string level = value.substr(start, end - start);
+                    if (level != "read" && level != "simulate" && level != "modify")
+                        throw std::runtime_error("--mcp-access takes a comma list of read, simulate, modify");
+                    mcp_access.insert(level);
+                    start = end + 1;
+                }
+            }
             else if ((arg == "--instruction-budget" || arg == "--lua-heap-budget" ||
                       arg == "--request-timeout-ms") && i + 1 < argc) {
                 const std::string value = argv[++i];
@@ -143,7 +160,8 @@ int RuntimeApp::Run(int argc, char **argv) {
             } else if (arg == "--help") {
                 std::cout << "game [--project PATH] [--seed UINT32] [--frames N [--capture PNG]]\n"
                              "game --project PATH --headless --agent [--seed UINT32] [--save-dir ROOT] [--record REPLAY]\n"
-                             "game --project PATH --headless --replay REPLAY [--save-dir ROOT]\n";
+                             "game --project PATH --headless --replay REPLAY [--save-dir ROOT]\n"
+                             "game --project PATH --headless --mcp [--mcp-access read,simulate,modify] [--seed UINT32]\n";
                 return 0;
             } else throw std::runtime_error("unknown or incomplete option: " + arg);
         }
@@ -153,10 +171,10 @@ int RuntimeApp::Run(int argc, char **argv) {
             if (SDL_setenv_unsafe("POCKET_SAVE_ROOT", value.c_str(), 1) != 0)
                 throw std::runtime_error("unable to configure save directory");
         }
-        if (int(agent) + int(agent_worker) + int(!replay.empty()) > 1)
-            throw std::runtime_error("choose one of --agent, --agent-worker and --replay");
+        if (int(agent) + int(agent_worker) + int(!replay.empty()) + int(mcp) > 1)
+            throw std::runtime_error("choose one of --agent, --agent-worker, --replay and --mcp");
         if (!record.empty() && !agent) throw std::runtime_error("--record requires --agent");
-        const bool automation = agent || agent_worker || !replay.empty();
+        const bool automation = agent || agent_worker || !replay.empty() || mcp;
         if (headless != automation) throw std::runtime_error("--headless and --agent must be used together");
         if (automation && (frame_limit != 0 || !capture.empty()))
             throw std::runtime_error("--frames/--capture require graphical mode");
@@ -173,12 +191,13 @@ int RuntimeApp::Run(int argc, char **argv) {
             ScriptBudget::Configure(limits.script_limits);
             return RunAgentSession(project, seed);
         }
-        if (agent || !replay.empty()) {
+        if (agent || mcp || !replay.empty()) {
             std::filesystem::path executable = argv[0];
             if (!std::filesystem::exists(executable))
                 executable = std::filesystem::path(SDL_GetBasePath()) / executable.filename();
             executable = std::filesystem::canonical(executable);
             if (!replay.empty()) return RunAgentReplay(executable, project, replay, limits);
+            if (mcp) return RunAgentMcpServer(executable, project, seed, limits, mcp_access);
             if (record.empty()) return RunAgentSupervisor(executable, project, seed, limits);
             AgentReplayRecorder recorder(record, project);
             return RunAgentSupervisor(executable, project, seed, limits, &recorder);
