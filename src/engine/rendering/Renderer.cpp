@@ -634,6 +634,15 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                                         viewport_height)) {
             return;
         }
+        if (request.rotation_degrees == 0.0f) {
+            // Snap both edges to output pixels so abutting draws (tiles) share
+            // an edge instead of rounding apart into one-pixel seams.
+            const float to_x = safe_zoom * output_scale_x;
+            const float to_y = safe_zoom * output_scale_y;
+            const float left = std::round(dst.x * to_x), right = std::round((dst.x + dst.w) * to_x);
+            const float top = std::round(dst.y * to_y), bottom = std::round((dst.y + dst.h) * to_y);
+            dst = {left / to_x, top / to_y, (right - left) / to_x, (bottom - top) / to_y};
+        }
 
         SDL_SetTextureColorMod(texture, static_cast<Uint8>(ClampByte(request.r)),
                                static_cast<Uint8>(ClampByte(request.g)),
