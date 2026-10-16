@@ -42,6 +42,16 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   render-phase loop. 65,536 individual sprites drop from about 77 to 10–13 ms
   per Metal frame with identical pixels; 16,384 reach the same ~8 ms floor as
   the native Tilemap path (`tilemap-performance.md`).
+- Lua is now compiled with `LUA_USE_POSIX` off Windows, so protected calls use
+  `_setjmp`/`_longjmp` and no longer save and restore the signal mask. Seven
+  interleaved Release pairs (10k actors, 8 warmup, 180 samples): Lua loop step
+  p50 6.07–6.51 ms before, 3.89–4.22 ms after; native unchanged within noise
+  (4.16–4.54 / 4.22–4.32 ms). The macro also switches `io.popen` from an error
+  to POSIX `popen`, decodes `os.execute`/pipe-close exit statuses, uses
+  `getc_unlocked`, `fseeko`/`ftello`, `gmtime_r`/`localtime_r` and `mkstemp`
+  for `os.tmpname`. It does not enable `LUA_USE_DLOPEN`. Trusted runtime
+  scripts already had `os.execute`; reload candidates still block `io`/`os`.
+  74 CTest cases pass in Debug, Release and ASan/UBSan.
 
 ## Completed and verified in this slice
 

@@ -46,8 +46,13 @@ p50 went from 4.19–4.36 ms to 4.60–4.91 ms (native) and from 6.15–6.44 ms 
 6.73–7.03 ms (Lua loop). A non-thread-local pointer recovered about half of
 it; the rest is slot lookup and code layout. Profiling the same benchmark
 showed a larger existing cost: every Lua `pcall` saves and restores the signal
-mask (`sigprocmask`, `sigaltstack`), because Lua is built without
-`LUA_USE_POSIX` and uses `setjmp` on macOS. That is a separate change.
+mask (`sigprocmask`, `sigaltstack`), because Lua was built without
+`LUA_USE_POSIX` and used `setjmp` on macOS. A follow-up change defines
+`LUA_USE_POSIX` for `lua_runtime` off Windows, so `ldo.c` uses
+`_setjmp`/`_longjmp`. Seven interleaved Release pairs on the same benchmark:
+Lua loop step p50 went from 6.07–6.51 ms to 3.89–4.22 ms; native stayed within
+noise (4.16–4.54 ms before, 4.22–4.32 ms after). The Lua loop now more than
+recovers the World lookup cost; native does not.
 
 ## Box2D 3.1.1
 

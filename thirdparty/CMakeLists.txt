@@ -26,6 +26,9 @@ target_compile_definitions(
     lua_runtime
     PRIVATE
         $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
+        # _setjmp/_longjmp skip the signal-mask syscalls of setjmp/longjmp on
+        # every protected call; also selects POSIX popen, mkstemp, *_r time.
+        $<$<NOT:$<PLATFORM_ID:Windows>>:LUA_USE_POSIX>
 )
 target_compile_options(
     lua_runtime
