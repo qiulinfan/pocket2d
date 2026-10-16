@@ -186,14 +186,65 @@ Owner 决定先迁移到 Box2D 3.1，并要求同时看是否有更现代的库�
 3. **Agent 接口**：统一命令 schema，同时提供 MCP 与 JSONL。
 4. **起步切片**：World 实例化 + Box2D v3。
 
+## 技术栈现代化清单（owner 2026-10-16 全部同意）
+
+第一切片（World 实例化 + Box2D 3.1.1，ADR 008）之后的工作。版本信息查于 2026-10-16。
+
+| 优先级 | 项目 | 内容 |
+| --- | --- | --- |
+| 高 | 独立 World 的 Play-in-Editor | Play 时复制编辑态 World 运行，Stop 丢弃；替代现有的编辑草稿保护逻辑。 |
+| 高 | 结构化日志 + Tracy | 替换源码中约 45 处 `std::cout`/`std::cerr`，输出带帧号、World 与分类的 JSON 行诊断；接入 Tracy 0.14 与 Box2D 的 `BOX2D_PROFILE`。 |
+| 高 | 物理能力补全 | 角色移动用 3.1.1 的 `b2World_CastMover`/`CollideMover`/`b2SolvePlanes`；Tilemap 墙体改 chain shape 消除接缝卡顿；Lua 暴露 joints、capsule/polygon/segment、碰撞分层、shape cast 与 overlap 查询。 |
+| 中 | SDL 3.4 GPU 渲染器 + SDL_ttf text engine | 自定义着色器、Vulkan/D3D12 后端；ImGui 改用 `imgui_impl_sdlgpu3` 以支持多窗口；文字改用共享图集的 `TTF_Text`。 |
+| 中 | Glaze + 资产 schema | RapidJSON 自 2016 年无发布；Glaze 由 C++ 类型定义 schema 并可导出 JSON Schema（注意其大版本变动频繁）。 |
+| 中 | ImGui 1.93 + ImGui Test Engine | 1.93 重写了形状绘制，需像素回归；Test Engine 对开源项目免费，用于编辑器测试和 agent 驱动编辑器。ImGuizmo 已恢复维护。 |
+| 低 | RmlUi 6.3、doctest/Catch2、清理 `thirdparty/SDL2*` | 游戏内 UI 用文本描述；测试框架替换；移除不再链接的 SDL2。 |
+| 等待上游 | Box2D 3.2、C++26 反射、LuaBridge3 正式版 | 3.2 带快照/回放；反射目前只有 GCC 16 实验支持，Clang/Apple Clang 不支持；LuaBridge3 仍是 rc12。 |
+
+已完成的相关项：Lua 以 `LUA_USE_POSIX` 构建（分支 `claude/fervent-napier-d7f463` 的提交 620f38c，Lua 循环每步 p50 约降 38%）。
+
+## 性能路线：与前沿 2D 引擎同台比较（2026-10-16）
+
+目标是在相同硬件、相同画面输出和相同工作量下，帧时间分布不差于前沿引擎。按 AGENTS.md，在完成这种对比之前不作领先声称。
+
+### 外部基线的现状
+
+几乎没有可直接引用的公开数字。Bevy、Godot、Unity 都没有官方的精灵吞吐数据；社区 bunnymark 混用硬件、平台、年代和更新逻辑。可用的线索：
+
+- Defold（Lua 引擎）的 bunnymark：C++ 侧的 `go.animate` 快于单个 Lua 控制循环，后者又快于每个对象一个 `update()`；论坛报告约 32k 对 9k 对象 @60 fps（未注明硬件，未核实）。官方建议不写 `update()`。
+- Godot 4.4 起在 Forward+/Mobile 加回 2D 批处理；文档说节点回调在数千到数万节点时开始成为瓶颈。
+- Megabunny 只画静态精灵（无逻辑），分离渲染与绑定开销；SDL2/OpenGL 约 21.9M 精灵/秒（未注明硬件）。
+- Box2D：大金字塔（5050 body，4 线程）M2 约 0.95 ms/步（2024-08）；仓库里的 v3.2 基准页报告比 3.1.1 快约 2 倍，但 3.2 尚未发布。
+
+因此可信的比较只能自己做：在同一台机器上运行 Bevy、Godot、Defold、LÖVE 的同构 bunnymark 移植，以及 Box2D 自带的 benchmark 场景。
+
+### 本地已测到的结构性瓶颈
+
+- 65,536 个独立精灵的 Metal 场景（`tilemap_benchmark 256 metal`）中，主线程约 77% 的样本在 `SpriteRenderer::QueueDraw`。每个精灵每帧都要校验 spritesheet 元数据缓存（拷贝并比较 `std::filesystem::path`）、拼元数据键、按字符串查组件、复制图片名；之后还有对整个请求数组的 `stable_sort`。真正的绘制提交约占 9%。
+- 逻辑路径：每个组件每帧一次 `OnUpdate`，每次经过多次受保护的字段读取和存活检查。`LUA_USE_POSIX` 已去掉 `pcall` 的信号掩码系统调用（Lua 循环 p50 约降 38%）；World 线程局部查找带来约 8–10% 开销。
+
+### 改造方向（按依赖顺序）
+
+1. **测量框架先行（P0）**：固定工作量 W1 静态精灵（只渲染）、W2 带逻辑的 bunnymark（Lua）、W3 Box2D 标准场景、W4 Tilemap 滚动、W5 混合村庄。统一输出分辨率，做像素校验，记录 p50/p99 帧时间与 CPU/GPU 分项；在本机对照 Bevy、Godot、Defold、LÖVE 的同构实现。结果只存在被忽略的 `build/`。
+2. **精灵提交热路径（P1，低成本）**：spritesheet 元数据按图片解析一次并缓存为整数资源 id；绘制请求不再携带字符串；组件 handle 校验移出每帧循环；排序改为 64 位排序键（层/材质/纹理/深度）加基数排序；视口裁剪前移；帧内请求数组复用，不再每帧分配。
+3. **原生组件存储（P2）**：Transform、SpriteRenderer、SpriteAnimation、Rigidbody 同步状态改为 World 内的连续 SoA 池，按密集数组迭代；Transform 层级只在脏标记时重算；Lua 侧仍是同一组件 API（userdata 指向池内槽位，带代际检查）。新原生系统显式接收 World 状态，不走线程局部查找。
+4. **GPU 批处理（P3）**：基于 SDL_GPU 的 vertex-pulling 精灵批（参照 SDL_gpu_examples 的 `PullSpriteBatch`：每帧一次 storage buffer 上传、`cycle` 防止停顿、单次 draw）；图集或 array texture 消除纹理切换；SDL_Renderer 保留为 software 参考路径与像素测试基准。
+5. **Lua 执行模型（P4）**：保留每组件 `OnUpdate` 的兼容性，同时提供“系统式”脚本（每种类型每帧调用一次，遍历该类型的实例数组）和批量读写 API；常用行为（补间、移动器、动画）下沉到 C++，参照 Defold 的结论。缓存方法引用，去掉每次回调的重复受保护字段读取。运行时保持 PUC Lua（owner 约束），不引入 LuaJIT。
+6. **帧流水线与任务（P5）**：线程池增加异步提交/等待接口；渲染提取（extract）后，模拟 N+1 与渲染 N 重叠；裁剪、排序、动画推进、粒子按测量接入任务；Box2D 多线程求解接入同一线程池。Lua 与 Box2D 世界变更仍在 World 拥有线程上。
+7. **物理（P6）**：Box2D 3.2 发布后升级（其基准报告约 2 倍提速，需本地复测）；x86 构建评估 `BOX2D_AVX2`。
+
+每一步都以 P0 的工作量前后对比验收，并保持 74 个功能测试和像素测试通过。
+
 ## 尚未决定
 
-1. **2D 渲染管线**：建议先做 headless 离屏渲染（M5 第一项），再接入 SDL 3.4 GPU 渲染器与自定义着色器；自建 SDL_GPU 批处理等 profiling 后再定。
+1. **2D 渲染管线**：已决定接入 SDL 3.4 GPU 渲染器（见上表），并按性能路线 P3 自建 SDL_GPU 精灵批处理。
 2. **README**：当前仍写 C++17/SDL2，事实部分是否由 agent 按现状更新。
 3. **Box2D 3.2**：发布前是否固定到 `main` 的某个提交以提前获得快照/回放。建议等正式版，期间用重放与 fork 实现检查点。
 
 ## 外部参照（2026-10-16 查阅）
 
+- 性能基线与技术：[Defold bunnymark 讨论](https://forum.defold.com/t/know-your-engine-limitations/9742)、[Defold Lua 手册](https://defold.com/manuals/lua)、[Godot 4.4 dev 3 2D 批处理](https://godotengine.org/article/dev-snapshot-godot-4-4-dev-3/)、[Godot CPU 优化](https://docs.godotengine.org/en/4.3/tutorials/performance/cpu_optimization.html)、[Bevymark](https://bevy.org/examples/stress-tests/bevymark/)、[Megabunny](https://github.com/electronstudio/megabunny)、[SDL_gpu_examples](https://github.com/TheSpydog/SDL_gpu_examples)、[Box2D SIMD Matters](https://box2d.org/posts/2024/08/simd-matters/)、[Box2D v3.2 基准页](https://raw.githubusercontent.com/erincatto/box2d/main/benchmark/performance_v320.md)、[ecs_benchmark](https://github.com/abeimler/ecs_benchmark)
+- 技术栈：[Dear ImGui v1.93.0](https://github.com/ocornut/imgui/releases/tag/v1.93.0)、[ImGui Test Engine 许可](https://github.com/ocornut/imgui_test_engine/blob/main/imgui_test_engine/LICENSE.txt)、[ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)、[SDL_ttf 3](https://wiki.libsdl.org/SDL3_ttf/TTF_CreateRendererTextEngine)、[RmlUi](https://github.com/mikke89/RmlUi)、[Tracy](https://github.com/wolfpld/tracy/releases)、[Glaze](https://github.com/stephenberry/glaze)、[Clang C++ 状态](https://clang.llvm.org/cxx_status.html)、[LuaBridge3](https://github.com/kunitoki/LuaBridge3)
 - 物理库：[Box2D releases](https://github.com/erincatto/box2d/releases)、[Box2D 3.1 release notes](https://box2d.org/documentation/md_release__notes__v310.html)、[Box2D blog](https://box2d.org/posts/)、[Rapier changelog](https://github.com/dimforge/rapier/blob/master/CHANGELOG.md)、[Rapier C bindings](https://github.com/dimforge/rapier/tree/master/bindings/c)、[Rapier determinism](https://rapier.rs/docs/user_guides/rust/determinism)、[Avian](https://github.com/avianphysics/avian)、[Jolt architecture](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md)、[Maul2D](https://github.com/Rawframe-Project/maul2d)
 - Box2D 确定性与线程模型：[FAQ](https://box2d.org/documentation/md_faq.html)、[Determinism](https://box2d.org/posts/2024/08/determinism/)、[Foundation](https://box2d.org/documentation/md_foundation.html)
 - 回放与回滚测试参照：[GGRS](https://docs.rs/ggrs/latest/ggrs/)
