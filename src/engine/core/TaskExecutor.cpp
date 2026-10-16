@@ -18,11 +18,16 @@ std::size_t TaskExecutor::DefaultWorkerCount() {
     return hardware > 1 ? std::min<std::size_t>(hardware - 1, 7) : 0;
 }
 
+TaskExecutor &TaskExecutor::Shared() {
+    static TaskExecutor executor;
+    return executor;
+}
+
 TaskExecutor::TaskExecutor(std::size_t worker_count) {
     try {
         workers_.reserve(worker_count);
         for (std::size_t i = 0; i < worker_count; ++i)
-            workers_.emplace_back([this] { WorkerLoop(); });
+            workers_.emplace_back([this, i] { WorkerLoop(i + 1); });
     } catch (...) {
         { std::lock_guard lock(mutex_); stopping_ = true; }
         work_ready_.notify_all();
@@ -89,21 +94,84 @@ void TaskExecutor::RunChunks() {
     }
 }
 
-void TaskExecutor::WorkerLoop() {
+struct TaskExecutor::Group {
+    IndexedRangeTask task;
+    void *context;
+    std::size_t remaining; // guarded by the executor's mutex_
+};
+
+TaskExecutor::Group *TaskExecutor::Submit(std::size_t count, std::size_t min_range,
+                                          IndexedRangeTask task, void *context) {
+    if (task == nullptr) throw std::invalid_argument("Submit requires a callback");
+    auto *group = new Group{task, context, 0};
+    if (count == 0) return group;
+    const std::size_t range = std::max<std::size_t>({min_range, 1, (count + workers_.size()) / (workers_.size() + 1)});
+    {
+        std::lock_guard lock(mutex_);
+        for (std::size_t begin = 0; begin < count; begin += range) {
+            jobs_.push_back({group, begin, std::min(count, begin + range)});
+            ++group->remaining;
+        }
+    }
+    work_ready_.notify_all();
+    return group;
+}
+
+void TaskExecutor::RunJob(const Job &job, std::size_t worker_index) {
+    job.group->task(job.begin, job.end, worker_index, job.group->context);
+}
+
+void TaskExecutor::Wait(Group *group) {
+    if (group == nullptr) return;
+    for (;;) {
+        Job job{};
+        {
+            std::unique_lock lock(mutex_);
+            const auto found = std::find_if(jobs_.begin(), jobs_.end(),
+                                            [group](const Job &queued) { return queued.group == group; });
+            if (found == jobs_.end()) {
+                work_finished_.wait(lock, [group] { return group->remaining == 0; });
+                break;
+            }
+            job = *found;
+            jobs_.erase(found);
+        }
+        RunJob(job, 0);
+        std::lock_guard lock(mutex_);
+        --group->remaining;
+    }
+    delete group;
+}
+
+void TaskExecutor::WorkerLoop(std::size_t worker_index) {
     std::size_t observed_generation = 0;
     for (;;) {
+        Job job{};
+        bool has_job = false;
         {
             std::unique_lock lock(mutex_);
             work_ready_.wait(lock, [&] {
-                return stopping_ || generation_ != observed_generation;
+                return stopping_ || generation_ != observed_generation || !jobs_.empty();
             });
             if (stopping_) return;
-            observed_generation = generation_;
+            if (generation_ == observed_generation) {
+                job = jobs_.front();
+                jobs_.pop_front();
+                has_job = true;
+            } else {
+                observed_generation = generation_;
+            }
+        }
+        if (has_job) {
+            RunJob(job, worker_index);
+            std::lock_guard lock(mutex_);
+            if (--job.group->remaining == 0) work_finished_.notify_all();
+            continue;
         }
         RunChunks();
         {
             std::lock_guard lock(mutex_);
-            if (--pending_workers_ == 0) work_finished_.notify_one();
+            if (--pending_workers_ == 0) work_finished_.notify_all();
         }
     }
 }

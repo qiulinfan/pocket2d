@@ -1,6 +1,10 @@
 #include "scripting/LuaBoundary.h"
 #include "core/Profile.h"
 #include "physics/Rigidbody.h"
+#include <cstring>
+#include <charconv>
+#include <SDL3/SDL.h>
+#include "core/TaskExecutor.h"
 #include "core/World.h"
 #include "physics/PhysicsMutationGuard.h"
 #include "scene/Actor.h"
@@ -439,13 +443,80 @@ static std::mutex &WorldRegistryMutex() {
     return mutex;
 }
 
+// Box2D's task system on the shared pool. Large worlds queue every range so
+// the solver's worker tasks run concurrently, and finishTask helps execute
+// the task's queued ranges on the stepping thread. Below kParallelAwakeBodies
+// awake bodies queueing costs more than it saves (physics_benchmark), so the
+// task runs inline. Results do not depend on the worker count.
+namespace {
+constexpr int kParallelAwakeBodies = 2048;
+struct PhysicsTasks {
+    TaskExecutor *executor = nullptr;
+    b2WorldId world = b2_nullWorldId;
+};
+PhysicsTasks &CurrentPhysicsTasks() { return World::Current().State<PhysicsTasks>(); }
+struct Box2DTask {
+    b2TaskCallback *task;
+    void *context;
+};
+void RunBox2DRange(std::size_t begin, std::size_t end, std::size_t worker, void *context) {
+    const auto &box2d = *static_cast<Box2DTask *>(context);
+    box2d.task(static_cast<int>(begin), static_cast<int>(end), static_cast<uint32_t>(worker), box2d.context);
+}
+struct Box2DGroup {
+    Box2DTask task;
+    TaskExecutor::Group *group;
+};
+void *EnqueueBox2DTask(b2TaskCallback *task, int item_count, int min_range, void *task_context, void *user) {
+    auto &tasks = *static_cast<PhysicsTasks *>(user);
+    if (item_count <= 0) return nullptr;
+    if (B2_IS_NULL(tasks.world) || b2World_GetAwakeBodyCount(tasks.world) < kParallelAwakeBodies) {
+        task(0, item_count, 0, task_context);
+        return nullptr;
+    }
+    auto *handle = new Box2DGroup{{task, task_context}, nullptr};
+    handle->group = tasks.executor->Submit(static_cast<std::size_t>(item_count),
+                                           static_cast<std::size_t>(std::max(min_range, 1)), &RunBox2DRange,
+                                           &handle->task);
+    return handle;
+}
+void FinishBox2DTask(void *user_task, void *user) {
+    auto *handle = static_cast<Box2DGroup *>(user_task);
+    static_cast<PhysicsTasks *>(user)->executor->Wait(handle->group);
+    delete handle;
+}
+// Box2D's internal B2_MAX_WORKERS (src/constants.h), absent from its public headers.
+constexpr std::size_t kMaxBox2DWorkers = 64;
+// POCKET_PHYSICS_WORKERS: unset or "auto" uses the whole shared pool for
+// large worlds; N limits it to N workers; 0 always steps on one thread.
+std::size_t PhysicsWorkerCount() {
+    const std::size_t available = TaskExecutor::Shared().WorkerCount();
+    const char *value = SDL_getenv("POCKET_PHYSICS_WORKERS");
+    if (value == nullptr || *value == '\0' || std::string_view(value) == "auto") return available;
+    std::size_t requested = 0;
+    const auto parsed = std::from_chars(value, value + std::strlen(value), requested);
+    if (parsed.ec != std::errc{}) return available;
+    return std::min(requested, available);
+}
+} // namespace
+
 // physics world lifecycle of the current World
 void Rigidbody::EnsurePhysicsWorld() {
     if (RayCast::HasPhysicsWorld()) return;
     b2WorldDef world_def = b2DefaultWorldDef();
     world_def.gravity = {0.0f, 9.8f};
+    PhysicsTasks &tasks = CurrentPhysicsTasks();
+    tasks = {};
+    if (const std::size_t workers = PhysicsWorkerCount(); workers > 0) {
+        tasks.executor = &TaskExecutor::Shared();
+        world_def.workerCount = static_cast<int>(std::min<std::size_t>(workers + 1, kMaxBox2DWorkers));
+        world_def.enqueueTask = &EnqueueBox2DTask;
+        world_def.finishTask = &FinishBox2DTask;
+        world_def.userTaskContext = &tasks;
+    }
     std::lock_guard lock(WorldRegistryMutex());
-    RayCast::SetPhysicsWorld(b2CreateWorld(&world_def));
+    tasks.world = b2CreateWorld(&world_def);
+    RayCast::SetPhysicsWorld(tasks.world);
 }
 
 void Rigidbody::DestroyPhysicsWorld() {
@@ -454,6 +525,7 @@ void Rigidbody::DestroyPhysicsWorld() {
         b2DestroyWorld(RayCast::GetPhysicsWorld());
     }
     RayCast::ClearPhysicsState();
+    CurrentPhysicsTasks() = {};
     Triggers().pairs.clear();
     ++CurrentForceStep();
 }

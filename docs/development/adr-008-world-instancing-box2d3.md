@@ -101,13 +101,20 @@ lock. Under ThreadSanitizer, two Worlds starting on two threads raced at
 creation and destruction with a process-wide mutex; operations inside a world
 need none.
 
-Box2D's own multithreaded solver is not connected (plan step B3). Its solver
-enqueues one task per worker and the tasks spin on shared stage counters, so
-they must run concurrently. `TaskExecutor::ParallelFor` runs a task to
-completion before returning and would deadlock. It needs an asynchronous
-submit/join API, or Box2D 3.2's built-in scheduler. Current scenes hold tens
-of bodies per World, and environment-level parallelism already runs Worlds on
-separate threads.
+Box2D's own multithreaded solver was not connected in the first slice (plan
+step B3). Its solver enqueues one task per worker and the tasks spin on shared
+stage counters, so they must run concurrently; `TaskExecutor::ParallelFor`
+runs a task to completion before returning and would deadlock.
+
+Update (2026-10-16): `TaskExecutor` gained `Submit`/`Wait`. Submit queues a
+task's ranges on the shared pool; Wait executes the group's still-queued ranges
+on the waiting thread before waiting for the rest, so the stepping thread can
+always run the solver's coordinating task even when every pool worker is
+spinning in another task. Physics worlds use this pool when they have at least
+2,048 awake bodies and run tasks inline below that, where queueing measured
+slower (`physics_benchmark`). `POCKET_PHYSICS_WORKERS=0` forces one thread.
+Final body positions are identical with one thread and with the pool
+(`physics_threads` CTest, also run under TSan).
 
 ## Verification
 

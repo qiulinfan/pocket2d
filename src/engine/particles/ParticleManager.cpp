@@ -16,12 +16,7 @@ namespace {
 constexpr float kPixelsPerUnit = 100.0f;
 constexpr size_t kParallelParticleThreshold = 8192;
 constexpr size_t kParticleChunkSize = 1024;
-// One pool for the process, shared by all Worlds. TaskExecutor accepts
-// concurrent submitters; it lives until process exit.
-TaskExecutor &ParticleExecutor() {
-    static TaskExecutor executor;
-    return executor;
-}
+TaskExecutor &ParticleExecutor() { return TaskExecutor::Shared(); }
 
 // 线性插值: 用于在粒子生命周期内平滑过渡属性值
 float Lerp(float start, float end, float t) {

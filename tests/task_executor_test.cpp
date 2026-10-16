@@ -1,7 +1,9 @@
 #include "core/TaskExecutor.h"
 #include "particles/ParticleManager.h"
 #include <atomic>
+#include <array>
 #include <barrier>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <mutex>
@@ -127,6 +129,71 @@ std::vector<ParticleSnapshot> RunParticles(TaskExecutor *executor) {
     return snapshots;
 }
 
+struct AsyncProbe {
+    std::vector<std::atomic<int>> visits;
+    std::array<std::atomic<int>, 8> active_by_worker{};
+    std::atomic<bool> overlap{false};
+    std::atomic<std::size_t> max_worker{0};
+    explicit AsyncProbe(std::size_t count) : visits(count) {}
+};
+
+void VisitRange(std::size_t begin, std::size_t end, std::size_t worker, void *context) {
+    auto &probe = *static_cast<AsyncProbe *>(context);
+    if (probe.active_by_worker[worker].fetch_add(1) != 0) probe.overlap = true;
+    std::size_t seen = probe.max_worker.load();
+    while (worker > seen && !probe.max_worker.compare_exchange_weak(seen, worker)) {}
+    for (std::size_t i = begin; i < end; ++i) probe.visits[i].fetch_add(1);
+    std::this_thread::sleep_for(std::chrono::microseconds(200));
+    probe.active_by_worker[worker].fetch_sub(1);
+}
+
+struct Spinner {
+    std::atomic<bool> release{false};
+    std::atomic<int> started{0};
+};
+
+void SpinUntilReleased(std::size_t, std::size_t, std::size_t, void *context) {
+    auto &spinner = *static_cast<Spinner *>(context);
+    spinner.started.fetch_add(1);
+    while (!spinner.release.load()) std::this_thread::yield();
+}
+
+void Release(std::size_t, std::size_t, std::size_t, void *context) {
+    static_cast<Spinner *>(context)->release = true;
+}
+
+void TestAsync() {
+    TaskExecutor executor(3);
+    AsyncProbe probe(5000);
+    auto *group = executor.Submit(probe.visits.size(), 64, &VisitRange, &probe);
+    executor.Wait(group);
+    for (const auto &count : probe.visits) Check(count.load() == 1, "async range omission or overlap");
+    Check(!probe.overlap, "a worker index ran two ranges at once");
+    Check(probe.max_worker <= executor.WorkerCount(), "worker index out of range");
+    executor.Wait(executor.Submit(0, 1, &VisitRange, &probe));
+
+    // Box2D's solver shape: workers spin until a task queued after them runs.
+    // With every pool worker spinning, the waiter must run the releasing task.
+    Spinner spinner;
+    std::vector<TaskExecutor::Group *> spinners;
+    for (std::size_t i = 0; i < executor.WorkerCount(); ++i)
+        spinners.push_back(executor.Submit(1, 1, &SpinUntilReleased, &spinner));
+    while (spinner.started.load() < static_cast<int>(executor.WorkerCount())) std::this_thread::yield();
+    auto *release = executor.Submit(1, 1, &Release, &spinner);
+    executor.Wait(release);
+    for (auto *spinning : spinners) executor.Wait(spinning);
+    Check(spinner.release.load(), "waiter ran its own queued task");
+
+    // ParallelFor still works while asynchronous groups are pending.
+    AsyncProbe pending(2000);
+    auto *background = executor.Submit(pending.visits.size(), 16, &VisitRange, &pending);
+    std::atomic<int> sum{0};
+    executor.ParallelFor(1000, 10, [&](size_t begin, size_t end) { sum += static_cast<int>(end - begin); });
+    executor.Wait(background);
+    Check(sum == 1000, "ParallelFor alongside async groups");
+    for (const auto &count : pending.visits) Check(count.load() == 1, "background group completed");
+}
+
 void TestParticleIntegration() {
     TaskExecutor executor(3);
     const auto serial = RunParticles(nullptr);
@@ -149,8 +216,9 @@ void TestParticleIntegration() {
 int main() {
     try {
         TestExecutor();
+        TestAsync();
         TestParticleIntegration();
-        std::cout << "task_executor_test: threads, ranges, exceptions, nesting and particle determinism passed\n";
+        std::cout << "task_executor_test: threads, ranges, exceptions, nesting and particle determinism, async groups passed\n";
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "task_executor_test: " << error.what() << '\n';

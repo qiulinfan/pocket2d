@@ -134,6 +134,11 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   (gpu/metal) before, 3.48–4.08 / 3.15–3.30 ms after. Against the old path,
   26 of 518,400 pixels differ at glyph edges by at most 18/255; no pixel test
   covers text.
+- Box2D's multithreaded solver runs on the shared `TaskExecutor` through new
+  asynchronous `Submit`/`Wait` calls, for worlds with at least 2,048 awake
+  bodies. `physics_benchmark` (Release, 7 pool workers, two runs each):
+  5,050-body pyramid collapsing 2.40–2.60 → 1.60–1.65 ms per step; 15 and 210
+  bodies unchanged (inline). Final positions match one thread exactly.
 
 ## Completed and verified in this slice
 
