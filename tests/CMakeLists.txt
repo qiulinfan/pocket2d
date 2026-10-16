@@ -9,6 +9,12 @@ pocket_runtime_test(runtime_step_test runtime_step_test.cpp)
 add_test(NAME runtime_step COMMAND runtime_step_test
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
 set_tests_properties(runtime_step PROPERTIES TIMEOUT 30)
+pocket_runtime_test(world_isolation_test world_isolation_test.cpp)
+add_test(NAME world_isolation_defense COMMAND world_isolation_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense" defense)
+add_test(NAME world_isolation_village COMMAND world_isolation_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village" village)
+set_tests_properties(world_isolation_defense world_isolation_village PROPERTIES TIMEOUT 120)
 pocket_runtime_test(runtime_actor_lifetime_test runtime_actor_lifetime_test.cpp)
 add_test(NAME runtime_actor_lifetime COMMAND runtime_actor_lifetime_test)
 set_tests_properties(runtime_actor_lifetime PROPERTIES TIMEOUT 30)
