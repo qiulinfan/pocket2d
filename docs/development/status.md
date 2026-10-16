@@ -631,10 +631,11 @@ phase15 benchmark directories. No performance gain or SOTA conclusion is claimed
    its quest line, inventory UI, altars and invasions, Ice Golem and saves, and
    the PocketTerraria sandbox with the Eye of Cthulhu, both played through the
    agent protocol. The engine gaps they found are fixed (the table in
-   `game-completeness-tests.md`, latest: FindPath clearance escape, built-ins
-   starting before Lua `OnStart` in a batch, point import on sprite actors).
-   Village_Rim's island-crossing puzzles, farming and other content remain
-   unmigrated (listed there).
+   `game-completeness-tests.md`, latest: `Physics.PathRegions` region labels,
+   FindPath leaving the clearance margin at once, FindPath clearance escape).
+   Village_Rim's original island route (keyed doors, chests) is migrated and
+   played to the Ice Golem; content after the golem, farming and other systems
+   remain unmigrated (listed there).
 
 ## Recovery and artifacts
 

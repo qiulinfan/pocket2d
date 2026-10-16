@@ -17,7 +17,8 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
 按 y 排序（与原工程 2D Renderer 的自定义排序轴一致）。`tools/pack_characters.py`
 为每个角色写 animation 资源（clip 直接引用 Unity 每动作一张的表，含 Golem 的 128 px
 四向表），`tools/pack_items.py` 从物品 ScriptableObject 读名称、堆叠和图标精灵，
-裁出图标并生成 `items/village.items.json`（12 种物品）。
+裁出图标并生成 `items/village.items.json`（17 种物品），`tools/pack_route.py` 裁出门的
+关闭精灵与宝箱开启帧（导入时门的 Pad 存的是打开的精灵，宝箱贴图在被跳过的 UISprites 里）。
 
 手写玩法组件：
 
@@ -37,21 +38,34 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
   360° 砸地（20 伤害、半径 3）或三圈各 12 发的旋转蓝火（每发 10）；击败即胜利并存档。
 - 存档：F5/F9 用 `Save.Write/Read` 存玩家、背包、祭坛与岛屿入侵、任务与 NPC 赠品、
   Boss 与地上掉落；读档先完整校验，再重新加载场景并应用（入侵者不存，与原作一致）。
-- 任务指引：`Physics.FindPath` 规划，目标在别的可行走区域时按传送门图（BFS）先走
-  向第一个传送门；同时作为 HUD 提示和 agent 观测。
+- `VRRoute`：原作的岛间路线。A 世界四岛与 Golem 小岛互不相连，只经 B 世界的房间
+  走通：起始岛 → APortal1 → B1（downdoor_B1、rightdoor_B1）→ BPortal2 → B 岛 →
+  APortal3 → B2（leftdoor_B2）→ BPortal4 → C 岛（Soldier）→ APortal5 → B3
+  （updoor_B3）→ BPortal6 → APortal6 → Golem。五扇 `DoorController` 门（任意钥匙，
+  `KeyUseManager`：选中钥匙后左键点门，鼠标距玩家 2 以内，消耗一把；碰到关着的门
+  提示 "Key required"），15 个宝箱（`ChestComponent` 默认物品按 TryAdd 堆叠；在 3 以内
+  左键点开，16 格窗口与背包间点击搬运，Tab 关闭，四帧开合动画），以及 B1 里死后必掉
+  钥匙的 GoblinArcher_KeyDrop（40 HP）。门、宝箱内容和弓箭手存入存档。
+- 任务 NPC 是原作 `NPCs/` 组（导入了胶囊碰撞体的那几个）：B 岛 SwordsMan 给指南针、
+  C 岛 Soldier 给 Boss 任务；起始岛上同名的是开场过场的 `OpeningNPCs`，不对话。
+- 任务指引：`Physics.PathRegions` 一次给传送门两端、门两侧和宝箱标出可行走区域，
+  再在"传送门（单向）+ 关着的门"的区域图上 BFS；下一步是锁着的门时，有钥匙就引到门前
+  （`action: unlock`，附点击的屏幕坐标），没有就引向最近的钥匙来源（地上的钥匙、
+  有钥匙的宝箱 `open_chest`、带钥匙的弓箭手）。路径用 0.25 格（有的宝箱在 1 格宽的
+  过道里）。同时作为 HUD 提示和 agent 观测。
 
 `tools/playtest.py` 只用真实输入和游戏观测，跟随任务指引完成：与 Priest 对话、
 击杀携带宝石的哥布林并拾取、回报、用鼠标在背包里搬运物品、修复祭坛并放置风宝石、
-领取指南针、守住第一波入侵、F5 存档 → `reset` 新 worker → F9 读档、APortal1/BPortal1
-往返、听 Soldier 的话经他开启的传送门到 Golem 岛并击败 Golem、用指南针传回祭坛；
-再从战前存档用其它种子重打，覆盖两种攻击。15 项检查全部通过，同一种子两次运行的
-结果逐项一致。
+守住第一波入侵、F5 存档 → `reset` 新 worker → F9 读档、APortal1/BPortal1 往返；
+然后沿原作路线：B1 用鼠标开宝箱 14、把两把钥匙拖进快捷栏、选中钥匙点开两扇门，
+到 B 岛找 SwordsMan 领指南针，B2 开宝箱 16 开 leftdoor_B2，到 C 岛听 Soldier 的话，
+B3 开宝箱 9 开 updoor_B3，经 BPortal6/APortal6 到 Golem 并击败它、用指南针传回祭坛；
+再从战前存档用其它种子重打（门与宝箱按存档恢复），覆盖两种攻击。17 项检查全部通过，同一种子两次运行的结果逐项一致。
 
 迁移时的适配（原作行为依赖未迁移内容或不可测）：
 
-- 原作各岛之间靠谜题内容连通（需钥匙的门与宝箱、幽灵墙、骷髅王死后出现的桥、
-  冻结水面等，未迁移）；Soldier 的"面前的传送门会带你去找他"按字面实现为一个通往
-  Golem 岛的单向传送门，并选用起始岛上的 Soldier。
+- 掉钥匙的弓箭手用近战哥布林代替（与入侵者相同）。路线上只需宝箱 14、16、9 的钥匙；
+  宝箱 15 和弓箭手的钥匙是原作的富余。
 - 原作修复宝石只有 15% 掉率；任务所需的修复宝石与风宝石由起始岛巡逻队的第一只
   哥布林必掉（其余敌人仍是 15%、全局上限 5）。
 - 入侵者用近战哥布林代替弓箭手/炸弹手（每次 10 点祭坛伤害、2 秒冷却）；盾牌在快捷栏
@@ -94,6 +108,8 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
 | 站得比净空半径更贴墙时 `FindPath` 出不了起点格（VR 任务指引在墙边来回抖动） | 区分实心格与净空格：距起点或终点 `ceil(radius/cell)+1` 格内的净空格可通行，实心格仍不可 |
 | 较早 actor 的 `OnStart` 里查不到后面 actor 的静态碰撞体（VR 传送门区域在 OnStart 里算错） | 同一启动批次先启动内建组件再调用 Lua `OnStart`；`OnStart` 中启用的刚体仍在本批次启动 |
 | 受击时进入传送门，锁定期间强制播放 idle，受击动画的完成事件不再到来，玩家永远卡在 hurt（VR 游戏代码） | 游戏侧修复：锁定期间只在 move 状态播放 idle |
+| 判断两点是否连通只能逐对 `FindPath`，不可达的目标要泛洪整片区域；任务指引每开一扇门重算区域要数秒（VR） | `Physics.PathRegions(points, cell, radius, max_nodes)`：每个连通区域一次泛洪，按 FindPath 的格规则给一批点标区域号 |
+| 起点在净空边距内时，A* 把边距格当作自由格，路径贴着墙走，盒形玩家卡在瓦片墙角（VR 路线上 B2 的门后） | 进入净空格的一步按四步计价，路径先离开边距再前进 |
 
 （VR = Village_Rim，PT = PocketTerraria。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
@@ -101,9 +117,13 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
 
 - **导入近似**：Unity Sprite 形状碰撞按整格；有缩放/旋转的 tilemap、九宫格精灵和 trigger 只记录在
   `import_report.json`。
-- **Village_Rim 未迁移的内容**：岛间通行谜题（门/钥匙/宝箱 UI、幽灵墙、骷髅王与桥、冻结与融化）、
-  B 世界的魔树柱（摧毁后停止该岛入侵）与陷阱、农场与种树、风以外的元素与元素图鉴、弓箭手/炸弹手的
+- **Village_Rim 未迁移的内容**：Golem 之后的内容（它死后 `BridgeManager` 架出通往 D 岛的桥，
+  D 岛的最终 Boss GoblinHighPriest，死后的春季融化 `MeltOnlySpringReveal`；导入场景里这座桥的
+  瓦片现在一直显示，挡路的碰撞体也一直在）；B 世界的敌人与 Boss（Ghost、蘑菇、GoblinSwordSaint、
+  骷髅王 GhostWizard 及其桥——那座桥的碰撞体是 3D BoxCollider，不影响 2D 通行，不在路线上）、
+  魔树柱（摧毁后停止该岛入侵）与箭陷阱、农场与种树、风以外的元素与元素图鉴、弓箭手/炸弹手的
   投射物、开场过场、小地图和音频；原工程玩家出生点位于水面碰撞体内（运行时另有放置逻辑，未迁移）。
+  幽灵墙（`GhostObstacle`，ghostborder 层与所有层碰撞）在原作里就是永久实心，已按实心瓦片导入。
   这些是内容移植，不是已知的引擎缺口。
 
 ## 性能
