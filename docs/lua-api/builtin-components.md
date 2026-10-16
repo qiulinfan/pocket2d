@@ -121,6 +121,13 @@ engine and is not directly exposed as writable Lua properties.
 pocket2d derives an `effective_body_type` internally for dynamic actor
 hierarchies. The authored Lua-visible `body_type` remains the requested value.
 
+Motion ownership: a dynamic body owns its pose and writes it to the Transform
+after each physics step; kinematic and static bodies follow their Transform
+before each step. `SetPosition` and `Physics.MoveCharacter` update both, so
+either may be used on kinematic bodies. Do not offset a kinematic actor's
+Transform for drawing (for example to put a sprite's feet on the ground):
+the body follows it. Use the SpriteRenderer pivot instead.
+
 ## `ParticleSystem`
 
 ### Properties

@@ -75,7 +75,7 @@ Physics raycasts return `HitResult` objects with:
 | `Physics.OverlapCircle(center, radius, include_triggers)` | Actors overlapping the circle, each once, in UID order |
 | `Physics.OverlapBox(center, width, height, include_triggers)` | Actors overlapping the axis-aligned box, each once, in UID order |
 | `Physics.GetGravity()` / `Physics.SetGravity(vec)` | Reads or changes world gravity (default `(0, 9.8)`) |
-| `Physics.MoveCharacter(body, delta)` | Moves a kinematic Rigidbody by up to `delta` against colliders its mask accepts; returns the applied movement. Circle/capsule movers slide along any surface; a box mover moves x then y with square corners (tile platformers), ignoring its rotation |
+| `Physics.MoveCharacter(body, delta)` | Moves a kinematic Rigidbody by up to `delta` against colliders its mask accepts; returns the applied movement. Circle/capsule movers slide along any surface; a box mover moves x then y with square corners (tile platformers), ignoring its rotation. Start movers clear of colliders: a box already overlapping a one-sided tilemap outline does not collide with it |
 | `Physics.FindPath(from, to, cell, radius, max_nodes)` | Grid A* (8-way, no corner cutting, at most `max_nodes` expansions) over `cell`-sized cells; static colliders within `radius` of a cell centre and solid tilemap cells block. Returns the waypoints after the start (ending exactly at `to`), or the path to the cell nearest the goal when it is not reached |
 | `Physics.ConnectDistance(a, b, anchor_a, anchor_b)` | Distance joint between two world anchors |
 | `Physics.ConnectRevolute(a, b, anchor)` | Hinge at a world anchor |
