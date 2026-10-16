@@ -47,7 +47,12 @@
 不允许绝对路径、`..`、反斜杠或越出各自根目录的符号链接。
 图片尺寸必须恰好等于列数 × 单帧宽、行数 × 单帧高。
 
-所有示例字段都必填，只有 frame 的 `event` 可省略。格式拒绝未知或重复字段、
+clip 可以用可选的 `sheet` 指定自己的图表（例如 Unity `Resources` 下每个动作一张表）：
+`{"name": "run", "loop": true, "sheet": {"image": "hero/Run.png", "columns": 8, "rows": 3}, "frames": [...]}`。
+它沿用资源的 `tile_width_px`/`tile_height_px`，图片尺寸必须恰好匹配，帧的行列落在该图表内；
+未指定 `sheet` 的 clip 使用顶层 `image`。
+
+所有示例字段都必填，只有 frame 的 `event` 与 clip 的 `sheet` 可省略。格式拒绝未知或重复字段、
 重名 clip、错误类型、非法 UTF-8 和越界行列。行列从 `1` 开始；每帧 `ticks`
 为 `1..36000` 的整数。资源最多 4 MiB、256 个非空 clip、总共 65,536 帧；
 clip 名称和显式 event 为 `1..128` 个 UTF-8 字节，区分大小写。

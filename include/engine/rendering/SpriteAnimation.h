@@ -86,6 +86,7 @@ private:
     // The pose image path for pose_image_data_, built once per asset.
     std::string pose_image_;
     const SpriteAnimationAsset::Data *pose_image_data_ = nullptr;
+    const SpriteAnimationAsset::Clip *pose_image_clip_ = nullptr;
     ActorHandle posed_actor_;
     std::string posed_target_;
 };

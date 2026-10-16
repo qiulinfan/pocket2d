@@ -260,6 +260,35 @@ void TestPathsAndImages(const Fixture &fixture) {
     Check(SpriteAnimationAsset::LoadResource("alias.animation.json").resolved_image_path == data.resolved_image_path,
           "in-root aliases may resolve to the same canonical resource");
 }
+// A clip may draw from its own sheet of the resource's tile size.
+void TestClipSheets(const Fixture &fixture) {
+    WritePNG(fixture.root / "images" / "run.png", 16, 5);   // 4 columns x 1 row of 4x5 tiles
+    const auto data = fixture.LoadText(R"({
+      "version":1,"image":"hero.png","columns":3,"rows":2,"tile_width_px":4,"tile_height_px":5,
+      "clips":[
+        {"name":"idle","loop":true,"frames":[{"row":2,"column":3,"ticks":1}]},
+        {"name":"run","loop":true,"sheet":{"image":"run.png","columns":4,"rows":1},
+         "frames":[{"row":1,"column":4,"ticks":2}]}]})");
+    const auto &idle = data.clips[0], &run = data.clips[1];
+    Check(SpriteAnimationAsset::ClipColumns(data, idle) == 3 && SpriteAnimationAsset::ClipRows(data, idle) == 2 &&
+              SpriteAnimationAsset::ClipImagePath(data, idle) == UTF8(data.resolved_image_path),
+          "clips without a sheet use the resource atlas");
+    Check(SpriteAnimationAsset::ClipColumns(data, run) == 4 && SpriteAnimationAsset::ClipRows(data, run) == 1 &&
+              run.resolved_image_path == std::filesystem::canonical(fixture.root / "images" / "run.png"),
+          "a clip sheet resolves its own image and grid");
+    Reject([&] { fixture.LoadText(R"({"version":1,"image":"hero.png","columns":3,"rows":2,
+      "tile_width_px":4,"tile_height_px":5,"clips":[{"name":"run","loop":true,
+      "sheet":{"image":"run.png","columns":5,"rows":1},"frames":[{"row":1,"column":1,"ticks":1}]}]})"); },
+      "sheet pixel size must match its grid");
+    Reject([&] { fixture.LoadText(R"({"version":1,"image":"hero.png","columns":3,"rows":2,
+      "tile_width_px":4,"tile_height_px":5,"clips":[{"name":"run","loop":true,
+      "sheet":{"image":"run.png","columns":4,"rows":1},"frames":[{"row":2,"column":1,"ticks":1}]}]})"); },
+      "frames must lie inside the clip's own sheet");
+    Reject([&] { fixture.LoadText(R"({"version":1,"image":"hero.png","columns":3,"rows":2,
+      "tile_width_px":4,"tile_height_px":5,"clips":[{"name":"run","loop":true,
+      "sheet":{"image":"run.png","columns":4,"rows":1,"extra":1},"frames":[{"row":1,"column":1,"ticks":1}]}]})"); },
+      "sheet fields are exact");
+}
 } // namespace
 
 int main() {
@@ -271,6 +300,7 @@ int main() {
             TestStrictJSON(fixture);
             TestBoundsAndEncoding(fixture);
             TestPathsAndImages(fixture);
+            TestClipSheets(fixture);
         }
         SDL_Quit();
         std::cout << "SpriteAnimation asset schema, bounds, UTF-8 and atlas confinement regressions passed\n";

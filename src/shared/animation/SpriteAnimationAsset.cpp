@@ -168,9 +168,16 @@ void ValidateData(const Data &data) {
         Require(!clip.frames.empty(), "clip " + clip.name + " must contain at least one frame");
         Require(clip.frames.size() <= kMaxFrames - total_frames, "total frame count exceeds 65536");
         total_frames += clip.frames.size();
+        if (!clip.image.empty()) {
+            RequireRelative(clip.image, "clip " + clip.name + " sheet.image");
+            Require(clip.columns > 0 && clip.rows > 0, "clip " + clip.name + ": sheet grid must be positive");
+            Require(static_cast<std::int64_t>(clip.columns) * data.tile_width_px <= std::numeric_limits<int>::max() &&
+                        static_cast<std::int64_t>(clip.rows) * data.tile_height_px <= std::numeric_limits<int>::max(),
+                    "clip " + clip.name + ": sheet dimensions overflow the supported integer range");
+        }
+        const int columns = ClipColumns(data, clip), rows = ClipRows(data, clip);
         for (const auto &frame : clip.frames) {
-            Require(frame.row >= 1 && frame.row <= data.rows &&
-                        frame.column >= 1 && frame.column <= data.columns,
+            Require(frame.row >= 1 && frame.row <= rows && frame.column >= 1 && frame.column <= columns,
                     "clip " + clip.name + ": frame cell lies outside the atlas grid");
             Require(frame.ticks >= 1 && frame.ticks <= kMaxFrameTicks,
                     "clip " + clip.name + ": frame ticks must be in [1,36000]");
@@ -181,16 +188,21 @@ void ValidateData(const Data &data) {
 
 void ValidateAtlasImage(Data &data, const std::filesystem::path &images_root) {
     ValidateData(data);
-    const auto path = ResolveWithin(images_root, data.image, "image");
-    Require(std::filesystem::is_regular_file(path), "atlas image missing: " + PathText(path));
-    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
-        IMG_Load(PathText(path).c_str()), SDL_DestroySurface);
-    Require(surface != nullptr, "cannot decode atlas " + PathText(path) + ": " + SDL_GetError());
-    const auto width = static_cast<std::int64_t>(data.columns) * data.tile_width_px;
-    const auto height = static_cast<std::int64_t>(data.rows) * data.tile_height_px;
-    Require(surface->w == width && surface->h == height,
-            "atlas pixel dimensions must exactly match grid and tile pixel dimensions: " + PathText(path));
-    data.resolved_image_path = path;
+    const auto check = [&](const std::string &image, int columns, int rows, const std::string &label) {
+        const auto path = ResolveWithin(images_root, image, label);
+        Require(std::filesystem::is_regular_file(path), "atlas image missing: " + PathText(path));
+        std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
+            IMG_Load(PathText(path).c_str()), SDL_DestroySurface);
+        Require(surface != nullptr, "cannot decode atlas " + PathText(path) + ": " + SDL_GetError());
+        Require(surface->w == static_cast<std::int64_t>(columns) * data.tile_width_px &&
+                    surface->h == static_cast<std::int64_t>(rows) * data.tile_height_px,
+                "atlas pixel dimensions must exactly match grid and tile pixel dimensions: " + PathText(path));
+        return path;
+    };
+    const auto atlas = check(data.image, data.columns, data.rows, "image");
+    for (auto &clip : data.clips)
+        if (!clip.image.empty()) clip.resolved_image_path = check(clip.image, clip.columns, clip.rows, "sheet.image");
+    data.resolved_image_path = atlas;
 }
 
 Data LoadFile(const std::filesystem::path &path, const std::filesystem::path &images_root) {
@@ -216,9 +228,17 @@ Data LoadFile(const std::filesystem::path &path, const std::filesystem::path &im
     std::size_t total_frames = 0;
     data.clips.reserve(clips.Size());
     for (const auto &value : clips.GetArray()) {
-        ExactKeys(value, {"name", "loop", "frames"}, {}, "clip");
+        ExactKeys(value, {"name", "loop", "frames"}, {"sheet"}, "clip");
         Clip clip;
         clip.name = String(value, "name", "clip");
+        if (value.HasMember("sheet")) {
+            const auto &sheet = value["sheet"];
+            ExactKeys(sheet, {"image", "columns", "rows"}, {}, "clip.sheet");
+            clip.image = String(sheet, "image", "clip.sheet");
+            clip.columns = Integer(sheet, "columns", "clip.sheet");
+            clip.rows = Integer(sheet, "rows", "clip.sheet");
+            Require(!clip.image.empty(), "clip.sheet.image must not be empty");
+        }
         Require(value["loop"].IsBool(), "clip.loop must be boolean");
         clip.loop = value["loop"].GetBool();
         const auto &frames = value["frames"];
@@ -247,6 +267,14 @@ Data LoadFile(const std::filesystem::path &path, const std::filesystem::path &im
 Data LoadResource(const std::string &relative) {
     const auto path = ResolveWithin(ResourcePath::ResourceSubdirectory("animations"), relative, "animation resource");
     return LoadFile(path, ResourcePath::ResourceSubdirectory("images"));
+}
+
+int ClipColumns(const Data &data, const Clip &clip) { return clip.image.empty() ? data.columns : clip.columns; }
+int ClipRows(const Data &data, const Clip &clip) { return clip.image.empty() ? data.rows : clip.rows; }
+std::string ClipImagePath(const Data &data, const Clip &clip) {
+    if (clip.image.empty())
+        return data.resolved_image_path.empty() ? data.image : PathText(data.resolved_image_path);
+    return clip.resolved_image_path.empty() ? clip.image : PathText(clip.resolved_image_path);
 }
 
 const Clip *FindClip(const Data &data, const std::string &name) {

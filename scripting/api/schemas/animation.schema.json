@@ -82,6 +82,30 @@
           "items": {
             "$ref": "#/$defs/frame"
           }
+        },
+        "sheet": {
+          "description": "Optional own sheet for this clip, with the resource's tile pixel size; frames index into it.",
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "string",
+              "minLength": 1
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "image",
+            "columns",
+            "rows"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

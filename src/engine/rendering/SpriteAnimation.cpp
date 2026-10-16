@@ -178,12 +178,15 @@ void SpriteAnimation::ApplyBoundPose(SpriteRenderer *target) {
     if (posed_actor_.uid != actor_handle.uid || posed_actor_.generation != actor_handle.generation ||
         posed_target_ != renderer_key) ClearOwnedPose();
     if (!target) return;
-    if (pose_image_data_ != data_.get()) {
-        pose_image_ = data_->resolved_image_path.empty() ? data_->image : data_->resolved_image_path.string();
+    const auto *clip = CurrentClip();
+    if (pose_image_data_ != data_.get() || pose_image_clip_ != clip) {
+        pose_image_ = SpriteAnimationAsset::ClipImagePath(*data_, *clip);
         pose_image_data_ = data_.get();
+        pose_image_clip_ = clip;
     }
-    const auto &frame = CurrentClip()->frames[frame_index_];
-    target->SetAnimationPose(pose_owner_, pose_image_, data_->columns, data_->rows, frame.row, frame.column);
+    const auto &frame = clip->frames[frame_index_];
+    target->SetAnimationPose(pose_owner_, pose_image_, SpriteAnimationAsset::ClipColumns(*data_, *clip),
+                             SpriteAnimationAsset::ClipRows(*data_, *clip), frame.row, frame.column);
     posed_actor_ = actor_handle;
     if (posed_target_ != renderer_key) posed_target_ = renderer_key;
 }
