@@ -54,6 +54,9 @@ public:
     // 启动/停止 Play 模式: 运行时使用快照副本, editor 侧缓存保持稳定.
     bool EnterPlayMode(Engine &engine);
     bool ExitPlayMode(Engine &engine);
+    // Ends play when the play World ran in its own Engine, which the caller
+    // destroys. Rebinds documents to the edit Engine without reloading it.
+    bool EndPlaySession(Engine &edit_engine);
     bool TogglePlayPause();
     bool HandleSceneEditCommand(const SceneFormat::SceneEditCommand &command,
                                 Engine &engine);
@@ -90,6 +93,7 @@ private:
     bool play_mode_paused_ = false;
     bool edit_mode_live_preview_enabled_ = false;
     Engine *bound_engine_ = nullptr;
+    bool authoring_edited_during_play_ = false;
     std::uint64_t coordinator_epoch_ = 0;
     std::uint64_t mirror_revision_ = 0;
     std::uint64_t attempted_revision_ = ~std::uint64_t{0};

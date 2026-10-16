@@ -463,13 +463,47 @@ std::filesystem::path ChooseStartupProjectRoot(EditorConfigData &editor_config) 
 
 } // namespace
 
+bool EditorApp::StartPlaySession() {
+    if (play_engine_) return false;
+    try {
+        play_world_ = std::make_unique<World>();
+        play_engine_ = std::make_unique<Engine>(*play_world_);
+        play_engine_->InitializeEmbedded(engine_->GetWindow(), engine_->GetRenderer());
+        play_engine_->SetRenderRuntimeToTexture(true);
+        play_engine_->SetRuntimeRenderTargetSize(engine_->GetRuntimeRenderTargetWidth(),
+                                                 engine_->GetRuntimeRenderTargetHeight());
+    } catch (const std::exception &error) {
+        play_engine_.reset();
+        play_world_.reset();
+        overlay_.ShowNotice(std::string("Cannot enter play mode: ") + error.what());
+        return false;
+    }
+    if (!scene_session_.EnterPlayMode(*play_engine_)) {
+        const std::string load_error = play_engine_->GetLastSceneLoadError();
+        StopPlaySession();
+        overlay_.ShowNotice(load_error.empty() ? "Cannot enter play mode."
+                                               : "Cannot enter play mode: " + load_error);
+        return false;
+    }
+    return true;
+}
+
+void EditorApp::StopPlaySession() {
+    if (scene_session_.IsPlayModeActive()) scene_session_.EndPlaySession(*engine_);
+    if (play_engine_) play_engine_->ShutdownRuntime();
+    play_engine_.reset();
+    play_world_.reset();
+}
+
 bool EditorApp::BootstrapEngineForCurrentProject() {
     engine_ = std::make_unique<Engine>();
     engine_->InitializeRuntime();
     ApplyEditorWindowIcon(engine_->GetWindow());
     ApplyEditorWindowSettings();
     engine_->SetRenderRuntimeToTexture(true);
+    // The edit World never plays sound; the play World owns audio output.
     engine_->SetAudioPlaybackEnabled(false);
+    engine_->GetWorld().audio_output_enabled = false;
     runtime_view_visible_last_frame_ = true;
     scene_session_.LoadInitialScene(*engine_);
 
@@ -492,6 +526,7 @@ bool EditorApp::SwitchProject(const std::filesystem::path &project_root) {
         return false;
     }
 
+    StopPlaySession();
     scene_session_.PersistDocumentOnEditorShutdown();
     overlay_.Shutdown();
     if (engine_) {
@@ -539,174 +574,188 @@ void EditorApp::Run() {
 
     // A script-requested quit must still leave unsaved authoring drafts reachable.
     while (engine_ && (engine_->IsRunning() || overlay_.HasUnsavedMapChanges())) {
-        /*
-        Retry pending draft recovery before simulation. Normal document edits
-        commit through the session hook at the owner-thread UI boundary.
-        */
-        engine_->SetAudioPlaybackEnabled(scene_session_.IsPlayModeActive());
-        scene_session_.SyncRuntimeMirrorIfDirty(*engine_);
-        overlay_.SetRuntimeInputRoutingState(scene_session_.IsPlayModeActive(), scene_session_.IsPlayModePaused());
-        overlay_.SetSceneEditStatus(scene_session_.GetLastEditError(), scene_session_.IsRuntimeMirrorPending());
-
-        bool quit_requested_this_frame = false;
-        SDL_Event event;
-        while (SDLEventHelper::SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT && overlay_.HasUnsavedMapChanges()) {
-                overlay_.ShowNotice("Save or discard Map Asset edits in the Inspector before closing.");
-                continue;
-            }
-            const bool captured_by_editor = overlay_.ProcessEvent(event);
-            const bool is_window_event = event.type >= SDL_EVENT_WINDOW_FIRST &&
-                                         event.type <= SDL_EVENT_WINDOW_LAST;
-            if (is_window_event) {
-                HandleWindowEvent(event.window);
-            }
-            /*
-            Window lifecycle events must still reach the runtime 
-            even when ImGui is actively capturing keyboard or mouse input.
-            */
-            const bool always_forward_to_runtime = event.type == SDL_EVENT_QUIT || is_window_event;
-            if (!captured_by_editor || always_forward_to_runtime) {
-                const SDL_Event runtime_event =
-                    overlay_.BuildRuntimeEvent(event, *engine_);
-                engine_->ProcessSDLEvent(runtime_event, quit_requested_this_frame);
-            }
-        }
-
-        const bool play_mode_active = scene_session_.IsPlayModeActive();
-        const bool play_mode_paused = scene_session_.IsPlayModePaused();
-        const bool edit_mode_live_preview_enabled =
-            scene_session_.IsEditModeLivePreviewEnabled();
-        const bool advance_gameplay_frame = play_mode_active && !play_mode_paused;
-        if (advance_gameplay_frame) {
-            // Play mode advances simulation (OnUpdate + physics).
-            engine_->RunSingleFrame(quit_requested_this_frame);
-        } else if (play_mode_active && play_mode_paused) {
-            // Pause keeps the exact last gameplay frame visible.
-            engine_->RunPresentPausedFrame(quit_requested_this_frame);
-        } else if (!runtime_view_visible_last_frame_ &&
-                   !edit_mode_live_preview_enabled) {
-            // No visible game viewport in edit mode: keep the editor host
-            // frame fresh without spending a pass on an unused runtime target.
-            engine_->RunPresentPausedFrame(quit_requested_this_frame);
-        } else {
-            // Edit mode renders a non-simulating preview from current state.
-            engine_->RunRenderFrozenFrame(quit_requested_this_frame,
-                                          edit_mode_live_preview_enabled);
-        }
         std::filesystem::path pending_project_root;
+        bool stop_play_after_frame = false;
         {
-            const EditorOverlayResult overlay_result =
-                overlay_.Render(*engine_, scene_session_.GetSceneDocument(),
-                                editor_config_,
-                                editor_config_dirty_,
-                                scene_session_.IsPlayModeActive(),
-                                scene_session_.IsPlayModePaused(),
-                                scene_session_.IsEditModeLivePreviewEnabled(),
-                                scene_session_.IsSceneEditingEnabled(),
-                                scene_session_.IsSceneSaveEnabled());
-            scene_session_.HandleSceneEditCommands(overlay_result.scene_edit_commands, *engine_);
-            if (overlay_result.retry_scene_mirror_requested) scene_session_.RetryRuntimeMirror();
-            if (overlay_result.dismiss_scene_edit_error_requested) scene_session_.ClearEditError();
-            if (overlay_result.play_mode_start_requested) {
-                if (overlay_.HasUnsavedMapChanges()) {
-                    overlay_.ShowNotice("Save or discard Map Asset edits before entering play mode.");
-                } else if (!scene_session_.EnterPlayMode(*engine_)) {
-                    const std::string &load_error =
-                        engine_->GetLastSceneLoadError();
-                    overlay_.ShowNotice(
-                        load_error.empty()
-                            ? "Cannot enter play mode."
-                            : "Cannot enter play mode: " + load_error);
+            /*
+            Retry pending draft recovery before simulation. Normal document edits
+            commit through the session hook at the owner-thread UI boundary.
+            */
+            // Panels and runtime calls below resolve the active Engine's World.
+            Engine &active = ActiveEngine();
+            WorldScope active_world(active.GetWorld());
+            // Mirroring targets the edit World; during play documents stay bound to the play Engine.
+            if (!play_engine_) scene_session_.SyncRuntimeMirrorIfDirty(*engine_);
+            overlay_.SetRuntimeInputRoutingState(scene_session_.IsPlayModeActive(), scene_session_.IsPlayModePaused());
+            overlay_.SetSceneEditStatus(scene_session_.GetLastEditError(), scene_session_.IsRuntimeMirrorPending());
+
+            bool quit_requested_this_frame = false;
+            SDL_Event event;
+            while (SDLEventHelper::SDL_PollEvent(&event)) {
+                if (event.type == SDL_EVENT_QUIT && overlay_.HasUnsavedMapChanges()) {
+                    overlay_.ShowNotice("Save or discard Map Asset edits in the Inspector before closing.");
+                    continue;
+                }
+                const bool captured_by_editor = overlay_.ProcessEvent(event);
+                const bool is_window_event = event.type >= SDL_EVENT_WINDOW_FIRST &&
+                                             event.type <= SDL_EVENT_WINDOW_LAST;
+                if (is_window_event) {
+                    HandleWindowEvent(event.window);
+                }
+                /*
+                Window lifecycle events must still reach the runtime 
+                even when ImGui is actively capturing keyboard or mouse input.
+                */
+                const bool always_forward_to_runtime = event.type == SDL_EVENT_QUIT || is_window_event;
+                if (!captured_by_editor || always_forward_to_runtime) {
+                    const SDL_Event runtime_event =
+                        overlay_.BuildRuntimeEvent(event, active);
+                    bool runtime_quit = false;
+                    active.ProcessSDLEvent(runtime_event, runtime_quit);
+                    // Closing the window ends the editor, even during play.
+                    if (event.type == SDL_EVENT_QUIT) quit_requested_this_frame = true;
                 }
             }
-            if (overlay_result.play_mode_pause_toggle_requested) {
-                scene_session_.TogglePlayPause();
+
+            const bool play_mode_active = scene_session_.IsPlayModeActive();
+            const bool play_mode_paused = scene_session_.IsPlayModePaused();
+            const bool edit_mode_live_preview_enabled =
+                scene_session_.IsEditModeLivePreviewEnabled();
+            const bool advance_gameplay_frame = play_mode_active && !play_mode_paused;
+            if (quit_requested_this_frame) engine_->RequestQuit();
+            if (advance_gameplay_frame) {
+                // Play mode advances the play World (OnUpdate + physics).
+                active.RunSingleFrame(false);
+            } else if (play_mode_active && play_mode_paused) {
+                // Pause keeps the exact last gameplay frame visible.
+                active.RunPresentPausedFrame(false);
+            } else if (!runtime_view_visible_last_frame_ &&
+                       !edit_mode_live_preview_enabled) {
+                // No visible game viewport in edit mode: keep the editor host
+                // frame fresh without spending a pass on an unused runtime target.
+                active.RunPresentPausedFrame(false);
+            } else {
+                // Edit mode renders a non-simulating preview from current state.
+                active.RunRenderFrozenFrame(false, edit_mode_live_preview_enabled);
             }
-            if (overlay_result.play_mode_stop_requested) {
-                scene_session_.ExitPlayMode(*engine_);
-            }
-            if (overlay_result.edit_mode_live_preview_toggle_requested) {
-                scene_session_.ToggleEditModeLivePreview();
-            }
-            /*
-            Panels report scene_changed for any document mutation, but command-
-            driven edits are already mirrored incrementally via
-            HandleSceneEditCommands(). Only request a full mirror rebuild for
-            scene changes that did not produce an explicit edit command.
-            */
-            if (overlay_result.scene_changed &&
-                overlay_result.scene_edit_commands.empty()) {
-                scene_session_.MarkRuntimeMirrorDirty();
-            }
-            if (overlay_result.save_scene_requested) {
-                scene_session_.SaveDocumentIfDirty();
-            }
-            if (overlay_result.editor_config_changed) {
-                editor_config_dirty_ =
-                    !AreEditorConfigsEqualForConfirmation( editor_config_, confirmed_editor_config_);
-            }
-            if (overlay_result.editor_window_settings_changed) {
-                ApplyEditorWindowSettings();
-                SyncWindowStateFromLiveWindow();
-            }
-            if (overlay_result.editor_config_apply_requested) {
-                PersistConfirmedEditorConfig();
-            }
-            if (overlay_result.editor_config_revert_requested) {
-                RevertUnconfirmedEditorConfigChanges();
-            }
-            if (overlay_result.toggle_fullscreen_requested) {
-                SetEditorFullscreen(!IsEditorWindowFullscreen());
-            }
-            if (overlay_result.open_scene_requested) {
-                const std::string &scene_external_command =
-                    EditorConfig::ExternalEditorCommand( editor_config_, EditorExternalFileType::Scene);
-                if (!IsBlankCommand(scene_external_command)) {
-                    OpenExternalEditor(editor_config_,
-                                       EditorExternalFileType::Scene,
-                                       overlay_result.requested_scene_path,
-                                       ResourcePath::ResourcesRootPath());
-                } else {
-                    const auto previous_attempt = engine_->GetSceneLoadAttemptRevision();
-                    if (scene_session_.OpenSceneFromPath(overlay_result.requested_scene_path, *engine_)) {
-                        overlay_.NotifySceneOpened();
-                    } else if (engine_->RequiresSceneReset()) {
-                        const std::string failure = "Scene transition failed after commit began; restart the editor. Rollback is not guaranteed. " +
-                                                    engine_->GetLastSceneLoadError();
-                        // The stopped runtime may close the loop before another overlay draw.
-                        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", failure.c_str());
-                        overlay_.ShowNotice(failure);
-                    } else if (engine_->GetSceneLoadAttemptRevision() != previous_attempt &&
-                               !engine_->GetLastSceneLoadError().empty()) {
-                        overlay_.ShowNotice("Cannot open scene: " + engine_->GetLastSceneLoadError());
+            {
+                const EditorOverlayResult overlay_result =
+                    overlay_.Render(active, scene_session_.GetSceneDocument(),
+                                    editor_config_,
+                                    editor_config_dirty_,
+                                    scene_session_.IsPlayModeActive(),
+                                    scene_session_.IsPlayModePaused(),
+                                    scene_session_.IsEditModeLivePreviewEnabled(),
+                                    scene_session_.IsSceneEditingEnabled(),
+                                    scene_session_.IsSceneSaveEnabled());
+                scene_session_.HandleSceneEditCommands(overlay_result.scene_edit_commands, active);
+                if (overlay_result.retry_scene_mirror_requested) scene_session_.RetryRuntimeMirror();
+                if (overlay_result.dismiss_scene_edit_error_requested) scene_session_.ClearEditError();
+                if (overlay_result.play_mode_start_requested) {
+                    if (overlay_.HasUnsavedMapChanges()) {
+                        overlay_.ShowNotice("Save or discard Map Asset edits before entering play mode.");
                     } else {
-                        // A document parse/path rejection may occur before an
-                        // Engine attempt. Do not display a stale previous error.
-                        overlay_.ShowNotice("Cannot read scene: " + overlay_result.requested_scene_path.string());
+                        StartPlaySession();
                     }
                 }
+                if (overlay_result.play_mode_pause_toggle_requested) {
+                    scene_session_.TogglePlayPause();
+                }
+                if (overlay_result.play_mode_stop_requested) {
+                    stop_play_after_frame = true;
+                }
+                if (overlay_result.edit_mode_live_preview_toggle_requested) {
+                    scene_session_.ToggleEditModeLivePreview();
+                }
+                /*
+                Panels report scene_changed for any document mutation, but command-
+                driven edits are already mirrored incrementally via
+                HandleSceneEditCommands(). Only request a full mirror rebuild for
+                scene changes that did not produce an explicit edit command.
+                */
+                if (overlay_result.scene_changed &&
+                    overlay_result.scene_edit_commands.empty()) {
+                    scene_session_.MarkRuntimeMirrorDirty();
+                }
+                if (overlay_result.save_scene_requested) {
+                    scene_session_.SaveDocumentIfDirty();
+                }
+                if (overlay_result.editor_config_changed) {
+                    editor_config_dirty_ =
+                        !AreEditorConfigsEqualForConfirmation( editor_config_, confirmed_editor_config_);
+                }
+                if (overlay_result.editor_window_settings_changed) {
+                    ApplyEditorWindowSettings();
+                    SyncWindowStateFromLiveWindow();
+                }
+                if (overlay_result.editor_config_apply_requested) {
+                    PersistConfirmedEditorConfig();
+                }
+                if (overlay_result.editor_config_revert_requested) {
+                    RevertUnconfirmedEditorConfigChanges();
+                }
+                if (overlay_result.toggle_fullscreen_requested) {
+                    SetEditorFullscreen(!IsEditorWindowFullscreen());
+                }
+                if (overlay_result.open_scene_requested) {
+                    const std::string &scene_external_command =
+                        EditorConfig::ExternalEditorCommand( editor_config_, EditorExternalFileType::Scene);
+                    if (!IsBlankCommand(scene_external_command)) {
+                        OpenExternalEditor(editor_config_,
+                                           EditorExternalFileType::Scene,
+                                           overlay_result.requested_scene_path,
+                                           ResourcePath::ResourcesRootPath());
+                    } else if (play_engine_) {
+                        overlay_.ShowNotice("Stop play before opening another scene.");
+                    } else {
+                        const auto previous_attempt = engine_->GetSceneLoadAttemptRevision();
+                        if (scene_session_.OpenSceneFromPath(overlay_result.requested_scene_path, *engine_)) {
+                            overlay_.NotifySceneOpened();
+                        } else if (engine_->RequiresSceneReset()) {
+                            const std::string failure = "Scene transition failed after commit began; restart the editor. Rollback is not guaranteed. " +
+                                                        engine_->GetLastSceneLoadError();
+                            // The stopped runtime may close the loop before another overlay draw.
+                            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", failure.c_str());
+                            overlay_.ShowNotice(failure);
+                        } else if (engine_->GetSceneLoadAttemptRevision() != previous_attempt &&
+                                   !engine_->GetLastSceneLoadError().empty()) {
+                            overlay_.ShowNotice("Cannot open scene: " + engine_->GetLastSceneLoadError());
+                        } else {
+                            // A document parse/path rejection may occur before an
+                            // Engine attempt. Do not display a stale previous error.
+                            overlay_.ShowNotice("Cannot read scene: " + overlay_result.requested_scene_path.string());
+                        }
+                    }
+                }
+                if (overlay_result.open_external_editor_requested) {
+                    OpenExternalEditor(editor_config_,
+                                       overlay_result.requested_external_file_type,
+                                       overlay_result.requested_external_file_path,
+                                       overlay_result.requested_external_project_root);
+                }
+                if (overlay_result.open_project_requested) {
+                    pending_project_root =
+                        overlay_result.requested_project_root;
+                }
+                runtime_view_visible_last_frame_ = overlay_result.runtime_view_visible;
             }
-            if (overlay_result.open_external_editor_requested) {
-                OpenExternalEditor(editor_config_,
-                                   overlay_result.requested_external_file_type,
-                                   overlay_result.requested_external_file_path,
-                                   overlay_result.requested_external_project_root);
+            // Present once after both runtime and editor UI have been drawn
+            active.PresentFrame(advance_gameplay_frame);
+            // A script quit or a fatal play-World failure ends play, not the editor.
+            if (play_engine_ && (!play_engine_->IsRunning() || play_engine_->RequiresSceneReset())) {
+                if (play_engine_->RequiresSceneReset())
+                    overlay_.ShowNotice("Play stopped: " + play_engine_->GetLastSceneLoadError());
+                stop_play_after_frame = true;
             }
-            if (overlay_result.open_project_requested) {
-                pending_project_root =
-                    overlay_result.requested_project_root;
-            }
-            runtime_view_visible_last_frame_ = overlay_result.runtime_view_visible;
         }
-        // Present once after both runtime and editor UI have been drawn
-        engine_->PresentFrame(advance_gameplay_frame);
+        if (stop_play_after_frame) StopPlaySession();
         if (!pending_project_root.empty()) {
             SwitchProject(pending_project_root);
         }
     }
 
     // On shutdown, persist only editor document cache and discard runtime-only play-state mutations
+    StopPlaySession();
     scene_session_.PersistDocumentOnEditorShutdown();
     EditorConfig::Write(confirmed_editor_config_);
     confirmed_editor_config_persist_dirty_ = false;

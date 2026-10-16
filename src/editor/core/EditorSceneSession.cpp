@@ -23,6 +23,7 @@ void EditorSceneSession::BindDocumentHooks(Engine &engine, bool new_epoch) {
 bool EditorSceneSession::CommitDocumentCandidate(bool authoring, const SceneDocument &, const SceneFormat::SceneEditCommand &command) {
     if (authoring && play_mode_active_) {
         // Explicit edits of the inactive authoring draft never touch play state.
+        authoring_edited_during_play_ = true;
         command.coordinator_receipt = coordinator_epoch_;
         return true;
     }
@@ -178,9 +179,28 @@ bool EditorSceneSession::EnterPlayMode(Engine &engine) {
     play_scene_document_loaded_ = true;
     play_mode_active_ = true;
     play_mode_paused_ = false;
+    authoring_edited_during_play_ = false;
     runtime_scene_dirty_ = false;
     last_edit_error_.clear();
     BindDocumentHooks(engine, true);
+    return true;
+}
+
+// The play World is discarded by its owner; the edit World never left the
+// authoring state, so it is reloaded only if the draft changed during play.
+bool EditorSceneSession::EndPlaySession(Engine &edit_engine) {
+    if (!play_mode_active_) return false;
+    play_mode_active_ = false;
+    play_mode_paused_ = false;
+    play_scene_document_ = SceneDocument();
+    play_scene_document_loaded_ = false;
+    last_edit_error_.clear();
+    if (authoring_edited_during_play_ && authoring_scene_document_loaded_) {
+        runtime_scene_dirty_ = true;
+        ++mirror_revision_;
+    }
+    authoring_edited_during_play_ = false;
+    BindDocumentHooks(edit_engine, true);
     return true;
 }
 

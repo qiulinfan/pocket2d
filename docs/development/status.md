@@ -38,6 +38,15 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   (native) and 8% (Lua loop) from thread-local World lookups; see ADR 008.
   Box2D's multithreaded solver is not connected: it needs an asynchronous task
   API that `TaskExecutor` lacks.
+- Editor play runs in its own World: Play builds an embedded Engine on the
+  editor's window and renderer and loads a snapshot of the authoring scene;
+  Stop discards it. The edit World is not reloaded unless the draft changed
+  during play, and a script quit or fatal play failure ends play, not the
+  editor. `editor_play_world_test` covers isolation, host survival and the
+  reload rule; the GUI Play button itself has not been exercised by a test.
+- Engine diagnostics go through `Log` (text or JSON lines, per-World recent
+  records reported in agent observations); optional Tracy zones via
+  `POCKET_ENABLE_TRACY`.
 - Sprite submission: per-sprite metadata and pose lookups removed from the
   render-phase loop. 65,536 individual sprites drop from about 77 to 10–13 ms
   per Metal frame with identical pixels; 16,384 reach the same ~8 ms floor as

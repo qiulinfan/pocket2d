@@ -302,3 +302,9 @@ set_tests_properties(rigidbody_activation PROPERTIES TIMEOUT 30)
 pocket_runtime_test(tilemap_activation_test tilemap_activation_test.cpp)
 add_test(NAME tilemap_activation COMMAND tilemap_activation_test)
 set_tests_properties(tilemap_activation PROPERTIES TIMEOUT 30)
+
+pocket_runtime_test(editor_play_world_test editor_play_world_test.cpp)
+target_link_libraries(editor_play_world_test PRIVATE GameEngine::Editor)
+add_test(NAME editor_play_world COMMAND editor_play_world_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
+set_tests_properties(editor_play_world PROPERTIES TIMEOUT 60)

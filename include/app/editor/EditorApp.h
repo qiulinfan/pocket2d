@@ -37,11 +37,21 @@ private:
     void HandleWindowEvent(const SDL_WindowEvent &window_event);
     bool BootstrapEngineForCurrentProject();
     bool SwitchProject(const std::filesystem::path &project_root);
+    // Play runs a snapshot of the authoring scene in its own World and Engine,
+    // embedded in the editor window. Stop discards them; the edit World is
+    // never reloaded for play.
+    bool StartPlaySession();
+    void StopPlaySession();
+    // The Engine whose World is simulated, rendered and inspected this frame.
+    Engine &ActiveEngine() { return play_engine_ ? *play_engine_ : *engine_; }
     EditorConfigData confirmed_editor_config_;
     bool confirmed_editor_config_persist_dirty_ = false;
     EditorConfigData editor_config_;
     bool editor_config_dirty_ = false;
     std::unique_ptr<Engine> engine_;
+    // Declared before play_engine_ so the Engine is destroyed first.
+    std::unique_ptr<World> play_world_;
+    std::unique_ptr<Engine> play_engine_;
     EditorOverlay overlay_;
     EditorSceneSession scene_session_;
     bool runtime_view_visible_last_frame_ = true;

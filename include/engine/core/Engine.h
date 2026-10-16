@@ -33,6 +33,8 @@ private:
     SDL_Renderer *renderer = nullptr;
     // SDL subsystems this Engine initialized and must release (SDL_InitFlags).
     std::uint32_t sdl_subsystems_ = 0;
+    // Set by InitializeEmbedded: window and renderer belong to another Engine.
+    bool borrows_presenter_ = false;
 
     // runtime actor container for the current scene
     std::list<Actor> actors;
@@ -120,6 +122,9 @@ public:
     void InitializeRuntime();
     // Initialize simulation services without a window, renderer, or audio device.
     void InitializeHeadless();
+    // Run inside another Engine's window and renderer, e.g. the editor's play
+    // World. The host keeps ownership; shutdown leaves both intact.
+    void InitializeEmbedded(SDL_Window *host_window, SDL_Renderer *host_renderer);
     // Advance the real gameplay pipeline by exactly one 1/60-second tick.
     // Input comes from ProcessSDLEvent; no SDL polling, rendering, or pacing.
     void StepSimulation();

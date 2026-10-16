@@ -297,6 +297,27 @@ void Engine::InitializeRuntime() {
     runtime_initialized_ = true;
 }
 
+void Engine::InitializeEmbedded(SDL_Window *host_window, SDL_Renderer *host_renderer) {
+    WorldScope world_scope(world_);
+    if(scene_reset_required_)throw std::runtime_error("runtime requires reset after failed publication");
+    if (runtime_initialized_ || runtime_shutdown_) return;
+    if (host_window == nullptr || host_renderer == nullptr)
+        throw std::invalid_argument("embedded runtime requires a host window and renderer");
+    window = host_window;
+    renderer = host_renderer;
+    borrows_presenter_ = true;
+    FrameClock::Reset();
+    ::Input::Init();
+    ::Input::SetExternalInputEnabled(false);
+    runtime_zoom_factor = (config_.zoom_factor > 0.0f)
+                              ? std::clamp(config_.zoom_factor, kMinZoomFactor,
+                                           kMaxZoomFactor)
+                              : 1.0f;
+    ResetPerformanceCounters();
+    is_game_running = true;
+    runtime_initialized_ = true;
+}
+
 void Engine::InitializeHeadless() {
     WorldScope world_scope(world_);
     if(scene_reset_required_)throw std::runtime_error("runtime requires reset after failed publication");
@@ -340,9 +361,14 @@ void Engine::ShutdownRuntime() {
     // Renderer caches, the SDL video subsystem and the event/render recording
     // helpers are process-wide; only the Engine that created a window releases
     // them, so a headless Engine cannot tear down another Engine's window.
-    const bool presented = window != nullptr || renderer != nullptr;
-    if (renderer != nullptr) Renderer::Shutdown();
+    // An embedded Engine borrows its host's window and renderer.
+    const bool presented = !borrows_presenter_ && (window != nullptr || renderer != nullptr);
+    if (presented && renderer != nullptr) Renderer::Shutdown();
     AudioManager::Shutdown();
+    if (borrows_presenter_) {
+        renderer = nullptr;
+        window = nullptr;
+    }
     if (renderer != nullptr) {
         SDL_DestroyRenderer(renderer);
         renderer = nullptr;
