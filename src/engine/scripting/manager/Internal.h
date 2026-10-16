@@ -71,6 +71,7 @@ struct ComponentRecord {
     bool has_on_trigger_enter = false;
     bool has_on_trigger_exit = false;
     bool on_start_called = false;
+    bool on_awake_called = false;
     bool on_destroy_called = false;
     bool removed = false;
     const std::uint64_t serial = component_record_serial.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -163,6 +164,8 @@ struct RuntimeState {
     std::vector<LifecycleComponentRef> on_update_components;
     std::vector<LifecycleComponentRef> on_late_update_components;
     std::vector<PendingOnStartRecord> pending_on_start;
+    // Components whose OnAwake has not run (it runs as soon as they are published).
+    std::vector<PendingOnStartRecord> pending_on_awake;
     // actor_uid -> Actor*
     std::unordered_map<Actor::UID, Actor *> actor_by_uid;
     // name -> Actor*

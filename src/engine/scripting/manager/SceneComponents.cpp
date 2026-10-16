@@ -118,12 +118,16 @@ std::unique_ptr<ComponentRecord> PrepareComponentRecord(const Actor::ComponentSp
     present[2]=present[2]||StaticField(instance,"OnUpdateBatch").isFunction();
     return std::make_unique<ComponentRecord>(spec.key,spec.type,std::move(instance),present[0],present[1],present[2],present[3],present[4],present[5],present[6],present[7]);
 }
+luabridge::LuaRef StaticLifecycleField(const luabridge::LuaRef &object, const char *name) {
+    return StaticField(object, name);
+}
 void InstallPreparedComponent(Actor::UID uid,std::unique_ptr<ComponentRecord> record) {
     const auto actor=Runtime().actor_by_uid.find(uid);
     if(actor!=Runtime().actor_by_uid.end()) SetSystemField(record->instance_table,"actor",Ref(Runtime().lua_state,ActorHandle(actor->second)));
     const auto key=record->key;
     Runtime().actor_components[uid].push_back(std::move(record));
     Runtime().pending_on_start.emplace_back(uid,key);
+    Runtime().pending_on_awake.emplace_back(uid,key);
     if(actor!=Runtime().actor_by_uid.end()) Runtime().dirty_component_actor_uids.insert(uid);
 }
 }

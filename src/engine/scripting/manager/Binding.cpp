@@ -591,7 +591,9 @@ luabridge::LuaRef ComponentManager::AddComponent(Actor::UID actor_uid,
     ComponentRecord *created = FindComponentRecord(actor_uid,
                                                    component_spec.key);
     if (created == nullptr) return MakeNilRef();
-    return created->instance_table;
+    const luabridge::LuaRef instance = created->instance_table;
+    ProcessPendingOnAwake();
+    return instance;
 }
 
 // runtime component add / remove
@@ -657,6 +659,10 @@ bool ComponentManager::RenameComponentKey(Actor::UID actor_uid,
         SetSystemField(component->instance_table, "key", luabridge::LuaRef(Runtime().lua_state, replacement_key));
         component->key = replacement_key;
         for (auto &pending : Runtime().pending_on_start) {
+            if (pending.actor_uid == actor_uid && pending.component_key == previous_key)
+                pending.component_key = replacement_key;
+        }
+        for (auto &pending : Runtime().pending_on_awake) {
             if (pending.actor_uid == actor_uid && pending.component_key == previous_key)
                 pending.component_key = replacement_key;
         }
@@ -798,7 +804,9 @@ luabridge::LuaRef ComponentManager::InstantiateActor(const std::string &template
         Actor::CommitSpawnTemplate(candidate);
         Actor *published = PublishRuntimeActor(*prepared, *Runtime().scene_actors, true);
         BoundEngine()->NotifyRuntimeActorPublished(*published);
-        return luabridge::LuaRef(Runtime().lua_state, ActorHandle(published));
+        const ActorHandle handle(published);
+        ProcessPendingOnAwake();
+        return luabridge::LuaRef(Runtime().lua_state, handle);
     } catch (const std::exception &failure) {
         if (prepared && prepared->CommitStarted()) BoundEngine()->ReportRuntimeActorPublicationFailure(failure.what());
         throw std::runtime_error(ScriptReloadCandidate::SanitizeDiagnosticText(failure.what()));

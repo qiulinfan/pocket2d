@@ -100,6 +100,10 @@ public:
     // per-frame lifecycle entry points
     // 每帧生命周期入口
     static void ProcessPendingOnStart();
+    // OnAwake runs once per component as soon as it is published: before
+    // Actor.Instantiate / AddComponent return, and for scene components before
+    // any OnStart, so the spawner can read initialized fields immediately.
+    static void ProcessPendingOnAwake();
     static void ApplyEffectiveRigidbodyBodyTypes();
     static void ProcessOnUpdate();
     static void ProcessOnLateUpdate();

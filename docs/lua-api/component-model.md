@@ -71,6 +71,12 @@ core callbacks through raw fields and static, table-valued `__index` chains:
 - `OnTriggerEnter(collision)`
 - `OnTriggerExit(collision)`
 
+`OnAwake()` is found the same static way and runs once per component as soon
+as it is published: `Actor.Instantiate` and `actor:AddComponent` return
+components whose `OnAwake` already ran, and every component of a loaded scene
+wakes before any `OnStart`. `OnStart` still runs at the next frame start (like
+Unity's `Awake`/`Start`), so initialize what spawners read in `OnAwake`.
+
 Construction does not call function-valued `__index` getters. Such a getter
 cannot synthesize membership in the core lifecycle callback cache. Define these
 callbacks directly on the component or on a statically inherited prototype.

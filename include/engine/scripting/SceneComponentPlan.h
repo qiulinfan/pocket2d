@@ -59,5 +59,7 @@ struct ComponentRecord;
 std::unique_ptr<ComponentRecord> PrepareComponentRecord(
     const Actor::ComponentSpec &spec, const luabridge::LuaRef &prototype);
 void InstallPreparedComponent(Actor::UID uid, std::unique_ptr<ComponentRecord> record);
+// A core lifecycle callback found through raw fields and static __index tables only.
+luabridge::LuaRef StaticLifecycleField(const luabridge::LuaRef &object, const char *name);
 }
 #endif

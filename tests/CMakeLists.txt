@@ -129,6 +129,9 @@ set_tests_properties(agent_protocol_generated PROPERTIES TIMEOUT 30)
 add_test(NAME agent_mouse COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_mouse_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_mouse PROPERTIES TIMEOUT 30)
+add_test(NAME agent_awake COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/agent_awake_test.py" $<TARGET_FILE:game_engine>)
+set_tests_properties(agent_awake PROPERTIES TIMEOUT 30)
 add_test(NAME agent_camera COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_camera_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_camera PROPERTIES TIMEOUT 30)

@@ -71,6 +71,7 @@ void RouteScriptDiagnostics() {
 
 void ClearBoundActorState() {
     Runtime().pending_on_start.clear();
+    Runtime().pending_on_awake.clear();
     struct TeardownTarget { Actor::UID uid; luabridge::LuaRef reference; };
     while (true) {
         std::vector<TeardownTarget> targets;
@@ -90,6 +91,7 @@ void ClearBoundActorState() {
     // OnDestroy may enqueue additions; this scene is being discarded, so those
     // callbacks must not leak into the next scene's OnStart queue.
     Runtime().pending_on_start.clear();
+    Runtime().pending_on_awake.clear();
     Runtime().actor_components.clear();
     ParticleManager::Clear();
     Rigidbody::DestroyPhysicsWorld();

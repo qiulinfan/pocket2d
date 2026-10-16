@@ -1,6 +1,7 @@
 #include "scripting/LuaBoundary.h"
 #include "core/Profile.h"
 #include "Internal.h"
+#include "scripting/SceneComponentPlan.h"
 #include "core/Engine.h"
 #include "scripting/ComponentManager.h"
 #include "physics/Rigidbody.h"
@@ -335,9 +336,39 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
     }
 }
 
+void ComponentManager::ProcessPendingOnAwake() {
+    POCKET_ZONE("Lua OnAwake");
+    while (!Runtime().pending_on_awake.empty()) {
+        auto pending = std::move(Runtime().pending_on_awake);
+        Runtime().pending_on_awake.clear();
+        std::vector<CallbackTarget> targets;
+        for (const auto &entry : pending) {
+            const auto *component = FindComponentRecord(entry.actor_uid, entry.component_key);
+            if (component && !component->on_awake_called && !component->removed)
+                targets.push_back(Snapshot(entry.actor_uid, *component));
+        }
+        for (auto &target : targets) {
+            if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
+            auto *component = Alive(Runtime(), target);
+            if (!component || component->on_awake_called) continue;
+            component->on_awake_called = true;
+            if (IsBuiltinComponentType(component->type)) continue;  // native components have no OnAwake
+            try {
+                const luabridge::LuaRef reference = component->instance_table;
+                // Statically discovered, like the other core callbacks.
+                const auto callback = ManagerDetail::StaticLifecycleField(reference, "OnAwake");
+                if (Alive(Runtime(), target) && callback.isFunction()) LuaBoundary::CallDiscard(callback, reference);
+            } catch (const LuaBoundary::Error &error) {
+                ReportError(GetActorNameByUID(target.uid), error);
+            }
+        }
+    }
+}
+
 // per-frame lifecycle entry points
 void ComponentManager::ProcessPendingOnStart() {
     POCKET_ZONE("Lua OnStart");
+    ProcessPendingOnAwake();
     auto pending = std::move(Runtime().pending_on_start);
     Runtime().pending_on_start.clear();
     std::vector<CallbackTarget> targets;
