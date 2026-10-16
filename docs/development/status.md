@@ -139,6 +139,13 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   bodies. `physics_benchmark` (Release, 7 pool workers, two runs each):
   5,050-body pyramid collapsing 2.40–2.60 → 1.60–1.65 ms per step; 15 and 210
   bodies unchanged (inline). Final positions match one thread exactly.
+- Dear ImGui is 1.93.0 (docking). Dear ImGui Test Engine 1.93.0 is vendored
+  under its own license (free for individuals and open-source projects) and
+  compiled into ImGui when `POCKET_ENABLE_IMGUI_TEST_ENGINE` is on (default).
+  `editor_ui_test` drives the real editor overlay: clicking the viewport Play
+  and Stop buttons, the Runtime menu items and F5 each start and stop a
+  separate play World. The editor app's own dock layout and window are still
+  not exercised by these tests.
 
 ## Completed and verified in this slice
 

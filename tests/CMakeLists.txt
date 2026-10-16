@@ -367,6 +367,12 @@ target_link_libraries(editor_play_world_test PRIVATE GameEngine::Editor)
 add_test(NAME editor_play_world COMMAND editor_play_world_test
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
 set_tests_properties(editor_play_world PROPERTIES TIMEOUT 60)
+if(POCKET_ENABLE_IMGUI_TEST_ENGINE)
+    pocket_runtime_test(editor_ui_test editor_ui_test.cpp)
+    target_link_libraries(editor_ui_test PRIVATE GameEngine::Editor)
+    add_test(NAME editor_ui COMMAND editor_ui_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
+    set_tests_properties(editor_ui PROPERTIES TIMEOUT 120)
+endif()
 
 pocket_runtime_test(physics_api_test physics_api_test.cpp)
 add_test(NAME physics_api COMMAND physics_api_test)

@@ -232,3 +232,7 @@ recovery through the supervisor. `two_world_render_software` checks the same
 fixture through real input and pixel readback; its executable also accepts
 `metal` or `opengl` after the fixture path for available local hardware checks.
 See phase15-checkpoint.md and the fixture CONTRACT for scope and final evidence.
+
+`POCKET_ENABLE_IMGUI_TEST_ENGINE` (default on) compiles Dear ImGui Test Engine
+hooks into ImGui and builds `editor_ui_test`, which clicks real editor
+controls. The engine's license is in `thirdparty/imgui_test_engine/LICENSE.txt`.

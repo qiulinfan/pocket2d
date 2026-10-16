@@ -65,6 +65,20 @@ target_include_directories(
 target_link_libraries(imgui_runtime PUBLIC game_engine_sdl)
 set_target_properties(imgui_runtime PROPERTIES FOLDER "thirdparty")
 
+# Dear ImGui Test Engine (its own license, thirdparty/imgui_test_engine/LICENSE.txt)
+# drives editor UI tests. Its hooks are compiled into ImGui itself, so the
+# engine's sources join the same static library.
+option(POCKET_ENABLE_IMGUI_TEST_ENGINE "Build ImGui with Dear ImGui Test Engine hooks for editor UI tests" ON)
+if(POCKET_ENABLE_IMGUI_TEST_ENGINE)
+    file(GLOB POCKET_IMGUI_TEST_ENGINE_SOURCES "${PROJECT_SOURCE_DIR}/thirdparty/imgui_test_engine/*.cpp")
+    target_sources(imgui_runtime PRIVATE ${POCKET_IMGUI_TEST_ENGINE_SOURCES})
+    target_include_directories(imgui_runtime PUBLIC "${PROJECT_SOURCE_DIR}/thirdparty/imgui_test_engine")
+    target_compile_definitions(imgui_runtime PUBLIC
+        IMGUI_USER_CONFIG="imgui_te_imconfig.h"
+        IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+        IMGUI_TEST_ENGINE_ENABLE_CAPTURE=0)
+endif()
+
 add_library(imguizmo_runtime STATIC)
 target_sources(
     imguizmo_runtime
