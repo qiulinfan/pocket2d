@@ -266,6 +266,60 @@ bool Tilemap::SetCell(const std::string &layer, double x, double y, double id) {
     else pending_[command] = static_cast<int>(id);
     return true;
 }
+// The cell value after pending edits; outside the map counts as connected (1).
+int Tilemap::EffectiveCell(int layer, int x, int y) const {
+    const auto &asset = replacement_ ? *replacement_ : data_;
+    if (x < 0 || y < 0 || x >= asset.width || y >= asset.height) return 1;
+    const auto count = static_cast<std::size_t>(asset.width) * asset.height;
+    const auto cell = static_cast<std::size_t>(y) * asset.width + static_cast<std::size_t>(x);
+    const auto found = pending_.find(layer * count + cell);
+    return found == pending_.end() ? LayerAt(asset, layer).cells[cell] : found->second;
+}
+void Tilemap::ReframeTerrainCell(int layer, int x, int y, const std::vector<int> &terrain_of) {
+    const auto &asset = replacement_ ? *replacement_ : data_;
+    if (x < 0 || y < 0 || x >= asset.width || y >= asset.height) return;
+    const int id = EffectiveCell(layer, x, y);
+    if (id <= 0 || static_cast<std::size_t>(id) >= terrain_of.size() || terrain_of[id] < 0) return;
+    const int framed = TilemapAsset::FrameTerrainCell(asset, terrain_of, terrain_of[id], x, y,
+        [&](int nx, int ny) { return EffectiveCell(layer, nx, ny); });
+    if (framed != id) SetCell(layer == 0 ? "ground" : "solid", x, y, framed);
+}
+std::optional<std::string> Tilemap::GetTerrain(const std::string &layer, double x, double y) const {
+    const auto id = GetCell(layer, x, y);
+    if (!id) return std::nullopt;
+    if (*id == 0) return std::string();
+    const auto terrain_of = TilemapAsset::TerrainIndex(data_);
+    const int terrain = static_cast<std::size_t>(*id) < terrain_of.size() ? terrain_of[*id] : -1;
+    return terrain < 0 ? std::string() : data_.autotile.terrains[terrain].name;
+}
+bool Tilemap::SetTerrain(const std::string &layer, double x, double y, const std::string &terrain) {
+    const int layer_index = LayerIndex(layer);
+    RequireInteger(x, "cell x"); RequireInteger(y, "cell y");
+    if (!HasLiveBinding() || (!HasAsset() && !replacement_)) return false;
+    const auto &asset = replacement_ ? *replacement_ : data_;
+    if (x < 0 || y < 0 || x >= asset.width || y >= asset.height) return false;
+    const auto terrain_of = TilemapAsset::TerrainIndex(asset);
+    const int cx = static_cast<int>(x), cy = static_cast<int>(y);
+    bool changed = false;
+    if (terrain.empty()) {
+        changed = SetCell(layer, x, y, 0);
+    } else {
+        int index = -1;
+        for (std::size_t i = 0; i < asset.autotile.terrains.size(); ++i)
+            if (asset.autotile.terrains[i].name == terrain) index = static_cast<int>(i);
+        if (index < 0) throw std::runtime_error("tilemap: unknown terrain '" + terrain + "'");
+        const int framed = TilemapAsset::FrameTerrainCell(asset, terrain_of, index, cx, cy,
+            [&](int nx, int ny) { return EffectiveCell(layer_index, nx, ny); });
+        changed = SetCell(layer, x, y, framed);
+    }
+    if (changed) {
+        ReframeTerrainCell(layer_index, cx, cy - 1, terrain_of);
+        ReframeTerrainCell(layer_index, cx + 1, cy, terrain_of);
+        ReframeTerrainCell(layer_index, cx, cy + 1, terrain_of);
+        ReframeTerrainCell(layer_index, cx - 1, cy, terrain_of);
+    }
+    return changed;
+}
 Vector2 Tilemap::WorldToCell(double x, double y) const {
     FiniteFloat(x, "world x"); FiniteFloat(y, "world y");
     const double cx = std::floor((x - origin_x_) / data_.cell_size);

@@ -35,7 +35,7 @@ component。每个运行实例有自己的 cell 数据；引用同一资源的�
 
 一个 actor 最多有一个 Tilemap，必须没有 parent，world rotation 必须为 `0`，
 不能同时有 Rigidbody。其他 actor 上的 Rigidbody 可以与地图碰撞。当前支持平移，
-不支持旋转地图、自动拼接、流式加载、任意 polygon tile 或额外地图层。
+不支持旋转地图、流式加载、任意 polygon tile 或额外地图层；自动拼接见下文“地形自动拼接”。
 
 非空资源在场景组装时解析并校验，frame 0 就能读取初始格子。地图原点、世界范围
 和渲染缩放还必须能被引擎的浮点类型表达。无效资源不能通过静默截断或占位图片
@@ -90,6 +90,32 @@ Tilemap 的 atlas grid 以地图 JSON 为准，不读取普通 SpriteRenderer �
 `cell_size`；例如 16 px 的 tile 配合 `cell_size=1`，占一整格世界单位，
 不会缩成 0.16 格。贴图使用 nearest 采样，允许透明像素；透明的 solid tile
 仍然产生整个 cell 的碰撞。
+
+## 地形自动拼接
+
+可选的 `autotile` 段按四邻居选择 tile（类似 Godot terrain、Unity RuleTile）：
+
+```json
+"autotile": {
+  "frame_on_load": true,
+  "terrains": [
+    {"name": "dirt", "connect": "any", "frames": [[45, 46, 47], [40], "... 共 16 项"]}
+  ]
+}
+```
+
+- `frames` 恰好 16 项，下标是四邻居掩码：上 1、右 2、下 4、左 8，邻居“相连”时置位。
+  每项至少一个 tile ID；多个 ID 时按格子坐标的稳定哈希选取变体。
+- 一个 tile ID 最多属于一个地形；格子的地形由其 ID 判定。
+- `connect` 为 `any`（默认，同层任意非零格都相连，适合泰拉瑞亚式方块互相融合）
+  或 `same`（只与同一地形相连）。地图外视为相连，地图边缘不出现收边。
+- `frame_on_load` 为 `true` 时，载入（运行时与编辑器）会按规则重选所有地形格，
+  生成器只需写入该地形的任一 ID。
+
+| 方法 | 返回与行为 |
+| --- | --- |
+| `GetTerrain(layer, x, y)` | 已提交格子的地形名；无地形为 `""`，地图外为 `nil`。 |
+| `SetTerrain(layer, x, y, name)` | 按邻居排队写入该地形的 tile（`""` 清空），并重选上下左右四个地形邻居。与 `SetCell` 一样在提交后生效，计算时包含尚未提交的编辑。未知名称报错。 |
 
 ## 获取组件与属性
 

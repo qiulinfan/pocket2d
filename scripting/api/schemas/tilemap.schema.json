@@ -85,6 +85,56 @@
         }
       },
       "additionalProperties": false
+    },
+    "autotile": {
+      "description": "Optional autotiling. Each terrain lists, per four-neighbour mask (bit 1 up, 2 right, 4 down, 8 left; set when that neighbour connects), the tile IDs to choose from. An ID belongs to at most one terrain. frame_on_load re-chooses every terrain cell when the map loads.",
+      "type": "object",
+      "properties": {
+        "frame_on_load": {
+          "type": "boolean"
+        },
+        "terrains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "connect": {
+                "description": "any: any nonzero neighbour connects (default); same: only this terrain.",
+                "enum": [
+                  "any",
+                  "same"
+                ]
+              },
+              "frames": {
+                "type": "array",
+                "minItems": 16,
+                "maxItems": 16,
+                "items": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            },
+            "required": [
+              "name",
+              "frames"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "terrains"
+      ],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false,

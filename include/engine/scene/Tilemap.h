@@ -51,6 +51,11 @@ public:
     bool InBounds(double x, double y) const;
     std::optional<int> GetCell(const std::string &layer, double x, double y) const;
     bool SetCell(const std::string &layer, double x, double y, double id);
+    // Autotiling: the terrain name at a cell ("" when none; nullopt outside),
+    // and placing/clearing ("") a terrain, which chooses the cell's tile from
+    // its neighbours and re-chooses the four neighbours. Pending edits count.
+    std::optional<std::string> GetTerrain(const std::string &layer, double x, double y) const;
+    bool SetTerrain(const std::string &layer, double x, double y, const std::string &terrain);
     std::uint64_t GetRevision() const { return revision_; }
     int GetWidth() const { return data_.width; }
     int GetHeight() const { return data_.height; }
@@ -92,6 +97,8 @@ private:
     Diagnostics diagnostics_;
 
     bool HasLiveBinding() const;
+    int EffectiveCell(int layer, int x, int y) const;
+    void ReframeTerrainCell(int layer, int x, int y, const std::vector<int> &terrain_of);
     void ValidatePlacement(float x, float y, float rotation) const;
     static int LayerIndex(const std::string &layer);
     static void RequireInteger(double value, const char *label);

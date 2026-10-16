@@ -7,6 +7,7 @@
 #include "rapidjson/stringbuffer.h"
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -24,9 +25,9 @@ void Require(bool valid, const std::string &message) {
     if (!valid) throw std::runtime_error("tilemap: " + message);
 }
 void ExactKeys(const Json &object, std::initializer_list<const char *> keys,
-               const std::string &where) {
+               const std::string &where, std::initializer_list<const char *> optional = {}) {
     Require(object.IsObject(), where + " must be an object");
-    std::set<std::string> allowed;
+    std::set<std::string> allowed(optional.begin(), optional.end());
     std::set<std::string> encountered;
     for (const char *key : keys) {
         allowed.emplace(key);
@@ -88,9 +89,85 @@ TilemapAsset::Layer ReadLayer(const Json &value, std::size_t cell_count, const c
     }
     return layer;
 }
+TilemapAsset::Autotile ReadAutotile(const Json &value) {
+    ExactKeys(value, {"terrains"}, "autotile", {"frame_on_load"});
+    TilemapAsset::Autotile autotile;
+    if (value.HasMember("frame_on_load")) {
+        Require(value["frame_on_load"].IsBool(), "autotile.frame_on_load must be a boolean");
+        autotile.frame_on_load = value["frame_on_load"].GetBool();
+    }
+    Require(value["terrains"].IsArray(), "autotile.terrains must be an array");
+    for (const auto &entry : value["terrains"].GetArray()) {
+        ExactKeys(entry, {"name", "frames"}, "terrain", {"connect"});
+        TilemapAsset::Terrain terrain;
+        Require(entry["name"].IsString(), "terrain.name must be a string");
+        terrain.name.assign(entry["name"].GetString(), entry["name"].GetStringLength());
+        if (entry.HasMember("connect")) {
+            Require(entry["connect"].IsString(), "terrain.connect must be \"any\" or \"same\"");
+            const std::string connect = entry["connect"].GetString();
+            Require(connect == "any" || connect == "same", "terrain.connect must be \"any\" or \"same\"");
+            terrain.connect_same = connect == "same";
+        }
+        Require(entry["frames"].IsArray() && entry["frames"].Size() == 16,
+                "terrain.frames must list 16 masks");
+        for (rapidjson::SizeType mask = 0; mask < 16; ++mask) {
+            const auto &ids = entry["frames"][mask];
+            Require(ids.IsArray(), "terrain.frames entries must be arrays of tile IDs");
+            for (const auto &id : ids.GetArray()) {
+                Require(id.IsInt(), "terrain.frames requires integer tile IDs");
+                terrain.frames[mask].push_back(id.GetInt());
+            }
+        }
+        autotile.terrains.push_back(std::move(terrain));
+    }
+    return autotile;
+}
 } // namespace
 
 namespace TilemapAsset {
+std::vector<int> TerrainIndex(const Data &data) {
+    const auto tile_count = static_cast<std::size_t>(data.atlas.columns) * data.atlas.rows;
+    std::vector<int> terrain_of(tile_count + 1, -1);
+    for (std::size_t index = 0; index < data.autotile.terrains.size(); ++index)
+        for (const auto &ids : data.autotile.terrains[index].frames)
+            for (int id : ids)
+                if (id >= 1 && static_cast<std::size_t>(id) <= tile_count) terrain_of[id] = static_cast<int>(index);
+    return terrain_of;
+}
+int FrameTerrainCell(const Data &data, const std::vector<int> &terrain_of, int terrain, int x, int y,
+                     const std::function<int(int, int)> &cell) {
+    const auto &rules = data.autotile.terrains.at(static_cast<std::size_t>(terrain));
+    const auto connects = [&](int nx, int ny) {
+        const int id = cell(nx, ny);
+        if (id <= 0) return false;
+        if (!rules.connect_same) return true;
+        return static_cast<std::size_t>(id) < terrain_of.size() && terrain_of[id] == terrain;
+    };
+    const unsigned mask = (connects(x, y - 1) ? 1u : 0u) | (connects(x + 1, y) ? 2u : 0u) |
+                          (connects(x, y + 1) ? 4u : 0u) | (connects(x - 1, y) ? 8u : 0u);
+    const auto &choices = rules.frames[mask];
+    // A stable per-position variant, so re-framing a cell keeps its look.
+    const std::uint32_t hash = static_cast<std::uint32_t>(x) * 73856093u ^ static_cast<std::uint32_t>(y) * 19349663u;
+    return choices[hash % choices.size()];
+}
+void FrameAll(Data &data) {
+    if (data.autotile.terrains.empty()) return;
+    const auto terrain_of = TerrainIndex(data);
+    for (const char *name : {"ground", "solid"}) {
+        auto &layer = GetLayer(data, name);
+        const auto original = layer.cells;
+        // Outside the map counts as connected, so map edges show no border.
+        const auto cell = [&](int x, int y) {
+            if (x < 0 || y < 0 || x >= data.width || y >= data.height) return 1;
+            return original[static_cast<std::size_t>(y) * data.width + x];
+        };
+        for (int y = 0; y < data.height; ++y)
+            for (int x = 0; x < data.width; ++x) {
+                auto &id = layer.cells[static_cast<std::size_t>(y) * data.width + x];
+                if (id > 0 && terrain_of[id] >= 0) id = FrameTerrainCell(data, terrain_of, terrain_of[id], x, y, cell);
+            }
+    }
+}
 Layer &GetLayer(Data &data, const std::string &layer) {
     if (layer == "ground") return data.ground;
     if (layer == "solid") return data.solid;
@@ -116,6 +193,21 @@ void ValidateData(const Data &data) {
     Require(tile_count <= std::numeric_limits<int>::max() &&
             pixel_width <= std::numeric_limits<int>::max() && pixel_height <= std::numeric_limits<int>::max(),
             "atlas dimensions overflow supported integer range");
+    std::set<std::string> names;
+    std::vector<int> owner(static_cast<std::size_t>(tile_count) + 1, -1);
+    for (std::size_t index = 0; index < data.autotile.terrains.size(); ++index) {
+        const auto &terrain = data.autotile.terrains[index];
+        Require(!terrain.name.empty() && names.insert(terrain.name).second, "terrain names must be unique and nonempty");
+        for (const auto &ids : terrain.frames) {
+            Require(!ids.empty(), "terrain " + terrain.name + ": every mask needs at least one tile ID");
+            for (int id : ids) {
+                Require(id >= 1 && id <= tile_count, "terrain " + terrain.name + ": tile ID outside atlas range");
+                Require(owner[id] == -1 || owner[id] == static_cast<int>(index),
+                        "terrain " + terrain.name + ": tile ID " + std::to_string(id) + " belongs to another terrain");
+                owner[id] = static_cast<int>(index);
+            }
+        }
+    }
     const auto count = static_cast<std::size_t>(data.width) * data.height;
     for (const char *name : {"ground", "solid"}) {
         const auto &layer = GetLayer(data, name);
@@ -140,7 +232,7 @@ Data LoadFile(const std::filesystem::path &path, const std::filesystem::path &im
     json.Parse(text.data(), text.size());
     Require(!json.HasParseError(), "invalid JSON in " + path.string() + ": " +
             rapidjson::GetParseError_En(json.GetParseError()));
-    ExactKeys(json, {"version", "width", "height", "cell_size", "atlas", "layers"}, "map");
+    ExactKeys(json, {"version", "width", "height", "cell_size", "atlas", "layers"}, "map", {"autotile"});
     Data data;
     data.version = Integer(json, "version", "map");
     Require(data.version == 1, "unsupported version (expected 1)");
@@ -163,7 +255,9 @@ Data LoadFile(const std::filesystem::path &path, const std::filesystem::path &im
     const auto count = static_cast<std::size_t>(data.width) * data.height;
     data.ground = ReadLayer(json["layers"]["ground"], count, "ground");
     data.solid = ReadLayer(json["layers"]["solid"], count, "solid");
+    if (json.HasMember("autotile")) data.autotile = ReadAutotile(json["autotile"]);
     ValidateAtlasImage(data, images_root);
+    if (data.autotile.frame_on_load) FrameAll(data);
     return data;
 }
 Data LoadResource(const std::string &map_resource) {
@@ -202,7 +296,26 @@ void SaveFile(const std::filesystem::path &path, const Data &data) {
         for (int tile : layer.cells) writer.Int(tile);
         writer.EndArray(); writer.EndObject();
     }
-    writer.EndObject(); writer.EndObject();
+    writer.EndObject();
+    if (!data.autotile.terrains.empty() || data.autotile.frame_on_load) {
+        writer.Key("autotile"); writer.StartObject();
+        writer.Key("frame_on_load"); writer.Bool(data.autotile.frame_on_load);
+        writer.Key("terrains"); writer.StartArray();
+        for (const auto &terrain : data.autotile.terrains) {
+            writer.StartObject();
+            writer.Key("name"); writer.String(terrain.name.c_str());
+            writer.Key("connect"); writer.String(terrain.connect_same ? "same" : "any");
+            writer.Key("frames"); writer.StartArray();
+            for (const auto &ids : terrain.frames) {
+                writer.StartArray();
+                for (int id : ids) writer.Int(id);
+                writer.EndArray();
+            }
+            writer.EndArray(); writer.EndObject();
+        }
+        writer.EndArray(); writer.EndObject();
+    }
+    writer.EndObject();
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     static std::atomic<std::uint64_t> counter{0};
     const auto temporary = path.string() + ".tmp-" + std::to_string(

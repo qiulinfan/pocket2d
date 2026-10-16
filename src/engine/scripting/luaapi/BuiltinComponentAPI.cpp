@@ -79,6 +79,11 @@ luabridge::LuaRef GetTileCell(Tilemap *map, const std::string &layer, double x, 
     return value ? luabridge::LuaRef(LuaState(), *value) : luabridge::LuaRef(LuaState());
 }
 
+luabridge::LuaRef GetTileTerrain(Tilemap *map, const std::string &layer, double x, double y) {
+    const auto value = map->GetTerrain(layer, x, y);
+    return value ? luabridge::LuaRef(LuaState(), *value) : luabridge::LuaRef(LuaState());
+}
+
 std::string GetMapResource(const Tilemap *map) { return map->map_resource; }
 
 bool PlayAnimation(SpriteAnimation *animation, const std::string &clip) { return animation->Play(clip); }
@@ -126,6 +131,8 @@ void InjectTilemapAPI() {
         .addFunction("InBounds", &Tilemap::InBounds)
         .addFunction("GetCell", &GetTileCell)
         .addFunction("SetCell", &Tilemap::SetCell)
+        .addFunction("GetTerrain", &GetTileTerrain)
+        .addFunction("SetTerrain", &Tilemap::SetTerrain)
         .addFunction("GetRevision", &Tilemap::GetRevision)
         .addFunction("OnStart", &Tilemap::OnStart)
         .addFunction("OnDestroy", &Tilemap::OnDestroy)

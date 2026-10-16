@@ -1387,6 +1387,52 @@
           "returns": "boolean"
         },
         {
+          "name": "GetTerrain",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "layer",
+              "type": "TileLayer"
+            },
+            {
+              "name": "x",
+              "type": "integer"
+            },
+            {
+              "name": "y",
+              "type": "integer"
+            }
+          ],
+          "returns": {
+            "nullable": "string"
+          },
+          "description": "Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map."
+        },
+        {
+          "name": "SetTerrain",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "layer",
+              "type": "TileLayer"
+            },
+            {
+              "name": "x",
+              "type": "integer"
+            },
+            {
+              "name": "y",
+              "type": "integer"
+            },
+            {
+              "name": "terrain",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean",
+          "description": "Queues the terrain's tile for the cell's neighbourhood (\"\" clears) and re-chooses the four neighbours; unknown names raise."
+        },
+        {
           "name": "GetRevision",
           "call": "instance",
           "parameters": [],

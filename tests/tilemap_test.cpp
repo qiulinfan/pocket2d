@@ -270,13 +270,60 @@ void EnabledCommitSnapshot(const Fixture &fixture) {
     for (const b2BodyId player : players) b2DestroyBody(player);
     map.OnDestroy();
 }
+// Terrain "dirt" (any neighbour connects) uses IDs 1-4 and "ore" (same
+// terrain only) 5-8; mask m maps to ID (m % 4) + base, so the up (1) and right
+// (2) bits are visible in the chosen ID.
+void Autotile(const Fixture &fixture) {
+    auto data = fixture.Data(5, 5);
+    data.ground.cells.assign(25, 0);
+    TilemapAsset::Terrain dirt{"dirt", false, {}}, ore{"ore", true, {}};
+    for (int mask = 0; mask < 16; ++mask) {
+        dirt.frames[mask] = {mask % 4 + 1};
+        ore.frames[mask] = {mask % 4 + 5};
+    }
+    data.autotile = {true, {dirt, ore}};
+    const auto at = [](int x, int y) { return static_cast<std::size_t>(y) * 5 + x; };
+    data.solid.cells[at(1, 2)] = 1; data.solid.cells[at(2, 2)] = 1;   // dirt pair
+    data.solid.cells[at(2, 1)] = 5;                                  // ore above the right one
+    data.solid.cells[at(0, 0)] = 1;                                  // corner dirt
+    TilemapAsset::SaveResource("autotile.tilemap.json", data);
+    const auto loaded = TilemapAsset::LoadResource("autotile.tilemap.json");
+    Check(loaded.autotile.terrains.size() == 2 && loaded.autotile.frame_on_load &&
+          loaded.autotile.terrains[1].connect_same, "autotile rules must round-trip");
+    Check(loaded.solid.cells[at(1, 2)] == 3, "left of a pair connects right only (mask 2)");
+    Check(loaded.solid.cells[at(2, 2)] == 2, "any-connect dirt joins the ore above (mask 9)");
+    Check(loaded.solid.cells[at(2, 1)] == 5, "same-connect ore ignores dirt (mask 0)");
+    Check(loaded.solid.cells[at(0, 0)] == 2, "outside the map connects (mask 9)");
+    auto duplicate = data;
+    duplicate.autotile.terrains[1].frames[3] = {1};
+    Reject([&] { TilemapAsset::ValidateData(duplicate); }, "a tile ID must belong to one terrain");
+    auto missing = data;
+    missing.autotile.terrains[0].frames[7].clear();
+    Reject([&] { TilemapAsset::ValidateData(missing); }, "every mask needs a tile");
+
+    Tilemap map;
+    map.Initialize(loaded, 0, 0);
+    Check(*map.GetTerrain("solid", 2, 1) == "ore" && map.GetTerrain("solid", 4, 4)->empty() &&
+          !map.GetTerrain("solid", 9, 9), "terrain names, empty cells and out-of-map differ");
+    Check(map.SetTerrain("solid", 3, 2, "dirt"), "placing a terrain queues an edit");
+    Check(*map.GetCell("solid", 2, 2) == 2, "terrain edits stay pending until commit");
+    map.CommitPending();
+    Check(*map.GetCell("solid", 3, 2) == 1, "new cell framed from its left neighbour (mask 8)");
+    Check(*map.GetCell("solid", 2, 2) == 4, "neighbour re-framed: up, right and left (mask 11)");
+    Check(map.SetTerrain("solid", 3, 2, ""), "clearing a terrain queues an edit");
+    map.CommitPending();
+    Check(*map.GetCell("solid", 3, 2) == 0 && *map.GetCell("solid", 2, 2) == 2,
+          "clearing re-frames the neighbour back");
+    Reject([&] { map.SetTerrain("solid", 1, 1, "lava"); }, "unknown terrain rejects");
+    map.OnDestroy();
+}
 } // namespace
 int main() {
     try {
         Fixture fixture;
         Schema(fixture); CoordinatesAndChunks(fixture); CollisionAndLifetime(fixture);
-        RealPassageAndCallback(fixture); EnabledCommitSnapshot(fixture);
-        std::cout << "PASS tilemap schema, isolated state, coordinates, dirty chunks, culling, real collision/callback lifecycle\n";
+        RealPassageAndCallback(fixture); EnabledCommitSnapshot(fixture); Autotile(fixture);
+        std::cout << "PASS tilemap schema, isolated state, coordinates, dirty chunks, culling, real collision/callback lifecycle, autotile\n";
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "FAIL tilemap: " << error.what() << '\n'; return 1;

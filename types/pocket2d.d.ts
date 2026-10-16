@@ -199,6 +199,10 @@ interface Tilemap extends Component {
     InBounds(this: Tilemap, x: number, y: number): boolean;
     GetCell(this: Tilemap, layer: TileLayer, x: number, y: number): number | undefined;
     SetCell(this: Tilemap, layer: TileLayer, x: number, y: number, id: number): boolean;
+    /** Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map. */
+    GetTerrain(this: Tilemap, layer: TileLayer, x: number, y: number): string | undefined;
+    /** Queues the terrain's tile for the cell's neighbourhood ("" clears) and re-chooses the four neighbours; unknown names raise. */
+    SetTerrain(this: Tilemap, layer: TileLayer, x: number, y: number, terrain: string): boolean;
     GetRevision(this: Tilemap): number;
 }
 

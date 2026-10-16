@@ -266,6 +266,19 @@ function _Tilemap:GetCell(layer, x, y) end
 ---@param id integer
 ---@return boolean
 function _Tilemap:SetCell(layer, x, y, id) end
+---Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map.
+---@param layer TileLayer
+---@param x integer
+---@param y integer
+---@return string|nil
+function _Tilemap:GetTerrain(layer, x, y) end
+---Queues the terrain's tile for the cell's neighbourhood ("" clears) and re-chooses the four neighbours; unknown names raise.
+---@param layer TileLayer
+---@param x integer
+---@param y integer
+---@param terrain string
+---@return boolean
+function _Tilemap:SetTerrain(layer, x, y, terrain) end
 ---@return integer
 function _Tilemap:GetRevision() end
 
