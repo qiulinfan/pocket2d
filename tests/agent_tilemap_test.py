@@ -55,7 +55,14 @@ def test_farming(runtime, fixture):
             check(invalid["ok"] is False, "invalid cell query accepted")
             check(query(agent)["frame"] == 0 and tile(query(agent)) == 2,
                   "rejected query mutated the runtime")
-        step(agent, 1, ["e"]); farm_state(agent, 1, 3, 0, 1, 0)
+        item = {"actor_uid": 10, "component_key": "map", "layer": "ground", "cells": [[8, 8]]}
+        rejected = agent.request({"cmd": "step", "keys": ["e"], "tilemaps": [dict(item, layer="missing")]})
+        check(rejected["ok"] is False and query(agent)["frame"] == 0,
+              "a bad tile query on step must reject before any tick")
+        stepped = successful(agent, {"cmd": "step", "keys": ["e"], "tilemaps": [item]})
+        check(stepped["frame"] == 1 and stepped["tilemaps"][0]["cells"][0]["tile"] == 3,
+              "step reports tiles committed by its own ticks")
+        farm_state(agent, 1, 3, 0, 1, 0)
         step(agent, 59, ["e"]); farm_state(agent, 60, 3, 0, 1, 0)
         step(agent); step(agent, 1, ["e"]); step(agent); farm_state(agent, 63, 3, 0, 1, 0)
         step(agent, 57); farm_state(agent, 120, 3, 0, 1, 0)

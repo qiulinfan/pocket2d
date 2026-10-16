@@ -1039,6 +1039,16 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                     EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
                     continue;
                 }
+                // Tile queries are checked before a step advances, so a bad
+                // query leaves the simulation untouched; cells are read after.
+                if (command.HasMember("tilemaps") && name != "observe") {
+                    try {
+                        (void)ReadTileQueries(command["tilemaps"]);
+                    } catch (const std::exception &error) {
+                        EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
+                        continue;
+                    }
+                }
             }
             if (name == "reset") {
                 if (command.HasMember("seed")) {
@@ -1140,18 +1150,10 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 throw std::runtime_error(engine->GetLastSceneEditError());
             if (engine->RequiresSceneReset() && !engine->GetLastRuntimeActorError().empty())
                 throw std::runtime_error(engine->GetLastRuntimeActorError());
-            if (name == "observe" && command.HasMember("tilemaps")) {
-                const auto queries = ReadTileQueries(command["tilemaps"]);
-                std::string observation = Observe(*engine, seed, &queries, selected);
-                if (game_observations) {
-                    observation = WithGameObservations(*engine, observation, selected);
-                    if (ScriptBudget::GetFailure() != ScriptBudget::Failure::None)
-                        throw std::runtime_error(ScriptBudget::FailureMessage());
-                }
-                if (image) observation = WithImage(*engine, observation, *image);
-                EmitResponse(responses, observation, request_id);
-            } else {
-                std::string observation = Observe(*engine, seed, nullptr, selected);
+            {
+                std::optional<std::vector<CellQueryResult>> queries;
+                if (command.HasMember("tilemaps")) queries = ReadTileQueries(command["tilemaps"]);
+                std::string observation = Observe(*engine, seed, queries ? &*queries : nullptr, selected);
                 if (game_observations) {
                     observation = WithGameObservations(*engine, observation, selected);
                     if (ScriptBudget::GetFailure() != ScriptBudget::Failure::None)

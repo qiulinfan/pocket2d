@@ -334,6 +334,14 @@
           "events": {
             "$ref": "#/definitions/events"
           },
+          "tilemaps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/tile_query"
+            },
+            "maxItems": 16,
+            "description": "Committed tile cells read after the ticks (as observe). Queries are validated before any tick runs; at most 16 queries and 256 cells."
+          },
           "select": {
             "$ref": "#/definitions/selection"
           },
@@ -377,6 +385,14 @@
           },
           "events": {
             "$ref": "#/definitions/events"
+          },
+          "tilemaps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/tile_query"
+            },
+            "maxItems": 16,
+            "description": "Committed tile cells read after the ticks (as observe). Queries are validated before any tick runs; at most 16 queries and 256 cells."
           },
           "select": {
             "$ref": "#/definitions/selection"
