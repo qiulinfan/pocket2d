@@ -2,6 +2,7 @@
 #include "core/Engine.h"
 #include "scripting/LuaBoundary.h"
 #include "physics/Rigidbody.h"
+#include "scripting/ComponentManager.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include <stdexcept>
@@ -9,6 +10,13 @@
 
 namespace {
 ActorHandle ActorOf(const Rigidbody *body) { return body->actor_handle; }
+// Non-dynamic bodies follow their Transform each physics step, so a scripted
+// move also writes the owner's Transform; otherwise the next step undoes it.
+void SetPositionWithTransform(Rigidbody *body, const Vector2 &position) {
+    body->SetPosition(position);
+    if (body->actor_handle.IsValid())
+        ComponentManager::SetRuntimeTransformWorldPosition(body->actor_handle.uid, position.x, position.y);
+}
 void SetActor(Rigidbody *body, ActorHandle handle) { body->actor_handle=handle; body->actor=handle.Resolve(); }
 double NumericInput(const luabridge::LuaRef &input) {
     if (input.type() != LUA_TNUMBER) throw std::invalid_argument("Rigidbody numeric value requires a number");
@@ -124,7 +132,7 @@ void RegisterRigidbodyAPI() {
         .addFunction("OnDestroy",&Rigidbody::OnDestroy)
         .addFunction("AddForce",&Rigidbody::AddForce)
         .addFunction("SetVelocity",&Rigidbody::SetVelocity)
-        .addFunction("SetPosition",&Rigidbody::SetPosition)
+        .addFunction("SetPosition",&SetPositionWithTransform)
         .addFunction("SetRotation",&Rotation)
         .addFunction("SetAngularVelocity",&AngularVelocity)
         .addFunction("SetGravityScale",&GravityScale)

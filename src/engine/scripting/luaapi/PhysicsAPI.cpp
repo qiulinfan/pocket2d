@@ -3,6 +3,7 @@
 #include "physics/PhysicsQueries.h"
 #include "physics/RayCast.h"
 #include "physics/Rigidbody.h"
+#include "scripting/ComponentManager.h"
 #include "scene/Actor.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
@@ -168,7 +169,17 @@ PhysicsJoint ConnectWheel(Rigidbody *a, Rigidbody *b, const Vector2 &anchor, con
 PhysicsJoint ConnectMotor(Rigidbody *a, Rigidbody *b) {
     return PhysicsJoint::Connect("motor", Body(a), Body(b), Vector2(), Vector2());
 }
-Vector2 MoveCharacter(Rigidbody *body, const Vector2 &delta) { return PhysicsQueries::MoveCharacter(Body(body), delta); }
+// The mover is kinematic, and kinematic bodies follow their Transform each
+// physics step, so the moved position is written back to the Transform too.
+Vector2 MoveCharacter(Rigidbody *body, const Vector2 &delta) {
+    Rigidbody &mover = Body(body);
+    const Vector2 moved = PhysicsQueries::MoveCharacter(mover, delta);
+    if (mover.actor_handle.IsValid()) {
+        const Vector2 position = mover.GetPosition();
+        ComponentManager::SetRuntimeTransformWorldPosition(mover.actor_handle.uid, position.x, position.y);
+    }
+    return moved;
+}
 
 void InjectPhysicsAPI() {
     luabridge::getGlobalNamespace(LuaState())

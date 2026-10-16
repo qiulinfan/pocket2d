@@ -61,7 +61,7 @@ struct Fixture {
           {"uid":5,"name":"polygon","components":{"body":{"type":"Rigidbody","x":-8,"y":0,"gravity_scale":0,"has_trigger":false,"collider_type":"polygon","collider_points":[0.0,-0.5,0.5,0.5,-0.5,0.5]}}},
           {"uid":6,"name":"ghost","components":{"body":{"type":"Rigidbody","x":6,"y":0,"gravity_scale":0,"has_trigger":false,"collision_layer":2,"collision_mask":2}}},
           {"uid":7,"name":"slider","components":{"body":{"type":"Rigidbody","x":1,"y":9.5,"gravity_scale":0,"has_trigger":false,"width":0.9,"height":0.9,"friction":0}}},
-          {"uid":8,"name":"mover","components":{"body":{"type":"Rigidbody","body_type":"kinematic","x":28,"y":5,"has_trigger":false,"collider_type":"circle","radius":0.4}}},
+          {"uid":8,"name":"mover","components":{"transform":{"type":"Transform","x":28,"y":5},"body":{"type":"Rigidbody","body_type":"kinematic","x":28,"y":5,"has_trigger":false,"collider_type":"circle","radius":0.4}}},
           {"uid":9,"name":"terrain","components":{"map":{"type":"Tilemap","map_resource":"floor.tilemap.json"},"transform":{"type":"Transform"}}}
         ]})";
     }
@@ -141,8 +141,17 @@ void Run() {
       assert(math.abs(after.y-before.y-1)<0.05,'mover slides along the wall: '..(after.y-before.y))
       assert(math.abs(moved.x-(after.x-before.x))<1e-4,'MoveCharacter returns the applied movement')
       ok=pcall(function() Physics.MoveCharacter(A,Vector2(1,0)) end); assert(not ok,'mover requires a kinematic body')
+      MOVED_TO=after
       -- slide along the 20-cell floor top
       SLIDER:SetVelocity(Vector2(8,0))
+    )");
+    Step(engine, 1);
+    Lua(state, R"(
+      -- kinematic bodies follow their Transform each step: the move must persist
+      local now=MOVER:GetPosition()
+      assert(math.abs(now.x-MOVED_TO.x)<1e-4 and math.abs(now.y-MOVED_TO.y)<1e-4,'mover keeps its position after a step')
+      local t=MOVER.actor:GetComponent('Transform')
+      assert(math.abs(t.x-MOVED_TO.x)<1e-4,'MoveCharacter writes the Transform')
     )");
     float slowest = 1e9f;
     for (int i = 0; i < 60; ++i) {
