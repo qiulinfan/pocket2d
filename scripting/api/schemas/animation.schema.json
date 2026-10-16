@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocket2d.dev/schemas/animation.schema.json",
+  "title": "Pocket2D sprite animation (*.animation.json)",
+  "description": "Sprite animation asset loaded by SpriteAnimationAsset::LoadFile (src/shared/animation/SpriteAnimationAsset.cpp). Every object has exactly the listed fields (event is optional): missing, unknown and duplicate fields are rejected. Not expressible here: the file must be at most 4 MiB with nesting depth at most 16, clip names must be unique, all clips together hold at most 65536 frames, frame row/column must not exceed rows/columns, grid products must fit a 32-bit int, and the image must exist under images/ with exactly columns*tile_width_px by rows*tile_height_px pixels. Label limits are UTF-8 bytes in the loader but characters here.",
+  "type": "object",
+  "required": [
+    "version",
+    "image",
+    "columns",
+    "rows",
+    "tile_width_px",
+    "tile_height_px",
+    "clips"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "image": {
+      "description": "Atlas path relative to images/: nonempty, '/' separators only, no NUL, no leading '/', second character not ':', no '..' component.",
+      "type": "string",
+      "pattern": "^(?!/)(?!.:)(?!(?:.*/)?\\.\\.(?:/|$))[^\\\\\\u0000]+$"
+    },
+    "columns": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "tile_width_px": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "tile_height_px": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "clips": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/clip"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "label": {
+      "description": "1..128 UTF-8 bytes without NUL (the schema bounds characters).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000]*$"
+    },
+    "clip": {
+      "type": "object",
+      "required": [
+        "name",
+        "loop",
+        "frames"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/label"
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "frames": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 65536,
+          "items": {
+            "$ref": "#/$defs/frame"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "frame": {
+      "type": "object",
+      "required": [
+        "row",
+        "column",
+        "ticks"
+      ],
+      "properties": {
+        "row": {
+          "description": "1-based atlas row, at most rows.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "column": {
+          "description": "1-based atlas column, at most columns.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "ticks": {
+          "description": "Fixed 1/60 s ticks the frame is shown.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 36000
+        },
+        "event": {
+          "description": "Event published when the frame starts.",
+          "$ref": "#/$defs/label"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

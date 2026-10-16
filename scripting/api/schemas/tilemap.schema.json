@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocket2d.dev/schemas/tilemap.schema.json",
+  "title": "Pocket2D tilemap (*.tilemap.json)",
+  "description": "Tilemap asset loaded by TilemapAsset::LoadFile (src/shared/tilemap/TilemapAsset.cpp). Every object has exactly the listed fields: missing, unknown and duplicate fields are rejected. Not expressible here: each layer's cells length must equal width*height, tile IDs must not exceed atlas columns*rows, columns*rows and the atlas pixel size must fit a 32-bit int, and the atlas image must exist under images/ with exactly columns*tile_width_px by rows*tile_height_px pixels.",
+  "type": "object",
+  "required": [
+    "version",
+    "width",
+    "height",
+    "cell_size",
+    "atlas",
+    "layers"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 512
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 512
+    },
+    "cell_size": {
+      "description": "World units per cell; finite and positive.",
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "atlas": {
+      "type": "object",
+      "required": [
+        "image",
+        "columns",
+        "rows",
+        "tile_width_px",
+        "tile_height_px"
+      ],
+      "properties": {
+        "image": {
+          "description": "Image path relative to images/: nonempty, no NUL, not absolute, no drive prefix, no '..' component (separated by '/' or backslash).",
+          "type": "string",
+          "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(?:.*[/\\\\])?\\.\\.(?:[/\\\\]|$))[^\\u0000]+$"
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "tile_width_px": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "tile_height_px": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      },
+      "additionalProperties": false
+    },
+    "layers": {
+      "type": "object",
+      "required": [
+        "ground",
+        "solid"
+      ],
+      "properties": {
+        "ground": {
+          "$ref": "#/$defs/layer"
+        },
+        "solid": {
+          "$ref": "#/$defs/layer"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "required": [
+        "sorting_order",
+        "cells"
+      ],
+      "properties": {
+        "sorting_order": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "cells": {
+          "description": "Row-major tile IDs, exactly width*height entries. 0 is empty; n in 1..columns*rows is atlas cell n.",
+          "type": "array",
+          "maxItems": 262144,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocket2d.dev/schemas/rendering-config.schema.json",
+  "title": "Pocket2D rendering.config",
+  "description": "Window and clear-color settings validated by ValidateRenderingConfig in src/shared/config/GameConfig.cpp. The file is optional and must be a JSON object without duplicate member names. Every field is optional; unknown fields are ignored by the loader and therefore allowed here. Integers must be exact 32-bit JSON integers (rapidjson IsInt).",
+  "type": "object",
+  "properties": {
+    "x_resolution": {
+      "description": "Window width in pixels.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "y_resolution": {
+      "description": "Window height in pixels.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "clear_color_r": { "$ref": "#/$defs/channel" },
+    "clear_color_g": { "$ref": "#/$defs/channel" },
+    "clear_color_b": { "$ref": "#/$defs/channel" },
+    "zoom_factor": {
+      "description": "Camera zoom: a finite positive number no larger than the largest 32-bit float.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 3.4028234663852886e38
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "channel": {
+      "description": "Clear color channel in [0, 255].",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    }
+  }
+}

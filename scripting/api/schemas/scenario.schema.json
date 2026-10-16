@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocket2d.dev/schemas/scenario.schema.json",
+  "title": "Pocket2D scenario (*.scenario.json)",
+  "description": "Task definition loaded by Scenario.from_dict (clients/python/pocket2d/scenario.py, documented in docs/development/scenarios.md). success and failure conditions are sent unchanged as run_until conditions and select as the observation selection, so their rules also follow the runtime's agent protocol (src/app/runtime/AgentSession.cpp). Unknown members are ignored and allowed here. Not expressible here: success and failure together hold at most 16 conditions, select.uids must be decimal uint64 strings, and script inputs must stay within controls.",
+  "type": "object",
+  "required": [
+    "version",
+    "name",
+    "max_frames",
+    "controls",
+    "success"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "seed": {
+      "description": "Reset seed (uint32); default 0.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "max_frames": {
+      "description": "Episode length in ticks before truncation.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "frames_per_step": {
+      "description": "Ticks per environment step; default 1.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "controls": {
+      "description": "Exactly one of keys (held SDL key names) or actions (semantic actions from actions.json).",
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "keys"
+          ]
+        },
+        {
+          "required": [
+            "actions"
+          ]
+        }
+      ]
+    },
+    "success": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/condition"
+      }
+    },
+    "failure": {
+      "type": "array",
+      "maxItems": 15,
+      "items": {
+        "$ref": "#/$defs/condition"
+      }
+    },
+    "reward": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reward"
+      }
+    },
+    "select": {
+      "description": "Observation filter, as the agent protocol's select.",
+      "type": "object",
+      "properties": {
+        "names": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string"
+          }
+        },
+        "uids": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string"
+          }
+        },
+        "types": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string"
+          }
+        },
+        "region": {
+          "type": "object",
+          "required": [
+            "min_x",
+            "min_y",
+            "max_x",
+            "max_y"
+          ],
+          "properties": {
+            "min_x": {
+              "type": "number"
+            },
+            "min_y": {
+              "type": "number"
+            },
+            "max_x": {
+              "type": "number"
+            },
+            "max_y": {
+              "type": "number"
+            }
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "components": {
+          "type": "boolean"
+        }
+      }
+    },
+    "script": {
+      "description": "Fixed input plan for regression tests, played in order.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "required": [
+          "frames"
+        ],
+        "properties": {
+          "frames": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36000
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "actions": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "expect": {
+      "description": "Outcome the script must reach; default success.",
+      "enum": [
+        "success",
+        "failure",
+        "truncated"
+      ]
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "condition": {
+      "description": "A run_until condition, chosen by the first present member of event, actor_exists, then actor.",
+      "type": "object",
+      "if": {
+        "required": [
+          "event"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "required": [
+            "actor_exists"
+          ]
+        },
+        "then": {
+          "properties": {
+            "actor_exists": {
+              "type": "string",
+              "minLength": 1
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        "else": {
+          "required": [
+            "actor",
+            "property",
+            "op",
+            "value"
+          ],
+          "properties": {
+            "actor": {
+              "description": "Actor UID as a decimal string, or actor name.",
+              "type": "string",
+              "minLength": 1
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1
+            },
+            "property": {
+              "type": "string",
+              "minLength": 1
+            },
+            "op": {
+              "enum": [
+                "==",
+                "!=",
+                "<",
+                "<=",
+                ">",
+                ">="
+              ]
+            },
+            "value": {
+              "type": [
+                "number",
+                "string",
+                "boolean"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "reward": {
+      "description": "per_frame x ticks, weight x published events of a type, or weight x change of a numeric actor property.",
+      "type": "object",
+      "if": {
+        "required": [
+          "per_frame"
+        ]
+      },
+      "then": {
+        "properties": {
+          "per_frame": {
+            "type": "number"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "weight": {
+            "type": "number"
+          }
+        },
+        "if": {
+          "required": [
+            "event"
+          ]
+        },
+        "then": {
+          "properties": {
+            "event": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "else": {
+          "required": [
+            "actor",
+            "property"
+          ],
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "property": {
+              "type": "string"
+            },
+            "component": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

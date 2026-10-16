@@ -41,6 +41,8 @@ class Scenario:
     reward: list = field(default_factory=list)
     select: dict = None
     description: str = ""
+    script: list = None
+    expect: str = "success"
     path: Path = None
 
     @classmethod
@@ -93,6 +95,18 @@ class Scenario:
                          where + " needs per_frame, event, or actor and property")
         select = data.get("select")
         _require(select is None or isinstance(select, dict), "select must be an object")
+        script = data.get("script")
+        if script is not None:
+            _require(isinstance(script, list) and 1 <= len(script) <= 10000, "script must list 1..10000 inputs")
+            for index, entry in enumerate(script):
+                where = "script[%d]" % index
+                _require(isinstance(entry, dict), where + " must be an object")
+                _require(isinstance(entry.get("frames"), int) and 1 <= entry["frames"] <= 36000,
+                         where + ".frames must be in 1..36000")
+                _require(isinstance(entry.get("keys", []), list) and isinstance(entry.get("actions", {}), dict),
+                         where + " keys must be a list and actions an object")
+        expect = data.get("expect", "success")
+        _require(expect in ("success", "failure", "truncated"), "expect must be success, failure or truncated")
         return cls(name=name, seed=seed, max_frames=max_frames, frames_per_step=frames_per_step,
                    controls=controls, success=success, failure=failure, reward=reward, select=select,
-                   description=data.get("description", ""), path=path)
+                   description=data.get("description", ""), script=script, expect=expect, path=path)

@@ -18,6 +18,8 @@ game_engine_osx
 game_engine_editor
 game
 pocket
+# The pocket command line script is source, not a mirrored executable.
+!/tools/pocket
 /game.exe
 /pocket.exe
 /*.dll

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocket2d.dev/schemas/game-config.schema.json",
+  "title": "Pocket2D game.config",
+  "description": "Project startup settings read by GameConfig::Read (src/shared/config/GameConfig.cpp). The file must be a JSON object without duplicate member names. Every field is optional; unknown fields are ignored by the loader and therefore allowed here.",
+  "type": "object",
+  "properties": {
+    "game_title": {
+      "description": "Window title.",
+      "type": "string"
+    },
+    "initial_scene": {
+      "description": "Scene name resolved under scenes/ (without the .scene extension) that the runtime and editor open first. Empty means no initial scene.",
+      "type": "string"
+    },
+    "save_namespace": {
+      "description": "Save-slot namespace for the Lua Save API. Empty disables saving; otherwise 1..64 ASCII letters, digits, '_' or '-', starting with a letter or digit (SaveStore::IsValidIdentifier).",
+      "type": "string",
+      "pattern": "^([A-Za-z0-9][A-Za-z0-9_-]{0,63})?$"
+    }
+  },
+  "additionalProperties": true
+}

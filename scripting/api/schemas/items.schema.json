@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocket2d.dev/schemas/items.schema.json",
+  "title": "Pocket2D item catalog (*.items.json)",
+  "description": "Item catalog loaded by ItemCatalog::LoadFile (src/shared/inventory/ItemCatalog.cpp). Every object has exactly the listed fields: missing required, unknown and duplicate fields are rejected. Not expressible here: the file must be at most 4 MiB with nesting depth at most 8 and no raw NUL byte, item IDs must be unique, and text limits are UTF-8 bytes in the loader but characters here.",
+  "type": "object",
+  "required": [
+    "version",
+    "items"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "stat": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "id",
+        "display_name",
+        "kind",
+        "max_stack"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000]*$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        },
+        "kind": {
+          "enum": [
+            "material",
+            "food",
+            "weapon",
+            "armor"
+          ]
+        },
+        "equipment_slot": {
+          "description": "Empty or absent for material and food.",
+          "enum": [
+            "",
+            "subweapon",
+            "head",
+            "chest",
+            "legs"
+          ]
+        },
+        "max_stack": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9999
+        },
+        "health_restore": {
+          "$ref": "#/$defs/stat"
+        },
+        "attack": {
+          "$ref": "#/$defs/stat"
+        },
+        "defense": {
+          "$ref": "#/$defs/stat"
+        },
+        "move_speed_bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "material"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "equipment_slot": {
+                "const": ""
+              },
+              "attack": {
+                "const": 0
+              },
+              "defense": {
+                "const": 0
+              },
+              "move_speed_bonus": {
+                "const": 0
+              },
+              "health_restore": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "food"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "health_restore"
+            ],
+            "properties": {
+              "equipment_slot": {
+                "const": ""
+              },
+              "attack": {
+                "const": 0
+              },
+              "defense": {
+                "const": 0
+              },
+              "move_speed_bonus": {
+                "const": 0
+              },
+              "health_restore": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "weapon"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "equipment_slot"
+            ],
+            "properties": {
+              "max_stack": {
+                "const": 1
+              },
+              "health_restore": {
+                "const": 0
+              },
+              "equipment_slot": {
+                "const": "subweapon"
+              },
+              "defense": {
+                "const": 0
+              },
+              "move_speed_bonus": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "armor"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "equipment_slot"
+            ],
+            "properties": {
+              "max_stack": {
+                "const": 1
+              },
+              "health_restore": {
+                "const": 0
+              },
+              "equipment_slot": {
+                "enum": [
+                  "head",
+                  "chest",
+                  "legs"
+                ]
+              },
+              "attack": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

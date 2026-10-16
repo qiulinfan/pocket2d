@@ -104,6 +104,13 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   tasks (harvest, defend a wave, close the route) solved by scripted key
   policies in CTest. Not yet done: vectorized and multi-agent environments,
   game-declared observation functions, and LLM-player evaluation.
+- Authoring loop: `tools/pocket` checks projects (JSON Schemas for every asset
+  format, runtime startup diagnostics, optional LuaLS/EmmyLua), runs scenario
+  scripts and replays as tests, serves JSONL or MCP, renders frames and
+  scaffolds projects with `AGENTS.md`. `scripting/api/schemas/` holds the
+  asset schemas and `tools/validate_schemas.py` validates all 41 fixture
+  assets in CTest. A root `llms.txt` indexes the agent-facing documentation.
+  No Lua checker is installed here, so that path is untested.
 
 ## Completed and verified in this slice
 
