@@ -627,12 +627,14 @@ phase15 benchmark directories. No performance gain or SOTA conclusion is claimed
    unverified. Existing unused SDL2 vendor files await packaging cleanup.
 5. Establish matched representative benchmarks against current established 2D
    engines before making SOTA performance or completeness claims.
-6. Whole-game completeness tests (2026-10-16): the Village_Rim world import plus
-   a first playable slice, and the PocketTerraria sandbox with the Eye of Cthulhu,
-   both played through the agent protocol. Fixed: y-sorting within a sorting
-   order, tile seams from edge rounding, and kinematic moves undone by the
-   Transform sync. Open gaps (pathfinding, 2D lighting, square movers, UI image
-   scaling, screen-to-world API, more tilemap layers): `game-completeness-tests.md`.
+6. Whole-game completeness tests (2026-10-16): the Village_Rim world import with
+   its quest line, inventory UI, altars and invasions, Ice Golem and saves, and
+   the PocketTerraria sandbox with the Eye of Cthulhu, both played through the
+   agent protocol. The engine gaps they found are fixed (the table in
+   `game-completeness-tests.md`, latest: FindPath clearance escape, built-ins
+   starting before Lua `OnStart` in a batch, point import on sprite actors).
+   Village_Rim's island-crossing puzzles, farming and other content remain
+   unmigrated (listed there).
 
 ## Recovery and artifacts
 

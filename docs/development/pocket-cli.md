@@ -56,8 +56,9 @@ schema.
   order` with y-sorting; solid Box/Circle/Capsule colliders become static
   bodies; GameObjects with a non-static Rigidbody2D become `SpawnMarker`
   actors (the project defines that component); `--point-prefix` also imports
-  empty GameObjects named with that prefix (spawn points) as `SpawnMarker`
-  actors of kind `point`. Scaled or rotated tilemaps,
+  GameObjects named with that prefix (spawn points) as `SpawnMarker` actors of
+  kind `point`; a point that has a sprite gets the marker on its sprite actor.
+  Scaled or rotated tilemaps,
   sliced sprites and triggers are reported in `import_report.json`, not
   converted. Scene actors with uid below 1000 survive re-imports. Verified on
   Village_Rim's Gameplay scene (49 tilemaps, 189 sprites, 111 colliders).
