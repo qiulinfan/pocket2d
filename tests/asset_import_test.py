@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pocket import: Aseprite sheets and LDtk levels become assets the runtime loads."""
+"""pocket import: Aseprite sheets, LDtk levels and Unity 2D scenes become assets the runtime loads."""
 import json
 from pathlib import Path
 import struct
@@ -52,6 +52,96 @@ def ldtk_project(tiles, walls):
                  "__tilesetDefUid": 7, "autoLayerTiles": walls, "gridTiles": []},
                 {"__identifier": "Ground", "__type": "Tiles", "__cWid": 10, "__cHei": 6, "__gridSize": 8,
                  "__tilesetDefUid": 7, "gridTiles": tiles, "autoLayerTiles": []}]}]}
+
+
+GUIDS = {"tiles": "a" * 31 + "1", "rock": "a" * 31 + "2", "hero": "a" * 31 + "3",
+         "wall": "a" * 31 + "4", "floor": "a" * 31 + "5"}
+
+
+def sprite_meta(guid, sprites=None, alignment=0):
+    """A texture importer .meta: single sprite, or a sheet of (name, internal id, x)."""
+    text = "fileFormatVersion: 2\nguid: %s\nTextureImporter:\n" % guid
+    if not sprites:
+        return text + "  spriteMode: 1\n  alignment: %d\n  spritePixelsToUnits: 16\n" % alignment
+    text += "  spriteMode: 2\n  spritePixelsToUnits: 16\n  spriteSheet:\n    serializedVersion: 2\n    sprites:\n"
+    for name, internal, x in sprites:
+        text += ("    - serializedVersion: 2\n      name: %s\n      rect:\n        serializedVersion: 2\n"
+                 "        x: %d\n        y: 0\n        width: 16\n        height: 16\n      alignment: 0\n"
+                 "      pivot: {x: 0.5, y: 0.5}\n      internalID: %d\n") % (name, x, internal)
+    return text
+
+
+def unity_scene():
+    g = GUIDS
+    transform = ("--- !u!4 &%d\nTransform:\n  m_GameObject: {fileID: %d}\n  m_LocalPosition: {x: %s, y: %s, z: 0}\n"
+                 "  m_LocalScale: {x: 1, y: 1, z: 1}\n  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}\n  m_Father: {fileID: %d}\n")
+    game_object = "--- !u!1 &%d\nGameObject:\n  m_Name: %s\n  m_IsActive: 1\n"
+    tile = ("  - first: {x: %d, y: 0, z: 0}\n    second:\n      m_TileIndex: %d\n      m_TileSpriteIndex: %d\n"
+            "      m_TileMatrixIndex: 0\n      m_TileColorIndex: 0\n")
+    reference = "  - m_RefCount: 1\n    m_Data: {fileID: %d, guid: %s, type: %d}\n"
+    return ("%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n" +
+            game_object % (10, "Grid") + transform % (11, 10, 0, 0, 0) +
+            game_object % (20, "Walls") + transform % (21, 20, 2, 3, 11) +
+            "--- !u!1839735485 &22\nTilemap:\n  m_GameObject: {fileID: 20}\n  m_Enabled: 1\n  m_Tiles:\n" +
+            tile % (0, 0, 0) + tile % (1, 1, 1) +
+            "  m_TileAssetArray:\n" + reference % (11400000, g["wall"], 2) + reference % (11400000, g["floor"], 2) +
+            "  m_TileSpriteArray:\n" + reference % (101, g["tiles"], 3) + reference % (102, g["tiles"], 3) +
+            "  m_TileMatrixArray:\n  - m_RefCount: 2\n    m_Data:\n      e00: 1\n      e01: 0\n      e10: 0\n"
+            "      e11: 1\n  m_TileColorArray:\n  - m_RefCount: 2\n    m_Data: {r: 1, g: 1, b: 1, a: 1}\n"
+            "--- !u!483693784 &23\nTilemapRenderer:\n  m_GameObject: {fileID: 20}\n  m_Enabled: 1\n  m_SortingOrder: 2\n"
+            "--- !u!19719996 &24\nTilemapCollider2D:\n  m_GameObject: {fileID: 20}\n  m_Enabled: 1\n" +
+            game_object % (30, "Rock") + transform % (31, 30, 5, -1, 0) +
+            "--- !u!212 &32\nSpriteRenderer:\n  m_GameObject: {fileID: 30}\n  m_Enabled: 1\n  m_SortingOrder: 0\n"
+            "  m_Sprite: {fileID: 21300000, guid: %s, type: 3}\n  m_Color: {r: 1, g: 1, b: 1, a: 1}\n" % g["rock"] +
+            "--- !u!61 &33\nBoxCollider2D:\n  m_GameObject: {fileID: 30}\n  m_Enabled: 1\n  m_IsTrigger: 0\n"
+            "  m_Size: {x: 1, y: 2}\n  m_Offset: {x: 0, y: 1}\n" +
+            game_object % (40, "Hero") + transform % (41, 40, 0, -3, 0) +
+            "--- !u!50 &42\nRigidbody2D:\n  m_GameObject: {fileID: 40}\n  m_BodyType: 0\n"
+            "--- !u!212 &43\nSpriteRenderer:\n  m_GameObject: {fileID: 40}\n  m_Enabled: 1\n"
+            "  m_Sprite: {fileID: 21300000, guid: %s, type: 3}\n" % g["hero"])
+
+
+def run_unity(game, root):
+    assets = root / "unity/Assets"
+    for folder in ("Art", "Art/Props", "Art/Heroes", "Tiles", "Scenes"):
+        (assets / folder).mkdir(parents=True, exist_ok=True)
+    write_png(assets / "Art/tiles.png", 32, 16)
+    (assets / "Art/tiles.png.meta").write_text(sprite_meta(GUIDS["tiles"], [("tiles_0", 101, 0), ("tiles_1", 102, 16)]))
+    write_png(assets / "Art/Props/rock.png", 16, 32)
+    (assets / "Art/Props/rock.png.meta").write_text(sprite_meta(GUIDS["rock"], alignment=7))
+    write_png(assets / "Art/Heroes/hero.png", 16, 16)
+    (assets / "Art/Heroes/hero.png.meta").write_text(sprite_meta(GUIDS["hero"]))
+    for name, collider in (("wall", 1), ("floor", 0)):
+        (assets / ("Tiles/%s.asset" % name)).write_text(
+            "%%YAML 1.1\n--- !u!114 &11400000\nMonoBehaviour:\n  m_ColliderType: %d\n" % collider)
+        (assets / ("Tiles/%s.asset.meta" % name)).write_text("fileFormatVersion: 2\nguid: %s\n" % GUIDS[name])
+    (assets / "Scenes/test.unity").write_text(unity_scene())
+    project = root / "unity_game"
+    (project / "component_types").mkdir(parents=True)
+    (project / "game.config").write_text('{"initial_scene":"imported"}')
+    (project / "component_types/SpawnMarker.lua").write_text('SpawnMarker = {kind = ""}')
+    pocket(game, "import", "unity", str(assets / "Scenes/test.unity"), "--assets", str(assets), "--project", str(project),
+           "--name", "imported")
+    actors = {actor["name"]: actor["components"] for actor in json.loads((project / "scenes/imported.scene").read_text())["actors"]}
+    walls = json.loads((project / "maps/Walls_1.tilemap.json").read_text())
+    check((walls["width"], walls["height"]) == (2, 1) and walls["layers"]["solid"]["cells"] == [1, 0] and
+          walls["layers"]["ground"]["cells"] == [0, 2], "Tile asset colliders pick solid vs ground: %r" % walls["layers"])
+    check(actors["Walls_1"]["transform"]["x"] == 2 and actors["Walls_1"]["transform"]["y"] == -4,
+          "tilemap origin flips y: %r" % actors["Walls_1"]["transform"])
+    rock = actors["Rock"]["sprite"]
+    check(rock["scale_x"] == 6.25 and rock["pivot_y"] == 1.0 and rock["auto_sorting_order"],
+          "sprites keep 16 PPU scale, bottom pivot and y-sorting: %r" % rock)
+    body = actors["Rock_collider"]["body"]
+    check((body["body_type"], body["x"], body["width"], body["height"]) == ("static", 5, 1, 2) and abs(body["y"]) < 1e-9,
+          "box colliders become static bodies with their offset: %r" % body)
+    check(actors["Hero"]["spawn"]["kind"] == "Heroes" and actors["Hero"]["transform"]["y"] == 3,
+          "Rigidbody2D entities become spawn markers: %r" % actors["Hero"])
+    with Runtime(game, project, save_dir=root / "unity_saves") as runtime:
+        uid = next(a["uid"] for a in json.loads((project / "scenes/imported.scene").read_text())["actors"]
+                   if a["name"] == "Walls_1")
+        observed = runtime.request({"cmd": "observe", "tilemaps": [
+            {"actor_uid": str(uid), "component_key": "map", "layer": "solid", "cells": [[0, 0], [1, 0]]}]})
+        check([cell["tile"] for cell in observed["tilemaps"][0]["cells"]] == [1, 0], "the runtime loads the import")
 
 
 def run(game):
@@ -128,6 +218,7 @@ def run(game):
                 {"actor_uid": "2", "component_key": "map", "layer": "solid", "cells": [[4, 0]]}]})
             check([query["cells"][0]["tile"] for query in observed["tilemaps"]] == [6, 6],
                   "the runtime reads imported cells: %r" % observed["tilemaps"])
+        run_unity(game, root)
     print("asset import regressions passed")
 
 

@@ -6,7 +6,7 @@
   pocket replay PROJECT REPLAY     verify a recorded replay
   pocket render PROJECT --out PNG  render a frame headlessly
   pocket new DIRECTORY             create a minimal project
-  pocket import aseprite|ldtk ...  convert Aseprite sheets or LDtk levels into assets
+  pocket import aseprite|ldtk|unity ...  convert Aseprite sheets, LDtk levels or Unity 2D scenes
 
 Diagnostics are text by default; --json prints one JSON object per line with
 severity, code, file and message. The runtime binary comes from --game, the
@@ -311,9 +311,40 @@ def command_new(options):
     return 0
 
 
+def command_import_unity(options, project):
+    from .unity import import_unity
+    if not options.assets:
+        print("pocket import: unity requires --assets (the Unity project's Assets directory)", file=sys.stderr)
+        return 1
+    try:
+        scene, report = import_unity(options.assets, options.source, project, options.name, options.skip_texture_folder)
+    except ImportError:
+        print("pocket import: unity needs Pillow (pip install pillow)", file=sys.stderr)
+        return 1
+    except (OSError, KeyError, ValueError) as error:
+        print("pocket import: %s" % error, file=sys.stderr)
+        return 1
+    validator = load_validator()
+    if validator is not None:
+        schemas = REPOSITORY / "scripting/api/schemas"
+        checks = [(scene, "scene")] + [(project / "maps" / actor["components"]["map"]["map_resource"], "tilemap")
+                                       for actor in json.loads(scene.read_text())["actors"] if "map" in actor["components"]]
+        for path, schema in checks:
+            problems = validator.validate(json.loads(path.read_text()),
+                                          json.loads((schemas / (schema + ".schema.json")).read_text()))
+            if problems:
+                print("pocket import: wrote an invalid %s %s: %s" % (schema, path, "; ".join(problems[:3])), file=sys.stderr)
+                return 1
+    print("wrote %s: %s, %d notes in import_report.json" % (scene.relative_to(project), json.dumps(report["stats"]),
+                                                           len(report["notes"])))
+    return 0
+
+
 def command_import(options):
     from .importers import ImportError_, import_aseprite, import_ldtk
     project = project_path(options.project)
+    if options.format == "unity":
+        return command_import_unity(options, project)
     try:
         if options.format == "aseprite":
             written = import_aseprite(options.source, project, options.name, options.image)
@@ -373,15 +404,18 @@ def main(argv=None):
     new = commands.add_parser("new", help="create a minimal project")
     new.add_argument("directory")
     new.set_defaults(handler=command_new)
-    importer = commands.add_parser("import", help="convert Aseprite sheets or LDtk levels into project assets")
-    importer.add_argument("format", choices=["aseprite", "ldtk"])
-    importer.add_argument("source", help="Aseprite sheet JSON or LDtk project")
+    importer = commands.add_parser("import", help="convert Aseprite sheets, LDtk levels or Unity 2D scenes into assets")
+    importer.add_argument("format", choices=["aseprite", "ldtk", "unity"])
+    importer.add_argument("source", help="Aseprite sheet JSON, LDtk project or Unity .unity scene")
     importer.add_argument("--project", required=True)
     importer.add_argument("--name", required=True, help="asset name (animations/NAME or maps/NAME)")
     importer.add_argument("--image", help="image name under images/ (default: the source image's file name)")
     importer.add_argument("--level", help="LDtk level identifier (default: the first level)")
     importer.add_argument("--ground", help="LDtk tile layer drawn as ground")
     importer.add_argument("--solid", help="LDtk tile layer drawn and collided as solid")
+    importer.add_argument("--assets", help="Unity: the project's Assets directory (resolves GUIDs)")
+    importer.add_argument("--skip-texture-folder", action="append", default=[],
+                          help="Unity: skip sprites whose texture lives in a folder of this name (repeatable)")
     importer.set_defaults(handler=command_import)
     options = parser.parse_args(argv)
     if options.command == "import" and options.format == "ldtk" and not options.ground:
