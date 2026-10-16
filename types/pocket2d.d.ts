@@ -201,6 +201,8 @@ interface Tilemap extends Component {
     SetCell(this: Tilemap, layer: TileLayer, x: number, y: number, id: number): boolean;
     /** Committed tile IDs of a rectangle inside the map as one row-major array; raises when the rectangle leaves the map. */
     GetCells(this: Tilemap, layer: TileLayer, x: number, y: number, width: number, height: number): (number)[];
+    /** Native tile lighting into a dynamic image (one pixel per cell); options: image, sky, air_falloff, solid_falloff, open_ground, sources, r, g, b, max_alpha. */
+    ComputeLight(this: Tilemap, x: number, y: number, width: number, height: number, options: unknown): void;
     /** Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map. */
     GetTerrain(this: Tilemap, layer: TileLayer, x: number, y: number): string | undefined;
     /** Queues the terrain's tile for the cell's neighbourhood ("" clears) and re-chooses the four neighbours; unknown names raise. */

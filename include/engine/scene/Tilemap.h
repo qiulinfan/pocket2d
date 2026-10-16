@@ -53,6 +53,24 @@ public:
     bool SetCell(const std::string &layer, double x, double y, double id);
     // Committed IDs of a rectangle inside the map, row-major (bulk reads for
     // game-side mirrors and planners). Raises when the rectangle leaves the map.
+    // Tile lighting for a cell rectangle (it may extend past the map): sky
+    // light enters cells with no solid tile and no ground tile (or an
+    // open-ground terrain), sources add light, and light decays per cell by
+    // air_falloff or solid_falloff. The darkness (1 - light, alpha up to
+    // max_alpha, in r/g/b) is written to a dynamic image of width x height
+    // pixels, one per cell, drawn by name. Above the map is open sky.
+    struct LightOptions {
+        std::string image;
+        float sky = 1.0f;
+        float air_falloff = 0.08f;
+        float solid_falloff = 0.24f;
+        std::vector<std::string> open_ground;
+        std::vector<float> sources;  // x, y, level triples in cells
+        int r = 0, g = 0, b = 0;
+        int max_alpha = 255;
+    };
+    // Returns the light levels (row-major) it drew.
+    std::vector<float> ComputeLight(int x, int y, int width, int height, const LightOptions &options) const;
     // Whether a world point lies in a committed nonzero solid cell of this
     // enabled map (the outline-only collision has no interior to query).
     bool IsSolidAt(double world_x, double world_y) const;

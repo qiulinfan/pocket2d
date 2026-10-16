@@ -117,6 +117,27 @@ Tilemap 的 atlas grid 以地图 JSON 为准，不读取普通 SpriteRenderer �
 | `GetTerrain(layer, x, y)` | 已提交格子的地形名；无地形为 `""`，地图外为 `nil`。 |
 | `SetTerrain(layer, x, y, name)` | 按邻居排队写入该地形的 tile（`""` 清空），并重选上下左右四个地形邻居。与 `SetCell` 一样在提交后生效，计算时包含尚未提交的编辑。未知名称报错。 |
 
+## 格子光照
+
+`map:ComputeLight(x, y, width, height, options)` 在原生代码中计算一个格子矩形
+（可超出地图）的光照，并把暗度写入一张动态图片，每格一个像素：
+
+```lua
+map:ComputeLight(x0, y0, w, h, {
+  image = "dynamic:light",       -- 必须以 dynamic: 开头
+  sky = 1.0,                      -- 天光强度（昼夜由游戏调节）
+  air_falloff = 0.08, solid_falloff = 0.24,
+  open_ground = {"trunk"},        -- 这些地形的 ground 格仍透天光
+  sources = {tx, ty, 1.2, ...},   -- 光源：格子坐标与强度的三元组
+  r = 0, g = 0, b = 0, max_alpha = 248,
+})
+Image.DrawEx("dynamic:light", x0, y0, 0, 100 * cell_size, 100 * cell_size, 0, 0, 255, 255, 255, 255, 40)
+```
+
+没有 solid 格、且没有 ground 格（或 ground 属于 `open_ground` 地形）的格子接收天光；
+地图上方视为天空。光照按格衰减（空气 `air_falloff`，实心 `solid_falloff`），
+用两轮正反扫描近似。像素 alpha 为 `(1 - 光照) * 255`，上限 `max_alpha`。
+
 ## 获取组件与属性
 
 ```lua

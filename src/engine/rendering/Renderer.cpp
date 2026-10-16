@@ -57,6 +57,22 @@ std::string ResolveSystemFontPath() {
     return std::filesystem::exists(system_font) ? system_font.string() : "";
 }
 
+struct DynamicImage {
+    int width = 0, height = 0;
+    std::vector<std::uint8_t> pixels;
+    std::uint64_t revision = 0;
+};
+struct DynamicImages {
+    std::mutex mutex;
+    std::unordered_map<std::string, DynamicImage> images;
+    std::uint64_t next_revision = 1;
+};
+DynamicImages &Dynamics() {
+    static DynamicImages images;
+    return images;
+}
+bool IsDynamicName(const std::string &name) { return name.starts_with(Renderer::kDynamicImagePrefix); }
+
 struct ImageSizeCache {
     std::mutex mutex;
     std::unordered_map<std::string, std::pair<int, int>> sizes;
@@ -345,6 +361,33 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
     }
 
     auto it = image_cache.find(image_name);
+    if (IsDynamicName(image_name)) {
+        auto &dynamics = Dynamics();
+        const std::lock_guard lock(dynamics.mutex);
+        const auto found = dynamics.images.find(image_name);
+        if (found == dynamics.images.end()) return nullptr;
+        const DynamicImage &image = found->second;
+        if (it != image_cache.end() && it->second.dynamic_revision == image.revision) return &it->second;
+        CachedImageTexture &cached = image_cache[image_name];
+        if (cached.texture != nullptr && (static_cast<int>(cached.width) != image.width ||
+                                          static_cast<int>(cached.height) != image.height)) {
+            SDL_DestroyTexture(cached.texture);
+            cached.texture = nullptr;
+        }
+        if (cached.texture == nullptr) {
+            cached.texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
+                                               image.width, image.height);
+            if (cached.texture == nullptr) { image_cache.erase(image_name); return nullptr; }
+            SDL_SetTextureBlendMode(cached.texture, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureScaleMode(cached.texture, SDL_SCALEMODE_NEAREST);
+        }
+        SDL_UpdateTexture(cached.texture, nullptr, image.pixels.data(), image.width * 4);
+        cached.width = static_cast<float>(image.width);
+        cached.height = static_cast<float>(image.height);
+        cached.dynamic = true;
+        cached.dynamic_revision = image.revision;
+        return &cached;
+    }
     if (it != image_cache.end()) {
         return &it->second;
     }
@@ -473,7 +516,8 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(const ImageDrawReque
                                                             SDL_Renderer *renderer) {
     if (request.image_id == 0) return LoadTextureResource(request.image_name, renderer);
     const std::size_t index = request.image_id - 1;
-    if (index < image_cache_by_id.size() && image_cache_by_id[index] != nullptr) return image_cache_by_id[index];
+    if (index < image_cache_by_id.size() && image_cache_by_id[index] != nullptr &&
+        !image_cache_by_id[index]->dynamic) return image_cache_by_id[index];
     std::string name;
     {
         auto &images = InternedImages();
@@ -489,7 +533,30 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(const ImageDrawReque
     return cached;
 }
 
+void Renderer::SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba) {
+    if (!IsDynamicName(name)) throw std::invalid_argument("dynamic image names must start with \"dynamic:\"");
+    if (width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
+        rgba.size() != static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4)
+        throw std::invalid_argument("dynamic image needs 1..4096 px sides and width*height RGBA bytes");
+    auto &dynamics = Dynamics();
+    const std::lock_guard lock(dynamics.mutex);
+    auto &image = dynamics.images[name];
+    image.width = width;
+    image.height = height;
+    image.pixels = std::move(rgba);
+    image.revision = dynamics.next_revision++;
+}
+
 bool Renderer::GetImageSize(const std::string &image_name, int &width, int &height) {
+    if (IsDynamicName(image_name)) {
+        auto &dynamics = Dynamics();
+        const std::lock_guard lock(dynamics.mutex);
+        const auto found = dynamics.images.find(image_name);
+        if (found == dynamics.images.end()) return false;
+        width = found->second.width;
+        height = found->second.height;
+        return true;
+    }
     auto &cache = ImageSizes();
     {
         const std::lock_guard lock(cache.mutex);

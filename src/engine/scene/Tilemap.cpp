@@ -266,6 +266,80 @@ bool Tilemap::SetCell(const std::string &layer, double x, double y, double id) {
     else pending_[command] = static_cast<int>(id);
     return true;
 }
+std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, const LightOptions &options) const {
+    if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
+    if (width <= 0 || height <= 0 || width > 1024 || height > 1024)
+        throw std::runtime_error("tilemap: light rectangle must be 1..1024 cells per side");
+    for (const float value : {options.sky, options.air_falloff, options.solid_falloff})
+        if (!std::isfinite(value) || value < 0.0f) throw std::runtime_error("tilemap: light levels must be finite and nonnegative");
+    if (options.sources.size() % 3 != 0) throw std::runtime_error("tilemap: light sources are x, y, level triples");
+    const auto terrain_of = TilemapAsset::TerrainIndex(data_);
+    std::vector<bool> open_ground(terrain_of.size(), false);
+    for (const auto &name : options.open_ground) {
+        bool known = false;
+        for (std::size_t terrain = 0; terrain < data_.autotile.terrains.size(); ++terrain)
+            if (data_.autotile.terrains[terrain].name == name) {
+                known = true;
+                for (std::size_t id = 0; id < terrain_of.size(); ++id)
+                    if (terrain_of[id] == static_cast<int>(terrain)) open_ground[id] = true;
+            }
+        if (!known) throw std::runtime_error("tilemap: unknown open_ground terrain '" + name + "'");
+    }
+    const auto &solid = data_.solid.cells;
+    const auto &ground = data_.ground.cells;
+    const auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < data_.width && y < data_.height; };
+    std::vector<float> light(static_cast<std::size_t>(width) * height, 0.0f);
+    std::vector<float> falloff(light.size(), options.air_falloff);
+    for (int ly = 0; ly < height; ++ly)
+        for (int lx = 0; lx < width; ++lx) {
+            const int x = x0 + lx, y = y0 + ly;
+            const auto i = static_cast<std::size_t>(ly) * width + lx;
+            if (y < 0) { light[i] = options.sky; continue; }
+            if (!inside(x, y)) continue;
+            const auto cell = static_cast<std::size_t>(y) * data_.width + x;
+            if (solid[cell] != 0) { falloff[i] = options.solid_falloff; continue; }
+            const int wall = ground[cell];
+            if (wall == 0 || (static_cast<std::size_t>(wall) < open_ground.size() && open_ground[wall])) light[i] = options.sky;
+        }
+    for (std::size_t s = 0; s + 2 < options.sources.size(); s += 3) {
+        const int lx = static_cast<int>(std::floor(options.sources[s])) - x0;
+        const int ly = static_cast<int>(std::floor(options.sources[s + 1])) - y0;
+        if (lx >= 0 && ly >= 0 && lx < width && ly < height) {
+            auto &value = light[static_cast<std::size_t>(ly) * width + lx];
+            value = std::max(value, options.sources[s + 2]);
+        }
+    }
+    // Two forward/backward sweeps approximate the distance-decayed flood.
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int ly = 0; ly < height; ++ly)
+            for (int lx = 0; lx < width; ++lx) {
+                const auto i = static_cast<std::size_t>(ly) * width + lx;
+                float v = light[i];
+                if (lx > 0) v = std::max(v, light[i - 1] - falloff[i]);
+                if (ly > 0) v = std::max(v, light[i - width] - falloff[i]);
+                light[i] = v;
+            }
+        for (int ly = height - 1; ly >= 0; --ly)
+            for (int lx = width - 1; lx >= 0; --lx) {
+                const auto i = static_cast<std::size_t>(ly) * width + lx;
+                float v = light[i];
+                if (lx + 1 < width) v = std::max(v, light[i + 1] - falloff[i]);
+                if (ly + 1 < height) v = std::max(v, light[i + width] - falloff[i]);
+                light[i] = v;
+            }
+    }
+    std::vector<std::uint8_t> pixels(light.size() * 4);
+    const int max_alpha = std::clamp(options.max_alpha, 0, 255);
+    for (std::size_t i = 0; i < light.size(); ++i) {
+        const float dark = std::clamp(1.0f - light[i], 0.0f, 1.0f);
+        pixels[i * 4 + 0] = static_cast<std::uint8_t>(std::clamp(options.r, 0, 255));
+        pixels[i * 4 + 1] = static_cast<std::uint8_t>(std::clamp(options.g, 0, 255));
+        pixels[i * 4 + 2] = static_cast<std::uint8_t>(std::clamp(options.b, 0, 255));
+        pixels[i * 4 + 3] = static_cast<std::uint8_t>(std::min(static_cast<int>(dark * 255.0f + 0.5f), max_alpha));
+    }
+    Renderer::SetDynamicImage(options.image, width, height, std::move(pixels));
+    return light;
+}
 bool Tilemap::IsSolidAt(double world_x, double world_y) const {
     if (!HasAsset() || !committed_enabled_ || !std::isfinite(world_x) || !std::isfinite(world_y)) return false;
     const double cx = std::floor((world_x - origin_x_) / data_.cell_size);

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -113,6 +114,10 @@ public:
     // Pixel size of an image resource, decoded without a renderer (headless
     // runs too) and cached until images reload. False when it cannot load.
     static bool GetImageSize(const std::string &image_name, int &width, int &height);
+    // Images generated at runtime (light maps, minimaps), drawn by name like
+    // files. Names must start with "dynamic:"; pixels are RGBA8, row-major.
+    static constexpr std::string_view kDynamicImagePrefix = "dynamic:";
+    static void SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba);
     static void QueueSceneImageDraw(const ImageDrawRequest &request);
     static void QueueSceneParticleBatch(const ParticleBatchRequest &request);
     static void QueueUIImageDraw(const ImageDrawRequest &request);
@@ -146,6 +151,8 @@ private:
         std::filesystem::path source;
         std::filesystem::file_time_type modified{};
         bool missing = false; // placeholder for an image that was not found
+        bool dynamic = false;  // pixels from SetDynamicImage
+        std::uint64_t dynamic_revision = 0;
     };
 
     static CachedImageTexture *LoadTextureResource(

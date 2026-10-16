@@ -11,6 +11,9 @@
 | `Image.DrawUIScaled(image_name, x, y, scale_x, scale_y, r, g, b, a, sorting_order)` | Draws a UI image scaled from its top-left corner; a negative scale mirrors it in place |
 | `Image.GetSize(image_name)` | The image's pixel size as a `Vector2` (works headless; raises if the image cannot load) |
 
+Images named `dynamic:...` are generated at runtime by native code (for example
+`Tilemap:ComputeLight` light maps) and drawn by name like image files.
+
 ### World-space drawing
 
 | Function | Description |

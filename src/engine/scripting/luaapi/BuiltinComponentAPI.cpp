@@ -93,6 +93,38 @@ luabridge::LuaRef GetTileCells(Tilemap *map, const std::string &layer, double x,
     return table;
 }
 
+// map:ComputeLight(x, y, width, height, {image=, sky=, air_falloff=, solid_falloff=,
+//                   open_ground={names}, sources={x, y, level, ...}, r=, g=, b=, max_alpha=})
+void ComputeTileLight(Tilemap *map, double x, double y, double width, double height, luabridge::LuaRef table) {
+    if (!table.isTable()) throw std::invalid_argument("Tilemap:ComputeLight options must be a table");
+    for (const double value : {x, y, width, height})
+        if (!std::isfinite(value) || std::floor(value) != value || std::abs(value) > 1e6)
+            throw std::invalid_argument("Tilemap:ComputeLight rectangle must be integers");
+    Tilemap::LightOptions options;
+    const auto number = [&](const char *key, auto &field) {
+        const luabridge::LuaRef value = table[key];
+        if (value.isNil()) return;
+        if (!value.isNumber()) throw std::invalid_argument(std::string("Tilemap:ComputeLight ") + key + " must be a number");
+        field = static_cast<std::decay_t<decltype(field)>>(value.cast<double>().value());
+    };
+    const luabridge::LuaRef image = table["image"];
+    if (!image.isString()) throw std::invalid_argument("Tilemap:ComputeLight needs an image name");
+    options.image = image.cast<std::string>().value();
+    number("sky", options.sky); number("air_falloff", options.air_falloff);
+    number("solid_falloff", options.solid_falloff); number("max_alpha", options.max_alpha);
+    number("r", options.r); number("g", options.g); number("b", options.b);
+    const luabridge::LuaRef open = table["open_ground"];
+    if (open.isTable())
+        for (int i = 1; i <= open.length(); ++i) options.open_ground.push_back(open[i].cast<std::string>().value());
+    const luabridge::LuaRef sources = table["sources"];
+    if (sources.isTable()) {
+        const int count = sources.length();
+        options.sources.reserve(static_cast<std::size_t>(count));
+        for (int i = 1; i <= count; ++i) options.sources.push_back(static_cast<float>(sources[i].cast<double>().value()));
+    }
+    map->ComputeLight(static_cast<int>(x), static_cast<int>(y), static_cast<int>(width), static_cast<int>(height), options);
+}
+
 luabridge::LuaRef GetTileTerrain(Tilemap *map, const std::string &layer, double x, double y) {
     const auto value = map->GetTerrain(layer, x, y);
     return value ? luabridge::LuaRef(LuaState(), *value) : luabridge::LuaRef(LuaState());
@@ -146,6 +178,7 @@ void InjectTilemapAPI() {
         .addFunction("GetCell", &GetTileCell)
         .addFunction("SetCell", &Tilemap::SetCell)
         .addFunction("GetCells", &GetTileCells)
+        .addFunction("ComputeLight", &ComputeTileLight)
         .addFunction("GetTerrain", &GetTileTerrain)
         .addFunction("SetTerrain", &Tilemap::SetTerrain)
         .addFunction("GetRevision", &Tilemap::GetRevision)

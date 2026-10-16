@@ -1,4 +1,5 @@
 #include "scene/Tilemap.h"
+#include "rendering/Renderer.h"
 #include "physics/RayCast.h"
 #include "physics/Rigidbody.h"
 #include "shared/resources/ResourcePath.h"
@@ -318,6 +319,25 @@ void Autotile(const Fixture &fixture) {
     Check(map.GetCells("solid", 1, 1, 2, 2) == std::vector<int>{0, 5, 3, 2}, "bulk read is row-major");
     Check(map.GetCells("solid", 0, 0, 0, 0).empty(), "an empty rectangle reads nothing");
     Reject([&] { map.GetCells("solid", 4, 4, 2, 1); }, "bulk read must stay inside the map");
+    // Lighting: column x=4 is open to the sky; solid cells decay faster.
+    Tilemap::LightOptions light;
+    light.image = "dynamic:light-test";
+    light.sky = 1.0f; light.air_falloff = 0.1f; light.solid_falloff = 0.5f;
+    const auto levels = map.ComputeLight(0, -1, 5, 6, light);
+    const auto at_light = [&](int x, int y) { return levels[static_cast<std::size_t>(y + 1) * 5 + x]; };
+    Check(at_light(4, -1) == 1.0f && at_light(4, 4) == 1.0f, "sky reaches open cells and above the map");
+    Check(std::abs(at_light(2, 1) - 0.5f) < 1e-5f, "a solid cell next to sky loses solid_falloff");
+    int width = 0, height = 0;
+    Check(Renderer::GetImageSize("dynamic:light-test", width, height) && width == 5 && height == 6,
+          "the light map is a dynamic image, one pixel per cell");
+    data.ground.cells.assign(25, 0);
+    light.sources = {0.5f, 4.5f, 0.9f};
+    light.sky = 0.0f;
+    const auto lit = map.ComputeLight(0, 0, 5, 5, light);
+    Check(std::abs(lit[4 * 5 + 0] - 0.9f) < 1e-5f && std::abs(lit[4 * 5 + 1] - 0.8f) < 1e-5f,
+          "a source lights its cell and decays through air");
+    light.image = "light-without-prefix";
+    Reject([&] { map.ComputeLight(0, 0, 2, 2, light); }, "dynamic images need the prefix");
     map.OnDestroy();
 }
 } // namespace

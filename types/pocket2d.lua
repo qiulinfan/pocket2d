@@ -274,6 +274,13 @@ function _Tilemap:SetCell(layer, x, y, id) end
 ---@param height integer
 ---@return (integer)[]
 function _Tilemap:GetCells(layer, x, y, width, height) end
+---Native tile lighting into a dynamic image (one pixel per cell); options: image, sky, air_falloff, solid_falloff, open_ground, sources, r, g, b, max_alpha.
+---@param x integer
+---@param y integer
+---@param width integer
+---@param height integer
+---@param options any
+function _Tilemap:ComputeLight(x, y, width, height, options) end
 ---Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map.
 ---@param layer TileLayer
 ---@param x integer

@@ -229,6 +229,21 @@ void TestRuntime(Engine &engine, const std::string &backend,
           Pixel(ui.get(), 45, 28) == std::array<Uint8, 4>{3, 7, 11, 255}, "scaled UI stops at its size");
     Check(Pixel(ui.get(), 40, 40) == std::array<Uint8, 4>{255, 255, 255, 255},
           "negative UI scale mirrors (checker corner turns white)");
+    // Dynamic images draw by name and re-upload when their pixels change.
+    Renderer::SetDynamicImage("dynamic:test", 2, 1, {0, 0, 255, 255, 255, 255, 0, 255});
+    ImageDrawRequest generated;
+    generated.image_name = "dynamic:test";
+    generated.x = 2.0f; generated.y = 50.0f; generated.scale_x = 4.0f; generated.scale_y = 4.0f;
+    Renderer::QueueUIImageDraw(generated);
+    engine.RunSingleFrame(false);
+    Surface first = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
+    Check(Pixel(first.get(), 3, 51) == std::array<Uint8, 4>{0, 0, 255, 255} &&
+          Pixel(first.get(), 7, 51) == std::array<Uint8, 4>{255, 255, 0, 255}, "dynamic image pixels draw");
+    Renderer::SetDynamicImage("dynamic:test", 2, 1, {0, 255, 0, 255, 0, 255, 0, 255});
+    Renderer::QueueUIImageDraw(generated);
+    engine.RunSingleFrame(false);
+    Surface second = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
+    Check(Pixel(second.get(), 3, 51) == std::array<Uint8, 4>{0, 255, 0, 255}, "updated dynamic pixels re-upload");
     TestFractionalTexturePath(renderer);
     TestParticleBatchPath(renderer);
 }

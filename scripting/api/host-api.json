@@ -1417,6 +1417,34 @@
           "description": "Committed tile IDs of a rectangle inside the map as one row-major array; raises when the rectangle leaves the map."
         },
         {
+          "name": "ComputeLight",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "integer"
+            },
+            {
+              "name": "y",
+              "type": "integer"
+            },
+            {
+              "name": "width",
+              "type": "integer"
+            },
+            {
+              "name": "height",
+              "type": "integer"
+            },
+            {
+              "name": "options",
+              "type": "unknown"
+            }
+          ],
+          "returns": "void",
+          "description": "Native tile lighting into a dynamic image (one pixel per cell); options: image, sky, air_falloff, solid_falloff, open_ground, sources, r, g, b, max_alpha."
+        },
+        {
           "name": "GetTerrain",
           "call": "instance",
           "parameters": [
