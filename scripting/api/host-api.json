@@ -1255,16 +1255,8 @@
     {
       "name": "TileLayer",
       "kind": "alias",
-      "type": {
-        "union": [
-          {
-            "literal": "ground"
-          },
-          {
-            "literal": "solid"
-          }
-        ]
-      }
+      "type": "string",
+      "description": "ground, solid, or an extra layer name declared by the map."
     },
     {
       "name": "Tilemap",
@@ -1415,6 +1407,15 @@
             "array": "integer"
           },
           "description": "Committed tile IDs of a rectangle inside the map as one row-major array; raises when the rectangle leaves the map."
+        },
+        {
+          "name": "GetLayerNames",
+          "call": "instance",
+          "parameters": [],
+          "returns": {
+            "array": "string"
+          },
+          "description": "Layer names in index order: ground, solid, then extra layers."
         },
         {
           "name": "ComputeLight",

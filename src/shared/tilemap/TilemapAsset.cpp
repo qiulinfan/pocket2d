@@ -5,6 +5,7 @@
 #include "rapidjson/error/en.h"
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/stringbuffer.h"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -153,8 +154,8 @@ int FrameTerrainCell(const Data &data, const std::vector<int> &terrain_of, int t
 void FrameAll(Data &data) {
     if (data.autotile.terrains.empty()) return;
     const auto terrain_of = TerrainIndex(data);
-    for (const char *name : {"ground", "solid"}) {
-        auto &layer = GetLayer(data, name);
+    for (int index = 0; index < LayerCount(data); ++index) {
+        auto &layer = LayerAtIndex(data, index);
         const auto original = layer.cells;
         // Outside the map counts as connected, so map edges show no border.
         const auto cell = [&](int x, int y) {
@@ -168,15 +169,36 @@ void FrameAll(Data &data) {
             }
     }
 }
+int LayerCount(const Data &data) { return 2 + static_cast<int>(data.extra_layers.size()); }
+const Layer &LayerAtIndex(const Data &data, int index) {
+    if (index == 0) return data.ground;
+    if (index == 1) return data.solid;
+    return data.extra_layers.at(static_cast<std::size_t>(index - 2)).layer;
+}
+Layer &LayerAtIndex(Data &data, int index) {
+    return const_cast<Layer &>(LayerAtIndex(static_cast<const Data &>(data), index));
+}
+std::string LayerName(const Data &data, int index) {
+    if (index == 0) return "ground";
+    if (index == 1) return "solid";
+    return data.extra_layers.at(static_cast<std::size_t>(index - 2)).name;
+}
+int FindLayerIndex(const Data &data, const std::string &layer) {
+    if (layer == "ground") return 0;
+    if (layer == "solid") return 1;
+    for (std::size_t i = 0; i < data.extra_layers.size(); ++i)
+        if (data.extra_layers[i].name == layer) return static_cast<int>(i) + 2;
+    return -1;
+}
 Layer &GetLayer(Data &data, const std::string &layer) {
-    if (layer == "ground") return data.ground;
-    if (layer == "solid") return data.solid;
-    throw std::runtime_error("tilemap: unknown layer '" + layer + "'");
+    const int index = FindLayerIndex(data, layer);
+    if (index < 0) throw std::runtime_error("tilemap: unknown layer '" + layer + "'");
+    return LayerAtIndex(data, index);
 }
 const Layer &GetLayer(const Data &data, const std::string &layer) {
-    if (layer == "ground") return data.ground;
-    if (layer == "solid") return data.solid;
-    throw std::runtime_error("tilemap: unknown layer '" + layer + "'");
+    const int index = FindLayerIndex(data, layer);
+    if (index < 0) throw std::runtime_error("tilemap: unknown layer '" + layer + "'");
+    return LayerAtIndex(data, index);
 }
 void ValidateData(const Data &data) {
     Require(data.version == 1, "unsupported version (expected 1)");
@@ -208,10 +230,20 @@ void ValidateData(const Data &data) {
             }
         }
     }
+    Require(static_cast<int>(data.extra_layers.size()) <= kMaxExtraLayers, "at most 6 extra layers");
+    std::set<std::string> layer_names{"ground", "solid"};
+    for (const auto &extra : data.extra_layers) {
+        Require(!extra.name.empty() && extra.name.size() <= 32 &&
+                    std::all_of(extra.name.begin(), extra.name.end(),
+                                [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; }),
+                "extra layer names must be 1..32 characters of [a-z0-9_]");
+        Require(layer_names.insert(extra.name).second, "duplicate layer name: " + extra.name);
+    }
     const auto count = static_cast<std::size_t>(data.width) * data.height;
-    for (const char *name : {"ground", "solid"}) {
-        const auto &layer = GetLayer(data, name);
-        Require(layer.cells.size() == count, std::string(name) + ".cells length does not match width*height");
+    for (int index = 0; index < LayerCount(data); ++index) {
+        const auto &layer = LayerAtIndex(data, index);
+        const std::string name = LayerName(data, index);
+        Require(layer.cells.size() == count, name + ".cells length does not match width*height");
         for (int tile : layer.cells)
             Require(tile >= 0 && tile <= tile_count, std::string(name) + ": tile ID outside atlas range");
     }
@@ -251,10 +283,19 @@ Data LoadFile(const std::filesystem::path &path, const std::filesystem::path &im
     data.atlas.rows = Integer(atlas, "rows", "atlas");
     data.atlas.tile_width_px = Integer(atlas, "tile_width_px", "atlas");
     data.atlas.tile_height_px = Integer(atlas, "tile_height_px", "atlas");
-    ExactKeys(json["layers"], {"ground", "solid"}, "layers");
+    const auto &layers = json["layers"];
+    Require(layers.IsObject() && layers.HasMember("ground") && layers.HasMember("solid"),
+            "layers must be an object with ground and solid");
     const auto count = static_cast<std::size_t>(data.width) * data.height;
-    data.ground = ReadLayer(json["layers"]["ground"], count, "ground");
-    data.solid = ReadLayer(json["layers"]["solid"], count, "solid");
+    data.ground = ReadLayer(layers["ground"], count, "ground");
+    data.solid = ReadLayer(layers["solid"], count, "solid");
+    std::set<std::string> seen;
+    for (auto member = layers.MemberBegin(); member != layers.MemberEnd(); ++member) {
+        const std::string name(member->name.GetString(), member->name.GetStringLength());
+        Require(seen.insert(name).second, "layers: duplicate field " + name);
+        if (name == "ground" || name == "solid") continue;
+        data.extra_layers.push_back({name, ReadLayer(member->value, count, name.c_str())});
+    }
     if (json.HasMember("autotile")) data.autotile = ReadAutotile(json["autotile"]);
     ValidateAtlasImage(data, images_root);
     if (data.autotile.frame_on_load) FrameAll(data);
@@ -288,9 +329,10 @@ void SaveFile(const std::filesystem::path &path, const Data &data) {
     writer.Key("tile_height_px"); writer.Int(data.atlas.tile_height_px);
     writer.EndObject();
     writer.Key("layers"); writer.StartObject();
-    for (const char *name : {"ground", "solid"}) {
-        const auto &layer = GetLayer(data, name);
-        writer.Key(name); writer.StartObject();
+    for (int index = 0; index < LayerCount(data); ++index) {
+        const auto &layer = LayerAtIndex(data, index);
+        const std::string name = LayerName(data, index);
+        writer.Key(name.c_str()); writer.StartObject();
         writer.Key("sorting_order"); writer.Int(layer.sorting_order);
         writer.Key("cells"); writer.StartArray();
         for (int tile : layer.cells) writer.Int(tile);

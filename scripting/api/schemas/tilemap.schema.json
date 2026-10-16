@@ -84,7 +84,14 @@
           "$ref": "#/$defs/layer"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": {
+        "$ref": "#/$defs/layer"
+      },
+      "description": "ground and solid (the only colliding layer) are required; up to six extra decorative layers named [a-z0-9_]{1,32} may follow, drawn at their own sorting orders.",
+      "maxProperties": 8,
+      "propertyNames": {
+        "pattern": "^[a-z0-9_]{1,32}$"
+      }
     },
     "autotile": {
       "description": "Optional autotiling. Each terrain lists, per four-neighbour mask (bit 1 up, 2 right, 4 down, 8 left; set when that neighbour connects), the tile IDs to choose from. An ID belongs to at most one terrain. frame_on_load re-chooses every terrain cell when the map loads.",

@@ -233,7 +233,8 @@ function _SpriteAnimation:Stop() end
 ---@field component_key string # mutable
 local _AnimationEvent = {}
 
----@alias TileLayer "ground"|"solid"
+---ground, solid, or an extra layer name declared by the map.
+---@alias TileLayer string
 
 ---Native opaque value; TypeScript nominal markers are compile-only.
 ---@class Tilemap: Component
@@ -274,6 +275,9 @@ function _Tilemap:SetCell(layer, x, y, id) end
 ---@param height integer
 ---@return (integer)[]
 function _Tilemap:GetCells(layer, x, y, width, height) end
+---Layer names in index order: ground, solid, then extra layers.
+---@return (string)[]
+function _Tilemap:GetLayerNames() end
 ---Native tile lighting into a dynamic image (one pixel per cell); options: image, sky, air_falloff, solid_falloff, open_ground, sources, r, g, b, max_alpha.
 ---@param x integer
 ---@param y integer

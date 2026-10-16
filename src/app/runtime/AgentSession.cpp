@@ -98,7 +98,7 @@ std::vector<CellQueryResult> ReadTileQueries(const rapidjson::Value &queries) {
         auto *map = ComponentManager::GetTilemap(uid, query["component_key"].GetString());
         if (!map) throw std::runtime_error("tilemap component not found");
         const std::string layer = query["layer"].GetString();
-        if (layer != "ground" && layer != "solid") throw std::runtime_error("unknown tilemap layer");
+        if (!map->HasLayer(layer)) throw std::runtime_error("unknown tilemap layer");
         total_cells += query["cells"].Size();
         if (total_cells > 256) throw std::runtime_error("tile queries are limited to 256 cells");
         CellQueryResult entry{uid, query["component_key"].GetString(), layer, map->GetRevision(), {}};

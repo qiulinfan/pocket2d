@@ -336,6 +336,29 @@ void Autotile(const Fixture &fixture) {
     const auto lit = map.ComputeLight(0, 0, 5, 5, light);
     Check(std::abs(lit[4 * 5 + 0] - 0.9f) < 1e-5f && std::abs(lit[4 * 5 + 1] - 0.8f) < 1e-5f,
           "a source lights its cell and decays through air");
+    // Extra layers: named, drawn at their own order, queryable, never solid.
+    auto layered = fixture.Data(4, 4);
+    layered.extra_layers.push_back({"walls", {-50, std::vector<int>(16, 0)}});
+    layered.extra_layers[0].layer.cells[5] = 3;
+    TilemapAsset::SaveResource("layered.tilemap.json", layered);
+    const auto reloaded = TilemapAsset::LoadResource("layered.tilemap.json");
+    Check(reloaded.extra_layers.size() == 1 && reloaded.extra_layers[0].name == "walls" &&
+          reloaded.extra_layers[0].layer.cells[5] == 3, "extra layers round-trip");
+    Tilemap walls;
+    walls.Initialize(reloaded, 0, 0);
+    Check(walls.GetLayerNames() == std::vector<std::string>{"ground", "solid", "walls"} &&
+          *walls.GetCell("walls", 1, 1) == 3, "extra layer cells read by name");
+    Check(walls.SetCell("walls", 2, 2, 4), "extra layer edits queue");
+    walls.CommitPending();
+    Check(*walls.GetCell("walls", 2, 2) == 4 && !walls.IsSolidAt(2.5, 2.5), "extra layers commit and never collide");
+    bool drawn = false;
+    for (const auto &draw : walls.CollectVisible(0, 0, 4, 4)) drawn |= draw.sorting_order == -50;
+    Check(drawn, "extra layers draw at their own sorting order");
+    auto clash = layered; clash.extra_layers.push_back({"walls", {0, std::vector<int>(16, 0)}});
+    Reject([&] { TilemapAsset::ValidateData(clash); }, "duplicate layer names reject");
+    auto bad = layered; bad.extra_layers[0].name = "Walls!";
+    Reject([&] { TilemapAsset::ValidateData(bad); }, "layer names are [a-z0-9_]");
+    walls.OnDestroy();
     light.image = "light-without-prefix";
     Reject([&] { map.ComputeLight(0, 0, 2, 2, light); }, "dynamic images need the prefix");
     map.OnDestroy();

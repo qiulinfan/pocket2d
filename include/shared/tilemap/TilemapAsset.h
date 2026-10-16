@@ -32,6 +32,13 @@ struct Autotile {
     bool frame_on_load = false;
     std::vector<Terrain> terrains;
 };
+// Extra decorative layers beyond the built-in ground and solid (which alone
+// collides): up to six, drawn at their own sorting orders.
+struct NamedLayer {
+    std::string name;
+    Layer layer;
+};
+constexpr int kMaxExtraLayers = 6;
 struct Data {
     int version = 1;
     int width = 0;
@@ -40,6 +47,7 @@ struct Data {
     Atlas atlas;
     Layer ground{-100, {}};
     Layer solid{0, {}};
+    std::vector<NamedLayer> extra_layers;
     Autotile autotile;
     // Derived at load time; not written into the portable JSON resource.
     std::filesystem::path resolved_image_path;
@@ -47,6 +55,12 @@ struct Data {
 
 Layer &GetLayer(Data &data, const std::string &layer);
 const Layer &GetLayer(const Data &data, const std::string &layer);
+// Layers by index: 0 ground, 1 solid, then the extra layers in file order.
+int LayerCount(const Data &data);
+Layer &LayerAtIndex(Data &data, int index);
+const Layer &LayerAtIndex(const Data &data, int index);
+std::string LayerName(const Data &data, int index);
+int FindLayerIndex(const Data &data, const std::string &layer); // -1 when absent
 void ValidateData(const Data &data);
 // tile ID -> terrain index, or -1; sized columns*rows+1.
 std::vector<int> TerrainIndex(const Data &data);

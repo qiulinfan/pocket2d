@@ -35,7 +35,7 @@ component。每个运行实例有自己的 cell 数据；引用同一资源的�
 
 一个 actor 最多有一个 Tilemap，必须没有 parent，world rotation 必须为 `0`，
 不能同时有 Rigidbody。其他 actor 上的 Rigidbody 可以与地图碰撞。当前支持平移，
-不支持旋转地图、流式加载、任意 polygon tile 或额外地图层；自动拼接见下文“地形自动拼接”。
+不支持旋转地图、流式加载或任意 polygon tile；额外装饰层见“资源格式”，自动拼接见下文“地形自动拼接”。
 
 非空资源在场景组装时解析并校验，frame 0 就能读取初始格子。地图原点、世界范围
 和渲染缩放还必须能被引擎的浮点类型表达。无效资源不能通过静默截断或占位图片
@@ -72,7 +72,9 @@ component。每个运行实例有自己的 cell 数据；引用同一资源的�
 
 - `version` 仅支持整数 `1`；`width`、`height` 是 1..512 的整数；
   `cell_size` 必须有限且大于零。
-- 仅支持 `ground`、`solid` 两层，每层恰好有 `width * height` 个整数。
+- 必须有 `ground`、`solid` 两层（只有 `solid` 产生碰撞），另可有至多 6 个额外装饰层，
+  名称为 `[a-z0-9_]{1,32}`，各有自己的 `sorting_order`；每层恰好有 `width * height` 个整数。
+  Lua 与 agent 查询按层名访问任何存在的层，`map:GetLayerNames()` 按 ground、solid、额外层顺序列出。
   JSON schema 拒绝缺字段、未知字段、重复字段、错误类型和非法编号。
 - 数组为 row-major，cell `(x,y)` 的零基索引是 `y * width + x`。
   Lua 中如自行保存一个普通数组，同一位置的 Lua 数组索引要再加 `1`。

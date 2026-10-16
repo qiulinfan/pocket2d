@@ -125,6 +125,13 @@ void ComputeTileLight(Tilemap *map, double x, double y, double width, double hei
     map->ComputeLight(static_cast<int>(x), static_cast<int>(y), static_cast<int>(width), static_cast<int>(height), options);
 }
 
+luabridge::LuaRef GetTileLayerNames(Tilemap *map) {
+    luabridge::LuaRef names = luabridge::newTable(LuaState());
+    int index = 1;
+    for (const auto &name : map->GetLayerNames()) names[index++] = name;
+    return names;
+}
+
 luabridge::LuaRef GetTileTerrain(Tilemap *map, const std::string &layer, double x, double y) {
     const auto value = map->GetTerrain(layer, x, y);
     return value ? luabridge::LuaRef(LuaState(), *value) : luabridge::LuaRef(LuaState());
@@ -178,6 +185,7 @@ void InjectTilemapAPI() {
         .addFunction("GetCell", &GetTileCell)
         .addFunction("SetCell", &Tilemap::SetCell)
         .addFunction("GetCells", &GetTileCells)
+        .addFunction("GetLayerNames", &GetTileLayerNames)
         .addFunction("ComputeLight", &ComputeTileLight)
         .addFunction("GetTerrain", &GetTileTerrain)
         .addFunction("SetTerrain", &Tilemap::SetTerrain)

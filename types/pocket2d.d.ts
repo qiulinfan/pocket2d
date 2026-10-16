@@ -180,7 +180,8 @@ interface AnimationEvent {
     component_key: string;
 }
 
-type TileLayer = "ground" | "solid";
+/** ground, solid, or an extra layer name declared by the map. */
+type TileLayer = string;
 
 interface Tilemap extends Component {
     readonly __pocketNativeTilemap: unique symbol;
@@ -201,6 +202,8 @@ interface Tilemap extends Component {
     SetCell(this: Tilemap, layer: TileLayer, x: number, y: number, id: number): boolean;
     /** Committed tile IDs of a rectangle inside the map as one row-major array; raises when the rectangle leaves the map. */
     GetCells(this: Tilemap, layer: TileLayer, x: number, y: number, width: number, height: number): (number)[];
+    /** Layer names in index order: ground, solid, then extra layers. */
+    GetLayerNames(this: Tilemap): (string)[];
     /** Native tile lighting into a dynamic image (one pixel per cell); options: image, sky, air_falloff, solid_falloff, open_ground, sources, r, g, b, max_alpha. */
     ComputeLight(this: Tilemap, x: number, y: number, width: number, height: number, options: unknown): void;
     /** Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map. */

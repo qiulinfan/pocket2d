@@ -14,10 +14,10 @@
 
 namespace {
 const TilemapAsset::Layer &LayerAt(const TilemapAsset::Data &data, int index) {
-    return index == 0 ? data.ground : data.solid;
+    return TilemapAsset::LayerAtIndex(data, index);
 }
 TilemapAsset::Layer &LayerAt(TilemapAsset::Data &data, int index) {
-    return index == 0 ? data.ground : data.solid;
+    return TilemapAsset::LayerAtIndex(data, index);
 }
 // Closed outlines of the solid cells in [x0,x1)x[y0,y1), cells outside counting
 // as empty. Each boundary edge has the solid cell on its left, so Box2D's
@@ -104,10 +104,19 @@ bool Tilemap::HasLiveBinding() const {
     if (!actor_handle.IsValid()) return false;
     return ComponentManager::FindBuiltinComponent(actor_handle.uid, key) == this;
 }
-int Tilemap::LayerIndex(const std::string &layer) {
-    if (layer == "ground") return 0;
-    if (layer == "solid") return 1;
-    throw std::runtime_error("tilemap: unknown layer '" + layer + "'");
+int Tilemap::LayerIndex(const std::string &layer) const {
+    const int index = TilemapAsset::FindLayerIndex(replacement_ ? *replacement_ : data_, layer);
+    if (index < 0) throw std::runtime_error("tilemap: unknown layer '" + layer + "'");
+    return index;
+}
+std::vector<std::string> Tilemap::GetLayerNames() const {
+    std::vector<std::string> names;
+    for (int index = 0; index < TilemapAsset::LayerCount(data_); ++index)
+        names.push_back(TilemapAsset::LayerName(data_, index));
+    return names;
+}
+bool Tilemap::HasLayer(const std::string &layer) const {
+    return TilemapAsset::FindLayerIndex(replacement_ ? *replacement_ : data_, layer) >= 0;
 }
 void Tilemap::RequireInteger(double value, const char *label) {
     if (!std::isfinite(value) || std::floor(value) != value)
@@ -154,10 +163,13 @@ void Tilemap::Initialize(const TilemapAsset::Data &data, float x, float y) {
     const int ny = (data.height + kChunkSize - 1) / kChunkSize;
     auto copy = data;
     std::vector<Chunk> chunks(static_cast<std::size_t>(nx) * ny);
+    const int layer_count = TilemapAsset::LayerCount(copy);
     for (int cy = 0; cy < ny; ++cy)
-        for (int cx = 0; cx < nx; ++cx)
-            for (int layer = 0; layer < 2; ++layer)
+        for (int cx = 0; cx < nx; ++cx) {
+            chunks[cy * nx + cx].tiles.resize(static_cast<std::size_t>(layer_count));
+            for (int layer = 0; layer < layer_count; ++layer)
                 chunks[cy * nx + cx].tiles[layer] = BuildTiles(copy, layer, cx, cy);
+        }
     ClearBodies();
     data_ = std::move(copy);
     chunks_ = std::move(chunks);
@@ -286,7 +298,6 @@ std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, 
         if (!known) throw std::runtime_error("tilemap: unknown open_ground terrain '" + name + "'");
     }
     const auto &solid = data_.solid.cells;
-    const auto &ground = data_.ground.cells;
     const auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < data_.width && y < data_.height; };
     std::vector<float> light(static_cast<std::size_t>(width) * height, 0.0f);
     std::vector<float> falloff(light.size(), options.air_falloff);
@@ -298,8 +309,14 @@ std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, 
             if (!inside(x, y)) continue;
             const auto cell = static_cast<std::size_t>(y) * data_.width + x;
             if (solid[cell] != 0) { falloff[i] = options.solid_falloff; continue; }
-            const int wall = ground[cell];
-            if (wall == 0 || (static_cast<std::size_t>(wall) < open_ground.size() && open_ground[wall])) light[i] = options.sky;
+            // Sky enters when every non-solid layer is empty or open here.
+            bool open = true;
+            for (int layer = 0; layer < TilemapAsset::LayerCount(data_) && open; ++layer) {
+                if (layer == 1) continue;
+                const int tile = TilemapAsset::LayerAtIndex(data_, layer).cells[cell];
+                open = tile == 0 || (static_cast<std::size_t>(tile) < open_ground.size() && open_ground[tile]);
+            }
+            if (open) light[i] = options.sky;
         }
     for (std::size_t s = 0; s + 2 < options.sources.size(); s += 3) {
         const int lx = static_cast<int>(std::floor(options.sources[s])) - x0;
@@ -450,11 +467,13 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
         std::size_t index;
         unsigned mask;
         bool collision;
-        std::array<std::vector<TileRecord>, 2> tiles;
+        std::vector<std::vector<TileRecord>> tiles;
         std::vector<std::vector<b2Vec2>> outlines;
         b2BodyId body = b2_nullBodyId;
     };
-    std::vector<unsigned> dirty(static_cast<std::size_t>(nx) * ny, replacement_ ? 3u : 0u);
+    const int layer_count = TilemapAsset::LayerCount(candidate);
+    const unsigned all_layers = (1u << layer_count) - 1u;
+    std::vector<unsigned> dirty(static_cast<std::size_t>(nx) * ny, replacement_ ? all_layers : 0u);
     for (const auto &[command, value] : pending_) {
         (void)value;
         const auto cell = command % cell_count;
@@ -473,12 +492,12 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
     for (std::size_t index = 0; index < dirty.size(); ++index) {
         const bool collision = replacement_ || (dirty[index] & 2u) != 0 || chunks_[index].collision_dirty;
         if (dirty[index] == 0 && !collision) continue;
-        Prepared work{index, dirty[index], collision, {}, {}, b2_nullBodyId};
+        Prepared work{index, dirty[index], collision, std::vector<std::vector<TileRecord>>(static_cast<std::size_t>(layer_count)), {}, b2_nullBodyId};
         const int start_x = static_cast<int>(index % nx) * kChunkSize;
         const int start_y = static_cast<int>(index / nx) * kChunkSize;
         const int end_x = std::min(start_x + kChunkSize, candidate.width);
         const int end_y = std::min(start_y + kChunkSize, candidate.height);
-        for (int layer = 0; layer < 2; ++layer) {
+        for (int layer = 0; layer < layer_count; ++layer) {
             if ((work.mask & (1u << layer)) == 0) continue;
             for (int cy = start_y; cy < end_y; ++cy)
                 for (int cx = start_x; cx < end_x; ++cx) {
@@ -526,9 +545,10 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
     }
     bool changed = !pending_.empty();
     if (replacement_) {
-        changed = data_.width != candidate.width || data_.height != candidate.height;
+        changed = data_.width != candidate.width || data_.height != candidate.height ||
+                  TilemapAsset::LayerCount(data_) != layer_count;
         if (!changed)
-            for (int layer = 0; layer < 2 && !changed; ++layer)
+            for (int layer = 0; layer < layer_count && !changed; ++layer)
                 for (int cy = 0; cy < candidate.height && !changed; ++cy)
                     for (int cx = 0; cx < candidate.width; ++cx)
                         if (LayerAt(data_, layer).cells[static_cast<std::size_t>(cy) * data_.width + cx] != tile_at(layer, cx, cy)) {
@@ -553,7 +573,8 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
     if (changed) ++revision_;
     for (auto &work : prepared) {
         auto &chunk = chunks_[work.index];
-        for (int layer = 0; layer < 2; ++layer)
+        chunk.tiles.resize(static_cast<std::size_t>(layer_count));
+        for (int layer = 0; layer < layer_count; ++layer)
             if ((work.mask & (1u << layer)) != 0) {
                 chunk.tiles[layer] = std::move(work.tiles[layer]);
                 ++diagnostics_.render_chunk_rebuilds;
@@ -591,7 +612,7 @@ std::vector<ImageDrawRequest> Tilemap::CollectVisible(double min_x, double min_y
     const int y1 = static_cast<int>(std::clamp(std::ceil((max_y - origin_y_) / data_.cell_size), 0.0, static_cast<double>(data_.height)));
     if (x0 >= x1 || y0 >= y1) return draws;
     const std::string image = data_.resolved_image_path.empty() ? data_.atlas.image : data_.resolved_image_path.string();
-    for (int layer = 0; layer < 2; ++layer)
+    for (int layer = 0; layer < TilemapAsset::LayerCount(data_); ++layer)
         for (int cy = y0 / kChunkSize; cy <= (y1 - 1) / kChunkSize; ++cy)
             for (int cx = x0 / kChunkSize; cx <= (x1 - 1) / kChunkSize; ++cx)
                 for (const auto &tile : chunks_[cy * chunks_x_ + cx].tiles[layer]) {

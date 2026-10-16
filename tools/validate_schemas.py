@@ -31,6 +31,7 @@ ANNOTATIONS = {"$schema", "$id", "$defs", "$comment", "title", "description", "d
 SUPPORTED = ANNOTATIONS | {
     "$ref", "type", "enum", "const",
     "properties", "required", "additionalProperties", "patternProperties", "propertyNames",
+    "minProperties", "maxProperties",
     "items", "prefixItems", "minItems", "maxItems",
     "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
     "minLength", "maxLength", "pattern",
@@ -199,6 +200,10 @@ def _check(instance, schema, root, pointer, errors):
                 _check(item, schema["items"], root, _child(pointer, index), errors)
 
     if isinstance(instance, dict):
+        if "minProperties" in schema and len(instance) < schema["minProperties"]:
+            errors.append("%s: has %d members, fewer than %d" % (where, len(instance), schema["minProperties"]))
+        if "maxProperties" in schema and len(instance) > schema["maxProperties"]:
+            errors.append("%s: has %d members, more than %d" % (where, len(instance), schema["maxProperties"]))
         for name in schema.get("required", []):
             if name not in instance:
                 errors.append("%s: missing required member %s" % (where, json.dumps(name)))

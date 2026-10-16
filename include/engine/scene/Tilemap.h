@@ -74,6 +74,9 @@ public:
     // Whether a world point lies in a committed nonzero solid cell of this
     // enabled map (the outline-only collision has no interior to query).
     bool IsSolidAt(double world_x, double world_y) const;
+    // Layer names in index order: ground, solid, then the extra layers.
+    std::vector<std::string> GetLayerNames() const;
+    bool HasLayer(const std::string &layer) const;
     std::vector<int> GetCells(const std::string &layer, double x, double y, double width, double height) const;
     // Autotiling: the terrain name at a cell ("" when none; nullopt outside),
     // and placing/clearing ("") a terrain, which chooses the cell's tile from
@@ -98,7 +101,7 @@ public:
 private:
     struct TileRecord { int x, y, id; };
     struct Chunk {
-        std::array<std::vector<TileRecord>, 2> tiles;
+        std::vector<std::vector<TileRecord>> tiles;  // one list per layer
         b2BodyId body = b2_nullBodyId;
         // Closed collision outlines (Box2D chains) on body.
         std::size_t outlines = 0;
@@ -124,7 +127,7 @@ private:
     int EffectiveCell(int layer, int x, int y) const;
     void ReframeTerrainCell(int layer, int x, int y, const std::vector<int> &terrain_of);
     void ValidatePlacement(float x, float y, float rotation) const;
-    static int LayerIndex(const std::string &layer);
+    int LayerIndex(const std::string &layer) const;
     static void RequireInteger(double value, const char *label);
     static std::vector<TileRecord> BuildTiles(const TilemapAsset::Data &data, int layer,
                                              int chunk_x, int chunk_y);
