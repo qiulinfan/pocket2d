@@ -135,6 +135,10 @@ void SetPublishTracing(bool enabled);
 // Returns and clears the records since the last call; dropped receives the
 // number discarded for exceeding the limit.
 std::vector<PublishedEvent> TakePublishedEvents(std::uint64_t *dropped = nullptr);
+// Records an engine-originated event (for example "audio.play") in the same
+// trace when tracing is on; it is not dispatched to Lua subscribers.
+void TraceEngineEvent(const std::string &event_type, std::string payload_json);
+bool IsPublishTracing();
 
 // publish immediately to current active subscribers
 // 立即发布给当前已经生效的订阅者

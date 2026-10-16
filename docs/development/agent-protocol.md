@@ -94,7 +94,11 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   object read without metamethods: at most 4 levels, 32 entries per table and
   256 bytes per string; functions and unknown userdata become `"<function>"`
   or `"<userdata>"`, deeper tables `"<table>"`, `Vector2` `{x,y}` and actors
-  `{actor_uid}`. Events are not reported unless requested.
+  `{actor_uid}`. Events are not reported unless requested. The engine adds
+  sound requests to the same stream (there is no audio device headless):
+  `audio.play` `{channel, clip, loop, found}`, `music.play` `{clip, loop,
+  found}` and `music.halt` `{}`; `found` says whether the clip resolves, so
+  a missing asset is visible. They are not dispatched to Lua subscribers.
 - `step` and `run_until` accept `actions`, the complete set of agent-held
   semantic actions declared in the project's `actions.json`: `true`/`false`
   for buttons, a number for axes, `[x, y]` for 2D axes (components clamped to

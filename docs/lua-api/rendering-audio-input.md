@@ -41,6 +41,8 @@ Draws screen-space text.
 | `Audio.IsPlaybackEnabled()` | Returns whether runtime audio routing is currently enabled |
 
 Use `Audio.*` for SFX, layered ambience, and other channel-based sounds.
+Agents see every `Audio.Play`, `Music.Play` and `Music.Halt` as `audio.play`,
+`music.play` and `music.halt` events, with or without an audio device.
 
 ## `Music`
 

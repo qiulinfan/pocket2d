@@ -305,6 +305,18 @@ void SetPublishTracing(bool enabled) {
     if (!enabled) { Bus().published.clear(); Bus().published_dropped = 0; }
 }
 
+bool IsPublishTracing() { return Bus().trace_publishes; }
+
+void TraceEngineEvent(const std::string &event_type, std::string payload_json) {
+    if (!Bus().trace_publishes) return;
+    auto &published = Bus().published;
+    if (published.size() == kPublishTraceLimit) {
+        published.pop_front();
+        ++Bus().published_dropped;
+    }
+    published.push_back({World::Current().frame_number, event_type, std::move(payload_json)});
+}
+
 std::vector<PublishedEvent> TakePublishedEvents(std::uint64_t *dropped) {
     if (dropped) *dropped = Bus().published_dropped;
     Bus().published_dropped = 0;
