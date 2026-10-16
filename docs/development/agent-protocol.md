@@ -86,6 +86,21 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   matched `condition` index or `null`, and for event matches the `event` type
   and frame. Invalid conditions return `invalid_argument` before any input or
   tick is applied. Errors during the run behave as in `step`.
+- `step` and `run_until` accept `events`: `true` for every type or an array of
+  1..64 type names. The response then carries `events`, oldest first and at
+  most 256, each with `frame` (the frame being simulated when it was
+  published, as in diagnostics; the observation after that tick reports one
+  more), `type` and `payload`, plus `events_dropped`. Payloads are the event
+  object read without metamethods: at most 4 levels, 32 entries per table and
+  256 bytes per string; functions and unknown userdata become `"<function>"`
+  or `"<userdata>"`, deeper tables `"<table>"`, `Vector2` `{x,y}` and actors
+  `{actor_uid}`. Events are not reported unless requested.
+- `observe`, `step` and `run_until` accept `select` to narrow `actors`:
+  `names`, `uids` (decimal strings) and component `types` each match any listed
+  value, `region` keeps actors whose world position lies in the inclusive
+  `min_x/min_y/max_x/max_y` box, and the filters combine. `limit` keeps the
+  lowest UIDs and `components:false` omits component properties. Selected
+  responses add `actors_matched`, the count before `limit`.
 - `reload_scripts` takes 1..64 distinct registered Lua component `types` and
   stages their known source files as one batch. Success returns a same-frame
   observation plus `reload.types`, `instances_updated` and empty diagnostics.

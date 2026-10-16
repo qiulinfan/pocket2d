@@ -124,6 +124,11 @@ void Shutdown();
 struct PublishedEvent {
     int frame = 0;
     std::string type;
+    // The event object as JSON, read without metamethods: at most 4 levels,
+    // 32 entries per table and 256 bytes per string. Functions and unknown
+    // userdata appear as "<function>"/"<userdata>"; Vector2 as {x,y}; actors
+    // as {actor_uid}.
+    std::string payload_json;
 };
 inline constexpr std::size_t kPublishTraceLimit = 4096;
 void SetPublishTracing(bool enabled);

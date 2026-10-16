@@ -23,6 +23,7 @@ Access: `read`.
 | Parameter | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `tilemaps` | object[] (max items 16) | no | At most 16 queries and 256 cells in total. |
+| `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 
 ## `step`
 
@@ -35,6 +36,8 @@ Access: `simulate`.
 | `frames` | integer (≥1, ≤3600) | no | Default 1. |
 | `keys` | string[] (max items 512) | no | Complete held key set as SDL key names (for example "right", "space", "e"). Omit to keep the previous held keys; [] releases all keys. Edges occur once at the start of the request. |
 | `mouse` | object | no | Screen-space mouse state. Omitted x/y/buttons are retained; buttons is the complete held set (1 left, 2 middle, 3 right); wheel applies on the first tick only. |
+| `events` | boolean \| array (max items 64) | no | Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped. |
+| `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 
 ## `run_until`
 
@@ -48,6 +51,8 @@ Access: `simulate`.
 | `until` | value[] (min items 1, max items 16) | yes |  |
 | `keys` | string[] (max items 512) | no | Complete held key set as SDL key names (for example "right", "space", "e"). Omit to keep the previous held keys; [] releases all keys. Edges occur once at the start of the request. |
 | `mouse` | object | no | Screen-space mouse state. Omitted x/y/buttons are retained; buttons is the complete held set (1 left, 2 middle, 3 right); wheel applies on the first tick only. |
+| `events` | boolean \| array (max items 64) | no | Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped. |
+| `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 
 ## `reload_scripts`
 

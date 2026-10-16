@@ -5,17 +5,33 @@
     "keys": {
       "type": "array",
       "description": "Complete held key set as SDL key names (for example \"right\", \"space\", \"e\"). Omit to keep the previous held keys; [] releases all keys. Edges occur once at the start of the request.",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "maxItems": 512
     },
     "mouse": {
       "type": "object",
       "description": "Screen-space mouse state. Omitted x/y/buttons are retained; buttons is the complete held set (1 left, 2 middle, 3 right); wheel applies on the first tick only.",
       "properties": {
-        "x": {"type": "number"},
-        "y": {"type": "number"},
-        "buttons": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 3}, "maxItems": 3},
-        "wheel": {"type": "number"}
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "buttons": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "maxItems": 3
+        },
+        "wheel": {
+          "type": "number"
+        }
       }
     },
     "actor_ref": {
@@ -28,44 +44,187 @@
         {
           "type": "object",
           "description": "Stops when gameplay publishes an EventBus event of this type.",
-          "properties": {"event": {"type": "string", "minLength": 1}},
-          "required": ["event"]
+          "properties": {
+            "event": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "event"
+          ]
         },
         {
           "type": "object",
           "description": "Stops when an actor property compares true. Without component, property is x, y or rotation of the actor's world position. A missing actor, component or property compares false.",
           "properties": {
-            "actor": {"$ref": "#/definitions/actor_ref"},
-            "component": {"type": "string", "minLength": 1},
-            "property": {"type": "string", "minLength": 1},
-            "op": {"enum": ["==", "!=", "<", "<=", ">", ">="]},
-            "value": {"type": ["number", "string", "boolean"]}
+            "actor": {
+              "$ref": "#/definitions/actor_ref"
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1
+            },
+            "property": {
+              "type": "string",
+              "minLength": 1
+            },
+            "op": {
+              "enum": [
+                "==",
+                "!=",
+                "<",
+                "<=",
+                ">",
+                ">="
+              ]
+            },
+            "value": {
+              "type": [
+                "number",
+                "string",
+                "boolean"
+              ]
+            }
           },
-          "required": ["actor", "property", "op", "value"]
+          "required": [
+            "actor",
+            "property",
+            "op",
+            "value"
+          ]
         },
         {
           "type": "object",
           "description": "Stops when the named actor exists (true) or no longer exists (false).",
           "properties": {
-            "actor_exists": {"$ref": "#/definitions/actor_ref"},
-            "value": {"type": "boolean", "default": true}
+            "actor_exists": {
+              "$ref": "#/definitions/actor_ref"
+            },
+            "value": {
+              "type": "boolean",
+              "default": true
+            }
           },
-          "required": ["actor_exists"]
+          "required": [
+            "actor_exists"
+          ]
         }
       ]
     },
     "tile_query": {
       "type": "object",
       "properties": {
-        "actor_uid": {"type": ["string", "integer"], "description": "Decimal UID string (preferred) or unsigned integer."},
-        "component_key": {"type": "string"},
-        "layer": {"enum": ["ground", "solid"]},
+        "actor_uid": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Decimal UID string (preferred) or unsigned integer."
+        },
+        "component_key": {
+          "type": "string"
+        },
+        "layer": {
+          "enum": [
+            "ground",
+            "solid"
+          ]
+        },
         "cells": {
           "type": "array",
-          "items": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}], "minItems": 2, "maxItems": 2}
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          }
         }
       },
-      "required": ["actor_uid", "component_key", "layer", "cells"]
+      "required": [
+        "actor_uid",
+        "component_key",
+        "layer",
+        "cells"
+      ]
+    },
+    "events": {
+      "type": [
+        "boolean",
+        "array"
+      ],
+      "description": "Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxItems": 64
+    },
+    "selection": {
+      "type": "object",
+      "description": "Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties.",
+      "properties": {
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256
+        },
+        "uids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        },
+        "region": {
+          "type": "object",
+          "properties": {
+            "min_x": {
+              "type": "number"
+            },
+            "min_y": {
+              "type": "number"
+            },
+            "max_x": {
+              "type": "number"
+            },
+            "max_y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "min_x",
+            "min_y",
+            "max_x",
+            "max_y"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "components": {
+          "type": "boolean",
+          "default": true
+        }
+      }
     }
   },
   "commands": [
@@ -73,7 +232,10 @@
       "name": "describe",
       "access": "read",
       "summary": "Report the protocol version, command schemas, execution limits, registered component types and the curated Lua host API.",
-      "params": {"type": "object", "properties": {}}
+      "params": {
+        "type": "object",
+        "properties": {}
+      }
     },
     {
       "name": "observe",
@@ -82,7 +244,17 @@
       "params": {
         "type": "object",
         "properties": {
-          "tilemaps": {"type": "array", "items": {"$ref": "#/definitions/tile_query"}, "maxItems": 16, "description": "At most 16 queries and 256 cells in total."}
+          "tilemaps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/tile_query"
+            },
+            "maxItems": 16,
+            "description": "At most 16 queries and 256 cells in total."
+          },
+          "select": {
+            "$ref": "#/definitions/selection"
+          }
         }
       }
     },
@@ -93,9 +265,24 @@
       "params": {
         "type": "object",
         "properties": {
-          "frames": {"type": "integer", "minimum": 1, "maximum": 3600, "default": 1},
-          "keys": {"$ref": "#/definitions/keys"},
-          "mouse": {"$ref": "#/definitions/mouse"}
+          "frames": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "default": 1
+          },
+          "keys": {
+            "$ref": "#/definitions/keys"
+          },
+          "mouse": {
+            "$ref": "#/definitions/mouse"
+          },
+          "events": {
+            "$ref": "#/definitions/events"
+          },
+          "select": {
+            "$ref": "#/definitions/selection"
+          }
         }
       }
     },
@@ -106,12 +293,36 @@
       "params": {
         "type": "object",
         "properties": {
-          "max_frames": {"type": "integer", "minimum": 1, "maximum": 36000},
-          "until": {"type": "array", "items": {"$ref": "#/definitions/condition"}, "minItems": 1, "maxItems": 16},
-          "keys": {"$ref": "#/definitions/keys"},
-          "mouse": {"$ref": "#/definitions/mouse"}
+          "max_frames": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36000
+          },
+          "until": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/condition"
+            },
+            "minItems": 1,
+            "maxItems": 16
+          },
+          "keys": {
+            "$ref": "#/definitions/keys"
+          },
+          "mouse": {
+            "$ref": "#/definitions/mouse"
+          },
+          "events": {
+            "$ref": "#/definitions/events"
+          },
+          "select": {
+            "$ref": "#/definitions/selection"
+          }
         },
-        "required": ["max_frames", "until"]
+        "required": [
+          "max_frames",
+          "until"
+        ]
       }
     },
     {
@@ -121,9 +332,20 @@
       "params": {
         "type": "object",
         "properties": {
-          "types": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "maxItems": 64, "uniqueItems": true}
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true
+          }
         },
-        "required": ["types"]
+        "required": [
+          "types"
+        ]
       }
     },
     {
@@ -133,7 +355,11 @@
       "params": {
         "type": "object",
         "properties": {
-          "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
         }
       }
     },
@@ -141,7 +367,10 @@
       "name": "quit",
       "access": "session",
       "summary": "Stop the runtime and end the session.",
-      "params": {"type": "object", "properties": {}}
+      "params": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ]
 }

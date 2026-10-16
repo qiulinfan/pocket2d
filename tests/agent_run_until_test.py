@@ -21,7 +21,11 @@ def write_project(root):
       OnUpdate = function(self)
         self.ticks = self.ticks + 1
         self.actor:GetComponent("Transform").x = self.ticks
-        if self.ticks == 10 then Event.Publish("tick_10", {}) end
+        Event.Publish("tick", self.ticks)
+        if self.ticks == 10 then
+          Event.Publish("tick_10", {count = self.ticks, at = Vector2(1.5, 2), who = self.actor,
+            fn = function() end, list = {1, 2, 3}, deep = {a = {b = {c = {d = 1}}}}})
+        end
         if self.ticks == 15 then self.phase = "middle" end
         if self.ticks == 20 then Actor.Destroy(Actor.Find("doomed")) end
         if self.ticks == 90 then Application.Quit() end
@@ -85,6 +89,40 @@ def run(executable):
             result = successful(agent, {"cmd": "run_until", "max_frames": 1000, "until": [{"event": "never"}]})
             check(result["run_until"]["reason"] == "stopped" and not result["running"],
                   "a quitting game stops the run: " + json.dumps(result["run_until"]))
+            check("events" not in result, "run_until reports events only on request")
+            successful(agent, {"cmd": "reset"})
+            def selected(select, command="observe"):
+                response = successful(agent, {"cmd": command, "select": select})
+                return [a["name"] for a in response["actors"]], response["actors_matched"], response
+            check(selected({"names": ["ticker"]})[:2] == (["ticker"], 1), "select by name")
+            check(selected({"types": ["Ticker"]})[:2] == (["ticker"], 1), "select by component type")
+            check(selected({"uids": ["2"]})[:2] == (["doomed"], 1), "select by uid")
+            check(selected({"limit": 1})[:2] == (["ticker"], 2), "limit keeps the lowest uids")
+            names, matched, response = selected({"region": {"min_x": 0.5, "min_y": -1, "max_x": 2, "max_y": 1},
+                                                 "components": False}, "step")
+            check(names == ["ticker"] and matched == 1 and "components" not in response["actors"][0] and
+                  "position" in response["actors"][0], "region on a step response, components omitted")
+            check("actors_matched" not in successful(agent, {"cmd": "observe"}), "unselected observations are unchanged")
+            response = agent.request({"cmd": "observe", "select": {"uids": ["x"]}})
+            check(not response["ok"] and response["code"] == "invalid_argument", "invalid selection")
+            successful(agent, {"cmd": "reset"})
+            stepped = successful(agent, {"cmd": "step", "frames": 12, "events": ["tick_10"]})
+            check(stepped["events_dropped"] == 0 and len(stepped["events"]) == 1, "filtered event stream")
+            event = stepped["events"][0]
+            check(event["frame"] == 9 and event["type"] == "tick_10", "event frame is the frame being simulated")
+            check(event["payload"] == {"count": 10, "at": {"x": 1.5, "y": 2.0}, "who": {"actor_uid": "1"},
+                                       "fn": "<function>", "list": [1, 2, 3],
+                                       "deep": {"a": {"b": {"c": "<table>"}}}},
+                  "bounded raw payload: " + json.dumps(event["payload"]))
+            stepped = successful(agent, {"cmd": "step", "frames": 3, "events": True})
+            check([(e["type"], e["payload"]) for e in stepped["events"]] == [("tick", 13), ("tick", 14), ("tick", 15)],
+                  "every event type in order")
+            check("events" not in successful(agent, {"cmd": "step"}), "events are opt-in")
+            result = successful(agent, {"cmd": "run_until", "max_frames": 5, "events": ["tick"],
+                                        "until": [{"event": "never"}]})
+            check(len(result["events"]) == 5, "run_until reports events too")
+            response = agent.request({"cmd": "step", "events": [""]})
+            check(not response["ok"] and response["code"] == "invalid_argument", "invalid event filters")
             successful(agent, {"cmd": "quit"})
             check(agent.process.wait(timeout=5) == 0, "clean quit")
         finally:

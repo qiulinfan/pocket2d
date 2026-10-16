@@ -16,6 +16,7 @@
 #include "rapidjson/writer.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <charconv>
 #include <iostream>
@@ -141,8 +142,84 @@ void WriteDiagnostics(Writer &out) {
     cursor.seen = written;
 }
 
+// Optional narrowing of observed actors; see the selection schema.
+struct ActorSelection {
+    std::set<std::string> names, types;
+    std::set<Actor::UID> uids;
+    std::optional<std::array<double, 4>> region; // min_x, min_y, max_x, max_y
+    std::size_t limit = std::numeric_limits<std::size_t>::max();
+    bool components = true;
+};
+
+std::optional<ActorSelection> ReadSelection(const rapidjson::Value &command) {
+    if (!command.HasMember("select")) return std::nullopt;
+    const auto &select = command["select"];
+    if (!select.IsObject()) throw std::invalid_argument("select must be an object");
+    ActorSelection selection;
+    const auto strings = [&](const char *key, std::size_t limit, auto &&insert) {
+        if (!select.HasMember(key)) return;
+        const auto &values = select[key];
+        if (!values.IsArray() || values.Size() > limit)
+            throw std::invalid_argument(std::string("select.") + key + " must be an array of at most " + std::to_string(limit) + " strings");
+        for (const auto &value : values.GetArray()) {
+            if (!value.IsString()) throw std::invalid_argument(std::string("select.") + key + " must contain strings");
+            insert(std::string(value.GetString(), value.GetStringLength()));
+        }
+    };
+    strings("names", 256, [&](std::string value) { selection.names.insert(std::move(value)); });
+    strings("types", 64, [&](std::string value) { selection.types.insert(std::move(value)); });
+    strings("uids", 256, [&](const std::string &value) {
+        Actor::UID uid = 0;
+        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), uid);
+        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
+            throw std::invalid_argument("select.uids must contain decimal uint64 strings");
+        selection.uids.insert(uid);
+    });
+    if (select.HasMember("region")) {
+        const auto &region = select["region"];
+        std::array<double, 4> bounds{};
+        const char *keys[] = {"min_x", "min_y", "max_x", "max_y"};
+        for (int i = 0; i < 4; ++i) {
+            if (!region.IsObject() || !region.HasMember(keys[i]) || !region[keys[i]].IsNumber() ||
+                !std::isfinite(region[keys[i]].GetDouble()))
+                throw std::invalid_argument("select.region needs finite min_x, min_y, max_x and max_y");
+            bounds[i] = region[keys[i]].GetDouble();
+        }
+        selection.region = bounds;
+    }
+    if (select.HasMember("limit")) {
+        if (!select["limit"].IsUint() || select["limit"].GetUint() > 100000)
+            throw std::invalid_argument("select.limit must be an integer in [0, 100000]");
+        selection.limit = select["limit"].GetUint();
+    }
+    if (select.HasMember("components")) {
+        if (!select["components"].IsBool()) throw std::invalid_argument("select.components must be a boolean");
+        selection.components = select["components"].GetBool();
+    }
+    return selection;
+}
+
+bool Selected(const ActorSelection &selection, const Actor &actor) {
+    if (!selection.names.empty() && !selection.names.count(actor.actor_name)) return false;
+    if (!selection.uids.empty() && !selection.uids.count(actor.uid)) return false;
+    if (!selection.types.empty()) {
+        bool found = false;
+        for (const auto &spec : ComponentManager::GetRuntimeComponentSpecs(actor.uid))
+            if (selection.types.count(spec.type)) { found = true; break; }
+        if (!found) return false;
+    }
+    if (selection.region) {
+        float x = 0, y = 0, rotation = 0;
+        if (!ComponentManager::TryGetRuntimeTransformWorld(actor.uid, x, y, rotation)) return false;
+        const auto &[min_x, min_y, max_x, max_y] = *selection.region;
+        if (x < min_x || x > max_x || y < min_y || y > max_y) return false;
+    }
+    return true;
+}
+
 std::string Observe(const Engine &engine, std::uint32_t seed,
-                    const std::vector<CellQueryResult> *tile_queries = nullptr) {
+                    const std::vector<CellQueryResult> *tile_queries = nullptr,
+                    const ActorSelection *selection = nullptr) {
     rapidjson::StringBuffer buffer;
     Writer out(buffer);
     out.StartObject();
@@ -156,10 +233,13 @@ std::string Observe(const Engine &engine, std::uint32_t seed,
     out.Key("actors"); out.StartArray();
     std::vector<const Actor *> actors;
     for (const auto &actor : engine.GetRuntimeActors())
-        if (!actor.runtime_destroyed) actors.push_back(&actor);
+        if (!actor.runtime_destroyed && (!selection || Selected(*selection, actor))) actors.push_back(&actor);
     std::sort(actors.begin(), actors.end(), [](const auto *a, const auto *b) {
         return a->uid < b->uid;
     });
+    const std::size_t matched = actors.size();
+    if (selection && actors.size() > selection->limit) actors.resize(selection->limit);
+    const bool with_components = !selection || selection->components;
     for (const auto *actor : actors) {
         out.StartObject();
         // UIDs are opaque decimal strings: JSON/TypeScript numbers cannot
@@ -173,6 +253,7 @@ std::string Observe(const Engine &engine, std::uint32_t seed,
             out.Key("x"); WriteNumber(out, x); out.Key("y"); WriteNumber(out, y);
             out.Key("rotation"); WriteNumber(out, rotation); out.EndObject();
         }
+        if (!with_components) { out.EndObject(); continue; }
         out.Key("components"); out.StartArray();
         auto specs = ComponentManager::GetRuntimeComponentSpecs(actor->uid);
         std::sort(specs.begin(), specs.end(), [](const auto &a, const auto &b) { return a.key < b.key; });
@@ -197,6 +278,7 @@ std::string Observe(const Engine &engine, std::uint32_t seed,
         out.EndArray(); out.EndObject();
     }
     out.EndArray();
+    if (selection) { out.Key("actors_matched"); out.Uint64(matched); }
     if (tile_queries) {
         out.Key("tilemaps"); out.StartArray();
         for (const auto &query : *tile_queries) {
@@ -574,6 +656,68 @@ std::string WithRunResult(const std::string &observation, const char *reason, in
     return buffer.GetString();
 }
 
+// Which published events a step or run_until reports.
+struct EventFilter {
+    bool enabled = false;
+    std::set<std::string> types; // empty with enabled: every type
+    bool Accepts(const std::string &type) const { return enabled && (types.empty() || types.count(type)); }
+};
+
+EventFilter ReadEventFilter(const rapidjson::Value &command) {
+    EventFilter filter;
+    if (!command.HasMember("events")) return filter;
+    const auto &events = command["events"];
+    if (events.IsBool()) { filter.enabled = events.GetBool(); return filter; }
+    if (!events.IsArray() || events.Size() > 64)
+        throw std::invalid_argument("events must be a boolean or an array of at most 64 event types");
+    filter.enabled = true;
+    for (const auto &type : events.GetArray()) {
+        if (!type.IsString() || type.GetStringLength() == 0)
+            throw std::invalid_argument("events must contain nonempty event type strings");
+        filter.types.emplace(type.GetString(), type.GetStringLength());
+    }
+    if (filter.types.empty()) filter.enabled = false;
+    return filter;
+}
+
+struct ReportedEvents {
+    static constexpr std::size_t kLimit = 256;
+    std::vector<EventBus::PublishedEvent> events;
+    std::uint64_t dropped = 0;
+    void Add(const EventFilter &filter, std::vector<EventBus::PublishedEvent> &&published, std::uint64_t trace_dropped) {
+        if (!filter.enabled) return;
+        dropped += trace_dropped;
+        for (auto &event : published) {
+            if (!filter.Accepts(event.type)) continue;
+            if (events.size() < kLimit) events.push_back(std::move(event));
+            else ++dropped;
+        }
+    }
+};
+
+std::string WithEvents(const std::string &observation, const ReportedEvents &reported) {
+    rapidjson::Document response;
+    response.Parse(observation.data(), observation.size());
+    auto &allocator = response.GetAllocator();
+    rapidjson::Value events(rapidjson::kArrayType);
+    for (const auto &event : reported.events) {
+        rapidjson::Value entry(rapidjson::kObjectType);
+        entry.AddMember("frame", event.frame, allocator);
+        entry.AddMember("type", rapidjson::Value(event.type.c_str(), allocator), allocator);
+        rapidjson::Document payload;
+        payload.Parse(event.payload_json.data(), event.payload_json.size());
+        rapidjson::Value value;
+        if (!payload.HasParseError()) value.CopyFrom(payload, allocator);
+        entry.AddMember("payload", value, allocator);
+        events.PushBack(entry, allocator);
+    }
+    response.AddMember("events", events, allocator);
+    response.AddMember("events_dropped", reported.dropped, allocator);
+    rapidjson::StringBuffer buffer;
+    Writer writer(buffer); response.Accept(writer);
+    return buffer.GetString();
+}
+
 struct RunSummary {
     const char *reason;
     int frames;
@@ -718,6 +862,18 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 continue;
             }
             std::optional<RunSummary> run_summary;
+            EventFilter event_filter;
+            ReportedEvents reported;
+            std::optional<ActorSelection> selection;
+            if (name == "observe" || name == "step" || name == "run_until") {
+                try {
+                    selection = ReadSelection(command);
+                } catch (const std::invalid_argument &error) {
+                    EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
+                    continue;
+                }
+            }
+            const ActorSelection *selected = selection ? &*selection : nullptr;
             if (name == "reset") {
                 if (command.HasMember("seed")) {
                     if (!command["seed"].IsUint()) throw std::runtime_error("seed must be uint32");
@@ -728,6 +884,12 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 const bool run_until = name == "run_until";
                 int frames = 1;
                 std::vector<StopCondition> conditions;
+                try {
+                    event_filter = ReadEventFilter(command);
+                } catch (const std::invalid_argument &error) {
+                    EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
+                    continue;
+                }
                 if (run_until) {
                     try {
                         if (!command.HasMember("max_frames") || !command["max_frames"].IsInt() ||
@@ -754,7 +916,7 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 ApplyKeys(*engine, held, next); held = std::move(next);
                 ApplyMouse(*engine, mouse, next_mouse); mouse = std::move(next_mouse);
                 std::optional<PublishTracing> tracing;
-                if (run_until) tracing.emplace();
+                if (run_until || event_filter.enabled) tracing.emplace();
                 const int previous_errors = ComponentManager::GetRuntimeErrorCount();
                 int advanced = 0;
                 std::optional<std::size_t> matched;
@@ -774,8 +936,9 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                         throw SceneLoadFailure(engine->GetLastSceneLoadError(), engine->RequiresSceneReset());
                     if (ComponentManager::GetRuntimeErrorCount() != previous_errors)
                         throw std::runtime_error(ComponentManager::GetLastRuntimeError());
-                    if (!run_until) continue;
-                    const auto events = EventBus::TakePublishedEvents();
+                    if (!tracing) continue;
+                    std::uint64_t trace_dropped = 0;
+                    auto events = EventBus::TakePublishedEvents(&trace_dropped);
                     for (std::size_t c = 0; c < conditions.size() && !matched; ++c) {
                         const auto &condition = conditions[c];
                         if (condition.kind == StopCondition::Kind::Event) {
@@ -787,6 +950,7 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                             matched = c;
                         }
                     }
+                    reported.Add(event_filter, std::move(events), trace_dropped);
                 }
                 if (run_until)
                     run_summary = RunSummary{matched ? "condition" : engine->IsRunning() ? "max_frames" : "stopped",
@@ -802,12 +966,16 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 throw std::runtime_error(engine->GetLastRuntimeActorError());
             if (name == "observe" && command.HasMember("tilemaps")) {
                 const auto queries = ReadTileQueries(command["tilemaps"]);
-                EmitResponse(responses, Observe(*engine, seed, &queries), request_id);
-            } else if (run_summary) {
-                EmitResponse(responses, WithRunResult(Observe(*engine, seed), run_summary->reason, run_summary->frames,
-                                                      run_summary->condition,
-                                                      run_summary->event ? &*run_summary->event : nullptr), request_id);
-            } else EmitResponse(responses, Observe(*engine, seed), request_id);
+                EmitResponse(responses, Observe(*engine, seed, &queries, selected), request_id);
+            } else {
+                std::string observation = Observe(*engine, seed, nullptr, selected);
+                if (run_summary)
+                    observation = WithRunResult(observation, run_summary->reason, run_summary->frames,
+                                                run_summary->condition,
+                                                run_summary->event ? &*run_summary->event : nullptr);
+                if (event_filter.enabled) observation = WithEvents(observation, reported);
+                EmitResponse(responses, observation, request_id);
+            }
         } catch (const SceneLoadFailure &failure) {
             EmitResponse(responses, SceneLoadError(failure), request_id);
             if (failure.requires_reset) return 1;
