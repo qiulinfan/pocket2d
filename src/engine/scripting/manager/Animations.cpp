@@ -73,7 +73,7 @@ struct LiveAnimation {
 std::vector<LiveAnimation> SnapshotAnimations() {
     ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     std::vector<LiveAnimation> result;
-    for (const auto uid : runtime.actor_uids_sorted) {
+    for (const auto uid : ManagerDetail::ActorsWithNative(runtime, ManagerDetail::NativeKind::SpriteAnimation)) {
         const auto actor = runtime.actor_by_uid.find(uid);
         if (actor == runtime.actor_by_uid.end()) continue;
         ActorHandle handle(actor->second);

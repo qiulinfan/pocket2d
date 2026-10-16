@@ -103,6 +103,7 @@ void ClearBoundActorState() {
     Runtime().actor_order_by_uid.clear();
     Runtime().next_actor_order = 0;
     Runtime().actor_uids_sorted.clear();
+    ++Runtime().actor_order_version;
     Runtime().pending_actor_uids_to_activate.clear();
     Runtime().pending_destroy_actor_uids.clear();
     Runtime().dirty_component_actor_uids.clear();

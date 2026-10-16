@@ -338,7 +338,7 @@ void PrepareFinal(Plan &plan) {
 // stay intact, and deferred spawns remain deferred across an editor transaction.
 void Reindex(std::list<Actor> &actors) {
     const std::unordered_set<UID> deferred(Runtime().pending_actor_uids_to_activate.begin(),Runtime().pending_actor_uids_to_activate.end());
-    Runtime().actor_by_uid.clear();Runtime().actors_by_name.clear();Runtime().actor_order_by_uid.clear();Runtime().actor_uids_sorted.clear();
+    Runtime().actor_by_uid.clear();Runtime().actors_by_name.clear();Runtime().actor_order_by_uid.clear();Runtime().actor_uids_sorted.clear();++Runtime().actor_order_version;
     Runtime().on_update_components.clear();Runtime().on_late_update_components.clear();Runtime().next_actor_order=0;
     for(auto &actor:actors)if(!actor.runtime_destroyed&&!Runtime().pending_destroy_actor_uids.contains(actor.uid)) {
         Runtime().actor_by_uid[actor.uid]=&actor;Runtime().actors_by_name[actor.actor_name].push_back(&actor);

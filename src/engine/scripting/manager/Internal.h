@@ -7,6 +7,7 @@
 #include "lua.hpp"
 #include "scripting/LuaBoundary.h"
 #include "LuaBridge/LuaBridge.h"
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <list>
@@ -169,6 +170,13 @@ struct RuntimeState {
     size_t next_actor_order = 0;
     // ordered actor uid vec (not distroyed yet)
     std::vector<Actor::UID> actor_uids_sorted;
+    // Bumped whenever actor_uids_sorted changes; see ActorsWithNative.
+    std::uint64_t actor_order_version = 0;
+    // Cached ActorsWithNative results and the state they were built from.
+    struct NativeActorLists {
+        std::uint64_t serial = ~0ull, epoch = ~0ull, order = ~0ull;
+        std::array<std::vector<Actor::UID>, 7> by_kind;
+    } native_actor_lists;
     // ptr to the actor container of current scene (stored by Engine)
     std::list<Actor> *scene_actors = nullptr;
     // 本帧新建的 actors (finable, 但是到下一帧才进入生命周期迭代)
@@ -183,6 +191,24 @@ struct RuntimeState {
 
 // The scripting runtime of World::Current().
 inline RuntimeState &Runtime() { return World::Current().State<RuntimeState>(); }
+
+// The built-in object of the actor's first live component of type T (key
+// order), as FindPrimaryComponentByType would find it, without comparing
+// type names.
+template<class T> T *FindPrimaryNative(RuntimeState &runtime, Actor::UID uid) {
+    const auto components = runtime.actor_components.find(uid);
+    if (components == runtime.actor_components.end()) return nullptr;
+    for (const auto &component : components->second)
+        if (!component->removed && component->native.kind == kNativeKindOf<T>)
+            return static_cast<T *>(component->native.object);
+    return nullptr;
+}
+
+// Actors (in actor_uids_sorted order) owning at least one record of a
+// built-in kind, removed records included; callers still check each record.
+// Rebuilt only after a record is created or destroyed or the actor order
+// changes, so per-frame systems skip actors without that component.
+const std::vector<Actor::UID> &ActorsWithNative(RuntimeState &runtime, NativeKind kind);
 
 // Names a component across Lua calls without a registry reference. The record
 // pointer is trusted only while no record has been destroyed since it was

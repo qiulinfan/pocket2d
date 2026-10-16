@@ -243,13 +243,10 @@ void DestroyRemovedComponents(Actor::UID uid) {
 void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
     // SetType/SetEnabled may dispatch contact-exit callbacks. Keep userdata
     // alive and never retain a container iterator or record across those calls.
+    // Scene actor order, not hash-table order, so every platform applies body
+    // type changes in the same sequence.
     std::vector<CallbackTarget> targets;
-    for (const auto &actor_components_entry : Runtime().actor_components) {
-        const auto uid = actor_components_entry.first;
-        // Most actors have no Rigidbody; skip the keyed lookup for them.
-        if (std::none_of(actor_components_entry.second.begin(), actor_components_entry.second.end(),
-                         [](const auto &record) { return record->template Native<Rigidbody>() != nullptr; }))
-            continue;
+    for (const Actor::UID uid : ActorsWithNative(Runtime(), NativeKind::Rigidbody)) {
         const auto *component = FindRuntimeRigidbodyComponent(uid);
         if (component && !component->removed) targets.push_back(Snapshot(uid, *component));
     }
@@ -539,6 +536,7 @@ void ComponentManager::FinalizePrePhysicsDestructions() {
                 std::remove(Runtime().actor_uids_sorted.begin(),
                             Runtime().actor_uids_sorted.end(), actor_uid),
                 Runtime().actor_uids_sorted.end());
+            ++Runtime().actor_order_version;
         }
 
         for (Actor::UID actor_uid : destroyed_actor_uids) {
@@ -623,6 +621,7 @@ void ComponentManager::FinalizeFrameMutations() {
         };
         if (active.empty() || !before(actor_uid, active.back())) active.push_back(actor_uid);
         else active.insert(std::lower_bound(active.begin(), active.end(), actor_uid, before), actor_uid);
+        ++Runtime().actor_order_version;
 
         // Newly instantiated actors have no existing lifecycle entries yet.
         // Append them directly instead of forcing a full dirty-list rebuild/sort.

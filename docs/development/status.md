@@ -111,6 +111,15 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   asset schemas and `tools/validate_schemas.py` validates all 41 fixture
   assets in CTest. A root `llms.txt` indexes the agent-facing documentation.
   No Lua checker is installed here, so that path is untested.
+- Per-frame systems (sprite submission, animation, tilemap commit/queue,
+  Rigidbody body types) now walk cached lists of actors owning each built-in
+  component kind, rebuilt only when records are created or destroyed or the
+  actor order changes, and look up primary built-ins by native kind instead
+  of type-name strings. Rigidbody body types are applied in scene order rather
+  than hash-table order. Release, 65,536 sprites on the `gpu` renderer: main
+  thread CPU p50 about 6.3 ms before both changes, 4.4–4.5 ms after; the
+  native tilemap path 0.30 → 0.19–0.21 ms. Wall time stays at the ~8 ms
+  display pacing floor.
 
 ## Completed and verified in this slice
 

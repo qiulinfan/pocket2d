@@ -124,7 +124,7 @@ Actor *PublishRuntimeActor(PreparedRuntimeActor &plan,std::list<Actor> &actors,b
     Runtime().actors_by_name[actor->actor_name].push_back(actor);
     Runtime().actor_order_by_uid[actor->uid]=Runtime().next_actor_order++;
     if(deferred_activation) Runtime().pending_actor_uids_to_activate.push_back(actor->uid);
-    else Runtime().actor_uids_sorted.push_back(actor->uid);
+    else { Runtime().actor_uids_sorted.push_back(actor->uid); ++Runtime().actor_order_version; }
     for(auto &record:prepared.records) InstallPreparedComponent(actor->uid,std::move(record));
     prepared.records.clear();
     SortComponentsForActor(actor->uid);

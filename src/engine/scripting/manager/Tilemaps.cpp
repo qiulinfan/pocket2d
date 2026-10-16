@@ -173,7 +173,7 @@ bool ComponentManager::SetTilemapResource(Actor::UID uid, const std::string &key
 void ComponentManager::CommitTilemaps() {
     POCKET_ZONE("CommitTilemaps");
     ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
-    for (Actor::UID uid : runtime.actor_uids_sorted) {
+    for (Actor::UID uid : ManagerDetail::ActorsWithNative(runtime, ManagerDetail::NativeKind::Tilemap)) {
         const auto owner = runtime.actor_by_uid.find(uid);
         if (owner == runtime.actor_by_uid.end() ||
             owner->second == nullptr || owner->second->runtime_destroyed ||
@@ -181,7 +181,7 @@ void ComponentManager::CommitTilemaps() {
         const auto components = runtime.actor_components.find(uid);
         if (components == runtime.actor_components.end()) continue;
         for (auto &entry : components->second) {
-            if (entry->removed || entry->type != "Tilemap") continue;
+            if (entry->removed || entry->Native<Tilemap>() == nullptr) continue;
             if (owner->second->parent_uid != Actor::kInvalidUID)
                 throw std::runtime_error("Tilemap must remain a root actor");
             float x, y, rotation;
@@ -193,14 +193,14 @@ void ComponentManager::CommitTilemaps() {
 
 void ComponentManager::QueueTilemaps(float min_x, float min_y, float max_x, float max_y,
                                      bool scene_backed_only) {
-    for (Actor::UID uid : ManagerDetail::Runtime().actor_uids_sorted) {
+    for (Actor::UID uid : ManagerDetail::ActorsWithNative(ManagerDetail::Runtime(), ManagerDetail::NativeKind::Tilemap)) {
         const auto owner = ManagerDetail::Runtime().actor_by_uid.find(uid);
         if (owner == ManagerDetail::Runtime().actor_by_uid.end() || owner->second == nullptr ||
             owner->second->runtime_destroyed || (scene_backed_only && !owner->second->scene_backed)) continue;
         const auto components = ManagerDetail::Runtime().actor_components.find(uid);
         if (components == ManagerDetail::Runtime().actor_components.end()) continue;
         for (auto &entry : components->second) {
-            if (entry->removed || entry->type != "Tilemap") continue;
+            if (entry->removed || entry->Native<Tilemap>() == nullptr) continue;
             entry->Native<Tilemap>()->QueueVisible(min_x, min_y, max_x, max_y);
         }
     }

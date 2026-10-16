@@ -474,6 +474,7 @@ void ComponentManager::BindActorsForScene(std::list<Actor> &actors) {
     Runtime().actors_by_name.clear();
     Runtime().actor_order_by_uid.clear();
     Runtime().actor_uids_sorted.clear();
+    ++Runtime().actor_order_version;
     Runtime().component_index_by_key.clear();
     Runtime().component_first_key_by_type.clear();
     Runtime().component_keys_by_type.clear();
@@ -492,6 +493,7 @@ void ComponentManager::BindActorsForScene(std::list<Actor> &actors) {
         Runtime().actors_by_name[actor.actor_name].push_back(&actor);
         Runtime().actor_order_by_uid[actor.uid] = actor_order;
         Runtime().actor_uids_sorted.push_back(actor.uid);
+        ++Runtime().actor_order_version;
         SortComponentsForActor(actor.uid);
         auto component_it = Runtime().actor_components.find(actor.uid);
         if (component_it == Runtime().actor_components.end()) continue;

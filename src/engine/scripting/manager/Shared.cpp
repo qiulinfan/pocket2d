@@ -42,6 +42,30 @@ NativeComponent ResolveNativeComponent(const std::string &type, const luabridge:
     return {};
 }
 
+const std::vector<Actor::UID> &ActorsWithNative(RuntimeState &runtime, NativeKind kind) {
+    auto &lists = runtime.native_actor_lists;
+    const std::uint64_t serial = component_record_serial.load(std::memory_order_relaxed);
+    const std::uint64_t epoch = component_record_epoch.load(std::memory_order_relaxed);
+    if (lists.serial != serial || lists.epoch != epoch || lists.order != runtime.actor_order_version) {
+        for (auto &list : lists.by_kind) list.clear();
+        for (const Actor::UID uid : runtime.actor_uids_sorted) {
+            const auto components = runtime.actor_components.find(uid);
+            if (components == runtime.actor_components.end()) continue;
+            std::array<bool, 7> seen{};
+            for (const auto &component : components->second) {
+                const auto index = static_cast<std::size_t>(component->native.kind);
+                if (component->native.kind == NativeKind::None || seen[index]) continue;
+                seen[index] = true;
+                lists.by_kind[index].push_back(uid);
+            }
+        }
+        lists.serial = serial;
+        lists.epoch = epoch;
+        lists.order = runtime.actor_order_version;
+    }
+    return lists.by_kind[static_cast<std::size_t>(kind)];
+}
+
 bool IsBuiltinComponentType(const std::string &type_name) {
     return type_name == "Rigidbody" || type_name == "ParticleSystem" ||
            type_name == "Transform" || type_name == "SpriteRenderer" || type_name == "Tilemap" || type_name == "SpriteAnimation";
@@ -300,18 +324,14 @@ void RotateClockwise(float x, float y, float rotation_degrees, float &out_x,
 // have one source of truth, else Rigidbody for scenes without a Transform.
 bool ResolveSpritePose(RuntimeState &runtime, Actor::UID uid, float &x, float &y,
                        float &rotation) {
-    if (ComponentRecord *record = FindPrimaryComponentByType(runtime, uid, "Transform")) {
-        if (const auto transform = record->instance_table.cast<Transform *>(); transform && *transform) {
-            x = (*transform)->world_x; y = (*transform)->world_y; rotation = (*transform)->world_rotation;
-            return true;
-        }
+    if (const Transform *transform = FindPrimaryNative<Transform>(runtime, uid)) {
+        x = transform->world_x; y = transform->world_y; rotation = transform->world_rotation;
+        return true;
     }
-    if (ComponentRecord *record = FindPrimaryComponentByType(runtime, uid, "Rigidbody")) {
-        if (const auto rigidbody = record->instance_table.cast<Rigidbody *>(); rigidbody && *rigidbody) {
-            const Vector2 position = (*rigidbody)->GetPosition();
-            x = position.x; y = position.y; rotation = (*rigidbody)->GetRotation();
-            return true;
-        }
+    if (const Rigidbody *rigidbody = FindPrimaryNative<Rigidbody>(runtime, uid)) {
+        const Vector2 position = rigidbody->GetPosition();
+        x = position.x; y = position.y; rotation = rigidbody->GetRotation();
+        return true;
     }
     return false;
 }
@@ -323,7 +343,7 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
     // Sorting-order ties must preserve authored scene order, not hash-table
     // iteration order. This also makes overlapping fractional pixel edges
     // deterministic across the SpriteRenderer and Tilemap submission paths.
-    for (Actor::UID uid : runtime.actor_uids_sorted) {
+    for (Actor::UID uid : ActorsWithNative(runtime, NativeKind::SpriteRenderer)) {
         auto components_it = runtime.actor_components.find(uid);
         if (components_it == runtime.actor_components.end()) continue;
         auto actor_it = runtime.actor_by_uid.find(uid);
@@ -344,8 +364,6 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
              components_it->second) {
             ComponentRecord &component = *component_ptr;
             if (component.removed) continue;
-            if (component.type != "SpriteRenderer") continue;
-
             SpriteRenderer *sprite_renderer = component.Native<SpriteRenderer>();
             if (sprite_renderer == nullptr) continue;
             if (sprite_renderer->actor_handle.generation != 0 && destroyed) continue;
@@ -503,9 +521,7 @@ public:
             auto actor_it = runtime_.actor_by_uid.find(actor_uid);
             Actor *actor = actor_it == runtime_.actor_by_uid.end()
                                ? nullptr : actor_it->second;
-            auto *component = ManagerDetail::FindPrimaryComponentByType(runtime_, actor_uid, "Transform");
-            Transform *transform = component == nullptr
-                                       ? nullptr : component->Native<Transform>();
+            Transform *transform = ManagerDetail::FindPrimaryNative<Transform>(runtime_, actor_uid);
             const Actor::UID parent_uid = actor == nullptr
                                              ? Actor::kInvalidUID : actor->parent_uid;
             path_.push_back({actor_uid, parent_uid, transform});
@@ -526,11 +542,7 @@ public:
                 Transform *parent = nullptr;
                 if (entry.parent_uid != Actor::kInvalidUID &&
                     entry.parent_uid != entry.uid) {
-                    auto *component = ManagerDetail::FindPrimaryComponentByType(
-                        runtime_, entry.parent_uid, "Transform");
-                    if (component != nullptr) {
-                        parent = component->Native<Transform>();
-                    }
+                    parent = ManagerDetail::FindPrimaryNative<Transform>(runtime_, entry.parent_uid);
                 }
                 Transform &transform = *entry.transform;
                 if (parent == nullptr) {
@@ -575,9 +587,7 @@ void ComponentManager::ResolveTransformHierarchy() {
         // A root's world pose is its local pose; only children need the
         // memoized parent walk.
         if (entry.second->parent_uid == Actor::kInvalidUID) {
-            auto *component = ManagerDetail::FindPrimaryComponentByType(runtime, entry.first, "Transform");
-            Transform *transform = component == nullptr
-                                       ? nullptr : component->Native<Transform>();
+            Transform *transform = ManagerDetail::FindPrimaryNative<Transform>(runtime, entry.first);
             if (transform != nullptr) {
                 transform->world_x = transform->x;
                 transform->world_y = transform->y;
