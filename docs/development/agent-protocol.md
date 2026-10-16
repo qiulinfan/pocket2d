@@ -95,6 +95,13 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   256 bytes per string; functions and unknown userdata become `"<function>"`
   or `"<userdata>"`, deeper tables `"<table>"`, `Vector2` `{x,y}` and actors
   `{actor_uid}`. Events are not reported unless requested.
+- `step` and `run_until` accept `actions`, the complete set of agent-held
+  semantic actions declared in the project's `actions.json`: `true`/`false`
+  for buttons, a number for axes, `[x, y]` for 2D axes (components clamped to
+  [-1, 1]). Omitting it keeps the previous values and `{}` releases them; reset
+  releases them too. Unknown actions or wrong value types return
+  `invalid_argument` before any input is applied. `describe.actions` lists the
+  declared actions and types. See the Lua [Input actions](../lua-api/rendering-audio-input.md#actions).
 - `observe`, `step` and `run_until` accept `select` to narrow `actors`:
   `names`, `uids` (decimal strings) and component `types` each match any listed
   value, `region` keeps actors whose world position lies in the inclusive

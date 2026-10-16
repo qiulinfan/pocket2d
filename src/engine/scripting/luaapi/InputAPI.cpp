@@ -1,5 +1,7 @@
 #include "RegistrationDetail.h"
 #include "input/Input.h"
+#include "input/ActionMap.h"
+#include "core/Vector2.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include "glm/glm.hpp"
@@ -19,6 +21,15 @@ bool CppInputGetKeyDown(const std::string &keycode) {
 
 bool CppInputGetKeyUp(const std::string &keycode) {
     return Input::GetKeyUp(keycode);
+}
+
+bool CppInputGetAction(const std::string &name) { return ActionMap::IsHeld(name); }
+bool CppInputGetActionDown(const std::string &name) { return ActionMap::WasPressed(name); }
+bool CppInputGetActionUp(const std::string &name) { return ActionMap::WasReleased(name); }
+float CppInputGetActionValue(const std::string &name) { return ActionMap::GetValue(name).x; }
+Vector2 CppInputGetActionVector(const std::string &name) {
+    const auto value = ActionMap::GetValue(name);
+    return Vector2(value.x, value.y);
 }
 
 glm::vec2 CppInputGetMousePosition() {
@@ -61,6 +72,11 @@ void InjectInputAPI() {
         .addFunction("GetKey", &CppInputGetKey)
         .addFunction("GetKeyDown", &CppInputGetKeyDown)
         .addFunction("GetKeyUp", &CppInputGetKeyUp)
+        .addFunction("GetAction", &CppInputGetAction)
+        .addFunction("GetActionDown", &CppInputGetActionDown)
+        .addFunction("GetActionUp", &CppInputGetActionUp)
+        .addFunction("GetActionValue", &CppInputGetActionValue)
+        .addFunction("GetActionVector", &CppInputGetActionVector)
         .addFunction("GetMousePosition", &CppInputGetMousePosition)
         .addFunction("GetMouseButton", &CppInputGetMouseButton)
         .addFunction("GetMouseButtonDown", &CppInputGetMouseButtonDown)

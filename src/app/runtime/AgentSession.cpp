@@ -4,6 +4,7 @@
 #include "engine/core/Log.h"
 #include "engine/core/FrameClock.h"
 #include "engine/input/Input.h"
+#include "engine/input/ActionMap.h"
 #include "engine/scripting/ComponentManager.h"
 #include "engine/scripting/ScriptBudget.h"
 #include "engine/scripting/ScriptAPIContract.h"
@@ -22,6 +23,7 @@
 #include <iostream>
 #include <memory>
 #include <limits>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -404,6 +406,15 @@ std::string Describe(bool runtime_available) {
     out.EndArray();
     out.Key("command_schema");
     out.RawValue(PocketAgentProtocol::kSchemaJson.data(), PocketAgentProtocol::kSchemaJson.size(), rapidjson::kObjectType);
+    out.Key("actions"); out.StartArray();
+    if (runtime_available)
+        for (const auto &action : ActionMap::Declarations()) {
+            out.StartObject();
+            out.Key("name"); out.String(action.name.c_str());
+            out.Key("type"); out.String(ActionMap::TypeName(action.type));
+            out.EndObject();
+        }
+    out.EndArray();
     out.Key("simulation_hz"); out.Int(60);
     out.Key("step"); out.StartObject();
     out.Key("frames"); out.StartObject();
@@ -524,6 +535,36 @@ void ApplyMouse(Engine &engine, const MouseAction &before, const MouseAction &af
         wheel.type = SDL_EVENT_MOUSE_WHEEL; wheel.wheel.y = after.wheel;
         engine.ProcessSDLEvent(wheel, quit);
     }
+}
+
+std::map<std::string, ActionMap::Value> ReadActions(const rapidjson::Value &actions) {
+    if (!actions.IsObject() || actions.MemberCount() > 256)
+        throw std::invalid_argument("actions must be an object of at most 256 declared actions");
+    std::map<std::string, ActionMap::Value> result;
+    for (const auto &member : actions.GetObject()) {
+        const std::string name(member.name.GetString(), member.name.GetStringLength());
+        const auto type = ActionMap::Find(name);
+        if (!type) throw std::invalid_argument("unknown action: " + name);
+        const auto &value = member.value;
+        const auto finite = [&](const rapidjson::Value &number) {
+            if (!number.IsNumber() || !std::isfinite(number.GetDouble()))
+                throw std::invalid_argument("action " + name + " needs finite numbers");
+            return static_cast<float>(std::clamp(number.GetDouble(), -1.0, 1.0));
+        };
+        ActionMap::Value entry;
+        if (*type == ActionMap::Type::Button) {
+            if (!value.IsBool()) throw std::invalid_argument("button action " + name + " needs true or false");
+            entry.x = value.GetBool() ? 1.0f : 0.0f;
+        } else if (*type == ActionMap::Type::Axis) {
+            entry.x = finite(value);
+        } else {
+            if (!value.IsArray() || value.Size() != 2) throw std::invalid_argument("2D action " + name + " needs [x, y]");
+            entry.x = finite(value[0]);
+            entry.y = finite(value[1]);
+        }
+        result[name] = entry;
+    }
+    return result;
 }
 
 // run_until stop conditions. Any condition holding after a tick stops the run.
@@ -908,6 +949,15 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                     }
                     if (frames < 1 || frames > 3600) throw std::runtime_error("frames must be in [1, 3600]");
                 }
+                std::optional<std::map<std::string, ActionMap::Value>> next_actions;
+                if (command.HasMember("actions")) {
+                    try {
+                        next_actions = ReadActions(command["actions"]);
+                    } catch (const std::invalid_argument &error) {
+                        EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
+                        continue;
+                    }
+                }
                 auto next = command.HasMember("keys") ? ReadKeys(command["keys"]) : held;
                 auto next_mouse = mouse;
                 next_mouse.wheel = 0;
@@ -915,6 +965,7 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 if (!engine->IsRunning()) throw std::runtime_error("runtime stopped; reset required");
                 ApplyKeys(*engine, held, next); held = std::move(next);
                 ApplyMouse(*engine, mouse, next_mouse); mouse = std::move(next_mouse);
+                if (next_actions) ActionMap::SetAgentValues(*next_actions);
                 std::optional<PublishTracing> tracing;
                 if (run_until || event_filter.enabled) tracing.emplace();
                 const int previous_errors = ComponentManager::GetRuntimeErrorCount();

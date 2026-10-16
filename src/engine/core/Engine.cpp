@@ -1,4 +1,6 @@
 #include "core/Engine.h"
+#include "input/ActionMap.h"
+#include "shared/resources/ResourcePath.h"
 #include "core/Profile.h"
 #include "core/Log.h"
 #include "audio/AudioManager.h"
@@ -245,6 +247,7 @@ Engine::Engine(World &world) : world_(world) {
         Scene::SetActiveSceneSubdirectory({});
         GameSave::Configure({});
         config_ = GameConfig::Read();
+        ActionMap::Load(ResourcePath::ResourcesRootPath());
         GameSave::Configure(config_.save_namespace);
         current_scene_name = config_.initial_scene_name;
         SceneFormat::SceneAsset initial;

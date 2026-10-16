@@ -59,6 +59,32 @@ compete with normal SFX channels.
 | `Input.GetKeyDown(keycode)` | Key pressed this frame |
 | `Input.GetKeyUp(keycode)` | Key released this frame |
 
+### Actions
+
+Actions are declared in an optional `actions.json` at the project root and read
+by name, so gameplay does not depend on particular keys and agents can set
+actions directly (the agent protocol's `actions` parameter):
+
+```json
+{"version": 1, "actions": {
+  "attack": {"type": "button", "keys": ["space"], "mouse": [1]},
+  "zoom": {"type": "axis", "negative": ["q"], "positive": ["e"]},
+  "move": {"type": "axis2d", "left": ["a"], "right": ["d"], "up": ["w"], "down": ["s"]}}}
+```
+
+Bound keys and agent values combine: a button is held when either holds, an
+axis sums and clamps to [-1, 1], a 2D axis sums and is scaled to at most unit
+length. Screen y grows downward, so `up` is y = -1. An invalid file fails
+project startup. Unknown action names raise a Lua error.
+
+| Function | Description |
+| --- | --- |
+| `Input.GetAction(name)` | Action held (nonzero) |
+| `Input.GetActionDown(name)` | Held now but not at the previous frame end |
+| `Input.GetActionUp(name)` | Held at the previous frame end but not now |
+| `Input.GetActionValue(name)` | Number: 0/1 for buttons, [-1, 1] for axes, x for 2D axes |
+| `Input.GetActionVector(name)` | `Vector2` (y is 0 except for 2D axes) |
+
 ### Mouse
 
 | Function | Description |

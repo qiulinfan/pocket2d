@@ -38,6 +38,7 @@ Access: `simulate`.
 | `mouse` | object | no | Screen-space mouse state. Omitted x/y/buttons are retained; buttons is the complete held set (1 left, 2 middle, 3 right); wheel applies on the first tick only. |
 | `events` | boolean \| array (max items 64) | no | Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped. |
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
+| `actions` | object | no | Complete set of agent-held semantic actions declared in the project's actions.json (see describe.actions): true/false for buttons, a number in [-1, 1] for axes, [x, y] for 2D axes. Omit to keep the previous values; {} releases all. Combined with any bound key or mouse input. |
 
 ## `run_until`
 
@@ -53,6 +54,7 @@ Access: `simulate`.
 | `mouse` | object | no | Screen-space mouse state. Omitted x/y/buttons are retained; buttons is the complete held set (1 left, 2 middle, 3 right); wheel applies on the first tick only. |
 | `events` | boolean \| array (max items 64) | no | Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped. |
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
+| `actions` | object | no | Complete set of agent-held semantic actions declared in the project's actions.json (see describe.actions): true/false for buttons, a number in [-1, 1] for axes, [x, y] for 2D axes. Omit to keep the previous values; {} releases all. Combined with any bound key or mouse input. |
 
 ## `reload_scripts`
 

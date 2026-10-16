@@ -225,6 +225,29 @@
           "default": true
         }
       }
+    },
+    "actions": {
+      "type": "object",
+      "description": "Complete set of agent-held semantic actions declared in the project's actions.json (see describe.actions): true/false for buttons, a number in [-1, 1] for axes, [x, y] for 2D axes. Omit to keep the previous values; {} releases all. Combined with any bound key or mouse input.",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        ]
+      },
+      "maxProperties": 256
     }
   },
   "commands": [
@@ -282,6 +305,9 @@
           },
           "select": {
             "$ref": "#/definitions/selection"
+          },
+          "actions": {
+            "$ref": "#/definitions/actions"
           }
         }
       }
@@ -317,6 +343,9 @@
           },
           "select": {
             "$ref": "#/definitions/selection"
+          },
+          "actions": {
+            "$ref": "#/definitions/actions"
           }
         },
         "required": [

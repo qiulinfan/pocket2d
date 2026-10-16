@@ -2,6 +2,7 @@
 #include "core/Log.h"
 #include "core/FrameClock.h"
 #include "core/World.h"
+#include "input/ActionMap.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -276,6 +277,7 @@ void Input::ProcessEvent(const SDL_Event &event) {
 
 // advance transient just-down / just-up states at frame end
 void Input::LateUpdate() {
+    ActionMap::EndFrame();
     for (SDL_Scancode code : State().just_became_down_scancodes_) {
         if (State().keyboard_states_[code] == INPUT_STATE_JUST_BECAME_DOWN) {
             State().keyboard_states_[code] = INPUT_STATE_DOWN;
@@ -423,6 +425,11 @@ Input::KeyBinding Input::ParseKeyBinding(const std::string &keycode) {
         binding.scancode = SDL_GetScancodeFromKey(binding.keycode, nullptr);
     }
     return binding;
+}
+
+bool Input::IsKnownKeyName(const std::string &keycode) {
+    const KeyBinding binding = ParseKeyBinding(keycode);
+    return IsValidScancode(binding.scancode) || IsValidKeycode(binding.keycode);
 }
 
 // string keycode overloads

@@ -2066,6 +2066,61 @@
             }
           ],
           "returns": "boolean"
+        },
+        {
+          "name": "GetAction",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "name": "GetActionDown",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "name": "GetActionUp",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "name": "GetActionValue",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "name": "GetActionVector",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "Vector2"
         }
       ]
     },

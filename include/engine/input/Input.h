@@ -44,6 +44,9 @@ public:
     static bool GetKeyDown(const std::string &keycode);
     static bool GetKeyUp(const std::string &keycode);
 
+    // Whether GetKey and friends recognize this key name.
+    static bool IsKnownKeyName(const std::string &keycode);
+
     static glm::vec2 GetMousePosition();
     static bool GetMouseButton(int button_num);
     static bool GetMouseButtonDown(int button_num);

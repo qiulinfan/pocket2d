@@ -307,6 +307,11 @@ declare namespace Input {
     function GetKey(this: void, key: string): boolean;
     function GetKeyDown(this: void, key: string): boolean;
     function GetKeyUp(this: void, key: string): boolean;
+    function GetAction(this: void, name: string): boolean;
+    function GetActionDown(this: void, name: string): boolean;
+    function GetActionUp(this: void, name: string): boolean;
+    function GetActionValue(this: void, name: string): number;
+    function GetActionVector(this: void, name: string): Vector2;
 }
 
 declare namespace Save {
