@@ -1,5 +1,6 @@
 #include "core/Engine.h"
 #include <string_view>
+#include <charconv>
 #include "input/ActionMap.h"
 #include "shared/resources/ResourcePath.h"
 #include "core/Profile.h"
@@ -114,6 +115,29 @@ std::string ToLowerASCII(std::string value) {
 std::string ReadEnvironmentString(const char *name) {
     const char *value = std::getenv(name);
     return value == nullptr ? "" : value;
+}
+
+// POCKET_WINDOW_DISPLAY picks the display for new windows: a 0-based index
+// into SDL's display list or a case-insensitive part of a display's name
+// (for example an external monitor's model). Unset or unmatched: primary.
+SDL_DisplayID ChooseWindowDisplay() {
+    const std::string wanted = ToLowerASCII(ReadEnvironmentString("POCKET_WINDOW_DISPLAY"));
+    const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
+    if (wanted.empty()) return primary;
+    int count = 0;
+    SDL_DisplayID *displays = SDL_GetDisplays(&count);
+    SDL_DisplayID chosen = 0;
+    int index = -1;
+    const auto parsed = std::from_chars(wanted.data(), wanted.data() + wanted.size(), index);
+    const bool numeric = parsed.ec == std::errc{} && parsed.ptr == wanted.data() + wanted.size();
+    for (int i = 0; displays != nullptr && i < count && chosen == 0; ++i) {
+        const char *name = SDL_GetDisplayName(displays[i]);
+        if (numeric ? i == index : (name != nullptr && ToLowerASCII(name).find(wanted) != std::string::npos))
+            chosen = displays[i];
+    }
+    SDL_free(displays);
+    if (chosen == 0) Log::Warning("render", "POCKET_WINDOW_DISPLAY matched no display; using the primary display");
+    return chosen != 0 ? chosen : primary;
 }
 
 SDL_Renderer *CreateConfiguredRenderer(SDL_Window *window) {
@@ -887,6 +911,13 @@ runtime window/renderer are needed by either the game or the editor host.
 void Engine::initialize() {
     FrameClock::Reset();
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
+    // POCKET_WINDOW_BACKGROUND=1 shows the window without activating the app,
+    // so automated runs never take keyboard focus from other work.
+    const bool background = ReadEnvironmentString("POCKET_WINDOW_BACKGROUND") == "1";
+    if (background) {
+        SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
+        SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+    }
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw std::runtime_error(std::string("SDL video initialization failed: ") + SDL_GetError());
     }
@@ -894,12 +925,14 @@ void Engine::initialize() {
 
     window = SDLRenderHelper::SDL_CreateWindow(
         config_.game_title.c_str(), config_.window_width, config_.window_height,
-        SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
     if (window == nullptr) {
         throw std::runtime_error(std::string("window creation failed: ") + SDL_GetError());
     }
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    SDL_RaiseWindow(window);
+    const SDL_DisplayID display = ChooseWindowDisplay();
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display));
+    SDL_ShowWindow(window);
+    if (!background) SDL_RaiseWindow(window);
     renderer = CreateConfiguredRenderer(window);
 
     Renderer::Init();

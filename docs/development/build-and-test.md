@@ -235,3 +235,12 @@ See phase15-checkpoint.md and the fixture CONTRACT for scope and final evidence.
 `POCKET_ENABLE_IMGUI_TEST_ENGINE` (default on) compiles Dear ImGui Test Engine
 hooks into ImGui and builds `editor_ui_test`, which clicks real editor
 controls. The engine's license is in `thirdparty/imgui_test_engine/LICENSE.txt`.
+
+`POCKET_WINDOW_DISPLAY` places new windows on a display chosen by 0-based index
+or by part of its name (for example a monitor model such as `EDB323QU`);
+`POCKET_WINDOW_BACKGROUND=1` shows windows without activating the app, so
+automated graphical runs do not take keyboard focus:
+
+```sh
+POCKET_WINDOW_DISPLAY=EDB323QU POCKET_WINDOW_BACKGROUND=1 ./build/sdl3-release/game --project tests/fixtures/village_defense --frames 120
+```
