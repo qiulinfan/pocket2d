@@ -181,18 +181,17 @@ Vector2 MoveCharacter(Rigidbody *body, const Vector2 &delta) {
     return moved;
 }
 
-// Static colliders and solid tilemap cells block; movers, triggers and the
-// optional `ignore` body do not. `radius` is the walker's clearance.
+// Static colliders and solid tilemap cells block; movers and triggers do not.
+// `radius` is the walker's clearance: a cell centre within it of a static
+// collider is a clearance cell, one inside the collider is solid.
 luabridge::LuaRef FindPath(const Vector2 &from, const Vector2 &to, float cell, float radius, int max_nodes) {
     if (!std::isfinite(radius) || radius < 0.0f || radius > 1e6f)
         throw std::invalid_argument("Physics.FindPath radius must be finite and nonnegative");
     const bool has_world = RayCast::HasPhysicsWorld();
-    const auto blocked = [&](float x, float y) {
-        if (ComponentManager::IsSolidTileAt(x, y)) return true;
-        if (!has_world) return false;
+    const auto touches_static = [](float x, float y, float r) {
         struct Hit { bool any = false; } hit;
         const b2Vec2 point{x, y};
-        const b2ShapeProxy proxy = b2MakeProxy(&point, 1, std::max(radius, 0.001f));
+        const b2ShapeProxy proxy = b2MakeProxy(&point, 1, r);
         b2World_OverlapShape(RayCast::GetPhysicsWorld(), &proxy, b2DefaultQueryFilter(),
             [](b2ShapeId shape, void *context) {
                 const auto *metadata = RayCast::FindShapeMetadata(shape);
@@ -203,7 +202,13 @@ luabridge::LuaRef FindPath(const Vector2 &from, const Vector2 &to, float cell, f
             }, &hit);
         return hit.any;
     };
-    const auto path = PhysicsQueries::FindPath(from, to, cell, max_nodes, blocked);
+    const auto occupancy = [&](float x, float y) {
+        using PhysicsQueries::PathCell;
+        if (ComponentManager::IsSolidTileAt(x, y)) return PathCell::Solid;
+        if (!has_world || !touches_static(x, y, std::max(radius, 0.001f))) return PathCell::Free;
+        return radius > 0.001f && !touches_static(x, y, 0.001f) ? PathCell::Clearance : PathCell::Solid;
+    };
+    const auto path = PhysicsQueries::FindPath(from, to, cell, max_nodes, radius, occupancy);
     lua_State *state = LuaState();
     luabridge::LuaRef result = luabridge::newTable(state);
     for (std::size_t i = 0; i < path.size(); ++i) result[static_cast<int>(i + 1)] = path[i];

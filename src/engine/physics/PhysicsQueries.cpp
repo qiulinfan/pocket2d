@@ -253,8 +253,8 @@ Vector2 MoveCharacter(Rigidbody &body, const Vector2 &delta) {
     return {position.x - start.x, position.y - start.y};
 }
 
-std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell, int max_nodes,
-                              const std::function<bool(float, float)> &blocked) {
+std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell, int max_nodes, float clearance,
+                              const std::function<PathCell(float, float)> &occupancy) {
     Finite(from, "path start must be finite");
     Finite(to, "path goal must be finite");
     Positive(cell, "path cell size must be positive and finite");
@@ -270,13 +270,22 @@ std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell
         const float dy = std::abs(static_cast<float>(c.second - goal.second));
         return std::max(dx, dy) + 0.41421356f * std::min(dx, dy);
     };
-    std::map<Cell, bool> blocked_cache;
-    const auto is_blocked = [&](const Cell &c) {
-        if (c == start) return false;
-        const auto found = blocked_cache.find(c);
-        if (found != blocked_cache.end()) return found->second;
+    std::map<Cell, PathCell> occupancy_cache;
+    const auto occupied = [&](const Cell &c) {
+        if (c == start) return PathCell::Free;
+        const auto found = occupancy_cache.find(c);
+        if (found != occupancy_cache.end()) return found->second;
         const Vector2 p = center(c);
-        return blocked_cache[c] = blocked(p.x, p.y);
+        return occupancy_cache[c] = occupancy(p.x, p.y);
+    };
+    // Clearance cells pass only this many cells (Chebyshev) from the start or goal.
+    const int margin = static_cast<int>(std::ceil(std::max(clearance, 0.0f) / cell)) + 1;
+    const auto near = [&](const Cell &a, const Cell &b) {
+        return std::max(std::abs(a.first - b.first), std::abs(a.second - b.second)) <= margin;
+    };
+    const auto passable = [&](const Cell &c) {
+        const PathCell kind = occupied(c);
+        return kind == PathCell::Free || (kind == PathCell::Clearance && (near(c, start) || near(c, goal)));
     };
     struct Open { float f; float g; Cell cell; bool operator>(const Open &o) const { return f > o.f; } };
     std::priority_queue<Open, std::vector<Open>, std::greater<Open>> open;
@@ -298,9 +307,9 @@ std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell
             for (int dx = -1; dx <= 1; ++dx) {
                 if (dx == 0 && dy == 0) continue;
                 const Cell next{current.cell.first + dx, current.cell.second + dy};
-                if (is_blocked(next)) continue;
-                if (dx != 0 && dy != 0 && (is_blocked({current.cell.first + dx, current.cell.second}) ||
-                                           is_blocked({current.cell.first, current.cell.second + dy}))) continue;
+                if (!passable(next)) continue;
+                if (dx != 0 && dy != 0 && (!passable({current.cell.first + dx, current.cell.second}) ||
+                                           !passable({current.cell.first, current.cell.second + dy}))) continue;
                 const float g = current.g + (dx != 0 && dy != 0 ? 1.41421356f : 1.0f);
                 const auto known = cost.find(next);
                 if (known != cost.end() && known->second <= g) continue;

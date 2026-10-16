@@ -170,6 +170,16 @@ void Run() {
       for _,p in ipairs(around) do assert(not (p.x>30 and p.x<31 and p.y>0 and p.y<12),'path never enters wall cells') end
       local partial=Physics.FindPath(Vector2(25,5),Vector2(35,5),1,0.2,10)
       assert(#partial>0 and partial[#partial].x~=35,'a node limit returns the best partial path')
+      -- a walker closer to the pillar than its clearance can still leave, and reach a goal beside it
+      local out=Physics.FindPath(Vector2(9.3,5),Vector2(6,5),0.5,1.0,4000)
+      assert(#out>0 and out[#out].x==6 and out[#out].y==5,'path leaves the clearance margin around the start')
+      local beside=Physics.FindPath(Vector2(6,5),Vector2(9.3,3),0.5,1.0,4000)
+      assert(#beside>0 and math.abs(beside[#beside].x-9.3)<1e-5,'a goal inside the clearance margin is reached')
+      local past=Physics.FindPath(Vector2(9.3,5),Vector2(11.5,5),0.5,1.0,20000)
+      assert(#past>0 and math.abs(past[#past].x-11.5)<1e-5,'path from the margin reaches the far side')
+      for _,p in ipairs(past) do
+        assert(not (p.x>9.5 and p.x<10.5 and p.y>2 and p.y<8),'path never enters the pillar')
+      end
       -- slide along the 20-cell floor top
       SLIDER:SetVelocity(Vector2(8,0))
     )");
