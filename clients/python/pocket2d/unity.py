@@ -313,6 +313,7 @@ class World:
         self.transform_parent = {}  # prefab-root transform key -> scene transform key
         self.aliases = {}  # stripped object key -> key of the prefab object it stands for
         self.report = []
+        self.sprite_actors = {}  # transform key -> the root sprite actor imported for it
         self._load(UnityFile(scene), namespace=(), modifications=[], root_parent=None)
 
     def _load(self, unity_file, namespace, modifications, root_parent):
@@ -479,6 +480,7 @@ def import_sprites(world, project, textures, layers, index, actors, stats, next_
         actors.append({"uid": next_uid, "name": names.get(go_key, "Sprite"), "components": {
             "transform": {"type": "Transform", "x": round(x, 4), "y": round(-y, 4), "rotation": round(-rotation, 3)},
             "sprite": sprite}})
+        world.sprite_actors[transform] = actors[-1]
         stats["sprites"] += 1
     return next_uid, root_sprites
 
@@ -597,7 +599,8 @@ def safe(name):
 
 def import_points(world, transforms, names, entity_of, prefixes, actors, stats, next_uid):
     """Active GameObjects named with one of the prefixes become marker actors
-    (SpawnMarker kind "point"): spawn points and other positions gameplay uses."""
+    (SpawnMarker kind "point"): spawn points and other positions gameplay uses.
+    A point already imported as a sprite gets the marker on that actor."""
     if not prefixes:
         return next_uid
     for go_key, transform in sorted(transforms.items(), key=lambda item: str(item[0])):
@@ -606,11 +609,16 @@ def import_points(world, transforms, names, entity_of, prefixes, actors, stats, 
             continue
         if not world.active(transform) or entity_of.get(transform) is not None:
             continue
+        marker = {"type": "SpawnMarker", "kind": "point"}
+        if transform in world.sprite_actors:  # a visible point keeps its sprite actor and gains the marker
+            world.sprite_actors[transform]["components"]["spawn"] = marker
+            stats["points"] += 1
+            continue
         x, y, _, _, _ = world.world_transform(transform)
         next_uid += 1
         actors.append({"uid": next_uid, "name": name, "components": {
             "transform": {"type": "Transform", "x": round(x, 4), "y": round(-y, 4)},
-            "spawn": {"type": "SpawnMarker", "kind": "point"}}})
+            "spawn": marker}})
         stats["points"] += 1
     return next_uid
 

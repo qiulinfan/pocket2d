@@ -96,6 +96,9 @@ def unity_scene():
             "--- !u!61 &33\nBoxCollider2D:\n  m_GameObject: {fileID: 30}\n  m_Enabled: 1\n  m_IsTrigger: 0\n"
             "  m_Size: {x: 1, y: 2}\n  m_Offset: {x: 0, y: 1}\n" +
             game_object % (50, "spawnPoint1") + transform % (51, 50, 7, 2, 0) +
+            game_object % (60, "spawnPoint2") + transform % (61, 60, 8, 2, 0) +
+            "--- !u!212 &62\nSpriteRenderer:\n  m_GameObject: {fileID: 60}\n  m_Enabled: 1\n"
+            "  m_Sprite: {fileID: 21300000, guid: %s, type: 3}\n" % g["rock"] +
             game_object % (40, "Hero") + transform % (41, 40, 0, -3, 0) +
             "--- !u!50 &42\nRigidbody2D:\n  m_GameObject: {fileID: 40}\n  m_BodyType: 0\n"
             "--- !u!212 &43\nSpriteRenderer:\n  m_GameObject: {fileID: 40}\n  m_Enabled: 1\n"
@@ -123,7 +126,11 @@ def run_unity(game, root):
     (project / "component_types/SpawnMarker.lua").write_text('SpawnMarker = {kind = ""}')
     pocket(game, "import", "unity", str(assets / "Scenes/test.unity"), "--assets", str(assets), "--project", str(project),
            "--name", "imported", "--point-prefix", "spawnPoint")
-    actors = {actor["name"]: actor["components"] for actor in json.loads((project / "scenes/imported.scene").read_text())["actors"]}
+    scene_actors = json.loads((project / "scenes/imported.scene").read_text())["actors"]
+    actors = {actor["name"]: actor["components"] for actor in scene_actors}
+    visible_points = [actor["components"] for actor in scene_actors if actor["name"] == "spawnPoint2"]
+    check(len(visible_points) == 1 and "sprite" in visible_points[0] and visible_points[0]["spawn"]["kind"] == "point",
+          "a point with a sprite is one actor with both: %r" % visible_points)
     walls = json.loads((project / "maps/Walls_1.tilemap.json").read_text())
     check((walls["width"], walls["height"]) == (2, 1) and walls["layers"]["solid"]["cells"] == [1, 0] and
           walls["layers"]["ground"]["cells"] == [0, 2], "Tile asset colliders pick solid vs ground: %r" % walls["layers"])
