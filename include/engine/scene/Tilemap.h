@@ -53,6 +53,9 @@ public:
     bool SetCell(const std::string &layer, double x, double y, double id);
     // Committed IDs of a rectangle inside the map, row-major (bulk reads for
     // game-side mirrors and planners). Raises when the rectangle leaves the map.
+    // Whether a world point lies in a committed nonzero solid cell of this
+    // enabled map (the outline-only collision has no interior to query).
+    bool IsSolidAt(double world_x, double world_y) const;
     std::vector<int> GetCells(const std::string &layer, double x, double y, double width, double height) const;
     // Autotiling: the terrain name at a cell ("" when none; nullopt outside),
     // and placing/clearing ("") a terrain, which chooses the cell's tile from

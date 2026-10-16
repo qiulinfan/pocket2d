@@ -182,6 +182,8 @@ public:
     static void CommitTilemaps();
     static void QueueTilemaps(float min_x, float min_y, float max_x, float max_y,
                               bool scene_backed_only = false);
+    // Whether any live tilemap has a solid cell at the world point.
+    static bool IsSolidTileAt(float x, float y);
     static bool SetTilemapResource(Actor::UID actor_uid, const std::string &key,
                                   const std::string &resource);
     static bool TryGetRuntimeTransformWorld(Actor::UID actor_uid,

@@ -62,7 +62,9 @@ struct Fixture {
           {"uid":6,"name":"ghost","components":{"body":{"type":"Rigidbody","x":6,"y":0,"gravity_scale":0,"has_trigger":false,"collision_layer":2,"collision_mask":2}}},
           {"uid":7,"name":"slider","components":{"body":{"type":"Rigidbody","x":1,"y":9.5,"gravity_scale":0,"has_trigger":false,"width":0.9,"height":0.9,"friction":0}}},
           {"uid":8,"name":"mover","components":{"transform":{"type":"Transform","x":28,"y":5},"body":{"type":"Rigidbody","body_type":"kinematic","x":28,"y":5,"has_trigger":false,"collider_type":"circle","radius":0.4}}},
-          {"uid":9,"name":"terrain","components":{"map":{"type":"Tilemap","map_resource":"floor.tilemap.json"},"transform":{"type":"Transform"}}}
+          {"uid":9,"name":"terrain","components":{"map":{"type":"Tilemap","map_resource":"floor.tilemap.json"},"transform":{"type":"Transform"}}},
+          {"uid":10,"name":"boxer","components":{"transform":{"type":"Transform","x":5,"y":9.1},"body":{"type":"Rigidbody","body_type":"kinematic","x":5,"y":9.1,"has_trigger":false,"collider_type":"box","width":0.8,"height":1.6}}},
+          {"uid":11,"name":"pillar","components":{"body":{"type":"Rigidbody","body_type":"static","x":10,"y":5,"has_trigger":false,"width":1,"height":6}}}
         ]})";
     }
     ~Fixture() { ResourcePath::SetResourcesRootPath(previous); std::error_code error; fs::remove_all(root, error); }
@@ -80,6 +82,7 @@ void Run() {
       CAP=Actor.Find('capsule'):GetComponent('Rigidbody'); POLY=Actor.Find('polygon'):GetComponent('Rigidbody')
       GHOST=Actor.Find('ghost'):GetComponent('Rigidbody'); SLIDER=Actor.Find('slider'):GetComponent('Rigidbody')
       MOVER=Actor.Find('mover'):GetComponent('Rigidbody')
+      BOXER=Actor.Find('boxer'):GetComponent('Rigidbody')
       local function names(list) local out={} for i,a in ipairs(list) do out[i]=a:GetName() end return table.concat(out,',') end
       assert(names(Physics.OverlapCircle(Vector2(0,0),0.6,false))=='a','overlap circle finds colliders')
       assert(names(Physics.OverlapCircle(Vector2(0,5),0.3,false))=='','triggers are excluded by default')
@@ -142,6 +145,31 @@ void Run() {
       assert(math.abs(moved.x-(after.x-before.x))<1e-4,'MoveCharacter returns the applied movement')
       ok=pcall(function() Physics.MoveCharacter(A,Vector2(1,0)) end); assert(not ok,'mover requires a kinematic body')
       MOVED_TO=after
+      -- box mover: square corners, per-axis moves (tile platformers)
+      local p0=BOXER:GetPosition()
+      Physics.MoveCharacter(BOXER,Vector2(0,1))
+      local p1=BOXER:GetPosition()
+      assert(p1.y<=9.2+1e-3 and p1.y>=9.15,'box mover lands on the floor top: '..p1.y)
+      local slid=Physics.MoveCharacter(BOXER,Vector2(3,0))
+      assert(math.abs(slid.x-3)<1e-4 and math.abs(slid.y)<1e-4,'box mover walks along the floor')
+      BOXER:SetPosition(Vector2(19.45,p1.y))
+      Physics.MoveCharacter(BOXER,Vector2(0,1))
+      assert(BOXER:GetPosition().y<9.21,'a box over the ledge edge does not slip off the corner')
+      BOXER:SetPosition(Vector2(27,3))   -- clear of the circle mover resting at the wall
+      Physics.MoveCharacter(BOXER,Vector2(5,0))
+      local wall=BOXER:GetPosition().x
+      assert(wall>29.5 and wall<29.61,'box mover stops at the wall: '..wall)
+      -- grid path finding around solid tiles and static colliders
+      local path=Physics.FindPath(Vector2(8,5),Vector2(12,5),0.5,0.2,4000)
+      assert(#path>0 and path[#path].x==12 and path[#path].y==5,'path reaches the goal exactly')
+      for _,p in ipairs(path) do
+        assert(not (p.x>9.3 and p.x<10.7 and p.y>1.8 and p.y<8.2),'path avoids the static pillar')
+      end
+      local around=Physics.FindPath(Vector2(25,5),Vector2(35,5),1,0.2,20000)
+      assert(#around>0 and around[#around].x==35,'path goes around the full-height tile wall')
+      for _,p in ipairs(around) do assert(not (p.x>30 and p.x<31 and p.y>0 and p.y<12),'path never enters wall cells') end
+      local partial=Physics.FindPath(Vector2(25,5),Vector2(35,5),1,0.2,10)
+      assert(#partial>0 and partial[#partial].x~=35,'a node limit returns the best partial path')
       -- slide along the 20-cell floor top
       SLIDER:SetVelocity(Vector2(8,0))
     )");

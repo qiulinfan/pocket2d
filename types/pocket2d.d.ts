@@ -346,6 +346,8 @@ declare namespace Physics {
     function GetGravity(this: void): Vector2;
     function SetGravity(this: void, gravity: Vector2): void;
     function MoveCharacter(this: void, body: Rigidbody, delta: Vector2): Vector2;
+    /** Grid A* around static colliders and solid tiles; partial path when the goal is not reached. */
+    function FindPath(this: void, from: Vector2, to: Vector2, cell: number, radius: number, max_nodes: number): (Vector2)[];
     function ConnectDistance(this: void, a: Rigidbody, b: Rigidbody, anchor_a: Vector2, anchor_b: Vector2): Joint;
     function ConnectRevolute(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint;
     function ConnectWeld(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint;

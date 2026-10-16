@@ -3,7 +3,10 @@
 #include "scene/Actor.h"
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <queue>
 #include <set>
+#include <unordered_map>
 #include <stdexcept>
 
 namespace {
@@ -99,6 +102,50 @@ b2Capsule MoverCapsule(const Rigidbody &body, const b2Vec2 &position) {
     return {{position.x, position.y - half}, {position.x, position.y + half}, radius};
 }
 
+// Box mover sweep: ignores the body's own shapes and non-colliders; a shape
+// already touching blocks only when it faces against the motion.
+struct BoxCastContext {
+    const Rigidbody *self = nullptr;
+    b2Vec2 direction{0, 0};
+    float fraction = 1.0f;
+    bool hit = false;
+};
+float CollectBoxCast(b2ShapeId shape, b2Vec2, b2Vec2 normal, float fraction, void *context) {
+    auto &cast = *static_cast<BoxCastContext *>(context);
+    if (b2Shape_GetBody(shape) == cast.self->body) return -1.0f;
+    const auto *metadata = RayCast::FindShapeMetadata(shape);
+    if (metadata == nullptr || metadata->kind != RayCast::FixtureKind::Collider) return -1.0f;
+    if (fraction == 0.0f && normal.x * cast.direction.x + normal.y * cast.direction.y > -0.5f) return -1.0f;
+    if (fraction < cast.fraction) { cast.fraction = fraction; cast.hit = true; }
+    return fraction;
+}
+Vector2 MoveBox(Rigidbody &body, const Vector2 &delta) {
+    const b2WorldId world = RayCast::GetPhysicsWorld();
+    const b2Vec2 start = b2Body_GetPosition(body.body);
+    b2Vec2 position = start;
+    const b2Filter filter = body.GetCollisionFilter();
+    const b2QueryFilter query{filter.categoryBits, filter.maskBits};
+    const float hx = body.width * 0.5f, hy = body.height * 0.5f;
+    const float skin = 0.005f * b2GetLengthUnitsPerMeter();
+    for (int axis = 0; axis < 2; ++axis) {
+        const float amount = axis == 0 ? delta.x : delta.y;
+        if (amount == 0.0f) continue;
+        const b2Vec2 corners[4] = {{position.x - hx, position.y - hy}, {position.x + hx, position.y - hy},
+                                   {position.x + hx, position.y + hy}, {position.x - hx, position.y + hy}};
+        const b2ShapeProxy proxy = b2MakeProxy(corners, 4, 0.0f);
+        const b2Vec2 translation = axis == 0 ? b2Vec2{amount, 0} : b2Vec2{0, amount};
+        BoxCastContext cast{&body, {axis == 0 ? (amount > 0 ? 1.0f : -1.0f) : 0.0f,
+                                    axis == 1 ? (amount > 0 ? 1.0f : -1.0f) : 0.0f}};
+        b2World_CastShape(world, &proxy, translation, query, CollectBoxCast, &cast);
+        float moved = std::abs(amount);
+        if (cast.hit) moved = std::max(0.0f, cast.fraction * std::abs(amount) - skin);
+        const float signed_move = amount > 0 ? moved : -moved;
+        if (axis == 0) position.x += signed_move; else position.y += signed_move;
+    }
+    body.SetPosition({position.x, position.y});
+    return {position.x - start.x, position.y - start.y};
+}
+
 struct MoverContext {
     const Rigidbody *self = nullptr;
     b2Filter filter;
@@ -170,6 +217,7 @@ Vector2 MoveCharacter(Rigidbody &body, const Vector2 &delta) {
     Finite(delta, "character movement must be finite");
     Require(body.HasBody(), "MoveCharacter requires a started Rigidbody");
     Require(b2Body_GetType(body.body) == b2_kinematicBody, "MoveCharacter requires a kinematic Rigidbody");
+    if (body.collider_type == "box") return MoveBox(body, delta);
     const b2WorldId world = RayCast::GetPhysicsWorld();
     const b2Vec2 start = b2Body_GetPosition(body.body);
     b2Vec2 position = start;
@@ -203,6 +251,69 @@ Vector2 MoveCharacter(Rigidbody &body, const Vector2 &delta) {
     }
     body.SetPosition({position.x, position.y});
     return {position.x - start.x, position.y - start.y};
+}
+
+std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell, int max_nodes,
+                              const std::function<bool(float, float)> &blocked) {
+    Finite(from, "path start must be finite");
+    Finite(to, "path goal must be finite");
+    Positive(cell, "path cell size must be positive and finite");
+    Require(max_nodes >= 1 && max_nodes <= 1000000, "path max_nodes must be in [1, 1000000]");
+    using Cell = std::pair<int, int>;
+    const auto cell_of = [&](const Vector2 &p) {
+        return Cell{static_cast<int>(std::floor(p.x / cell)), static_cast<int>(std::floor(p.y / cell))};
+    };
+    const Cell start = cell_of(from), goal = cell_of(to);
+    const auto center = [&](const Cell &c) { return Vector2((c.first + 0.5f) * cell, (c.second + 0.5f) * cell); };
+    const auto heuristic = [&](const Cell &c) {
+        const float dx = std::abs(static_cast<float>(c.first - goal.first));
+        const float dy = std::abs(static_cast<float>(c.second - goal.second));
+        return std::max(dx, dy) + 0.41421356f * std::min(dx, dy);
+    };
+    std::map<Cell, bool> blocked_cache;
+    const auto is_blocked = [&](const Cell &c) {
+        if (c == start) return false;
+        const auto found = blocked_cache.find(c);
+        if (found != blocked_cache.end()) return found->second;
+        const Vector2 p = center(c);
+        return blocked_cache[c] = blocked(p.x, p.y);
+    };
+    struct Open { float f; float g; Cell cell; bool operator>(const Open &o) const { return f > o.f; } };
+    std::priority_queue<Open, std::vector<Open>, std::greater<Open>> open;
+    std::map<Cell, float> cost{{start, 0.0f}};
+    std::map<Cell, Cell> parent;
+    open.push({heuristic(start), 0.0f, start});
+    Cell best = start;
+    float best_h = heuristic(start);
+    int expanded = 0;
+    while (!open.empty() && expanded < max_nodes) {
+        const Open current = open.top();
+        open.pop();
+        if (current.g > cost[current.cell]) continue;
+        ++expanded;
+        const float h = heuristic(current.cell);
+        if (h < best_h) { best_h = h; best = current.cell; }
+        if (current.cell == goal) { best = goal; break; }
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                const Cell next{current.cell.first + dx, current.cell.second + dy};
+                if (is_blocked(next)) continue;
+                if (dx != 0 && dy != 0 && (is_blocked({current.cell.first + dx, current.cell.second}) ||
+                                           is_blocked({current.cell.first, current.cell.second + dy}))) continue;
+                const float g = current.g + (dx != 0 && dy != 0 ? 1.41421356f : 1.0f);
+                const auto known = cost.find(next);
+                if (known != cost.end() && known->second <= g) continue;
+                cost[next] = g;
+                parent[next] = current.cell;
+                open.push({g + heuristic(next), g, next});
+            }
+    }
+    std::vector<Vector2> path;
+    for (Cell c = best; c != start; c = parent.at(c)) path.push_back(center(c));
+    std::reverse(path.begin(), path.end());
+    if (best == goal && !path.empty()) path.back() = to;
+    return path;
 }
 
 } // namespace PhysicsQueries

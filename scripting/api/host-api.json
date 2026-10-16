@@ -2447,6 +2447,36 @@
           "returns": "Vector2"
         },
         {
+          "name": "FindPath",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "from",
+              "type": "Vector2"
+            },
+            {
+              "name": "to",
+              "type": "Vector2"
+            },
+            {
+              "name": "cell",
+              "type": "number"
+            },
+            {
+              "name": "radius",
+              "type": "number"
+            },
+            {
+              "name": "max_nodes",
+              "type": "integer"
+            }
+          ],
+          "returns": {
+            "array": "Vector2"
+          },
+          "description": "Grid A* around static colliders and solid tiles; partial path when the goal is not reached."
+        },
+        {
           "name": "ConnectDistance",
           "call": "static",
           "parameters": [

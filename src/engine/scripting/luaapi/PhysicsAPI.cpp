@@ -181,6 +181,35 @@ Vector2 MoveCharacter(Rigidbody *body, const Vector2 &delta) {
     return moved;
 }
 
+// Static colliders and solid tilemap cells block; movers, triggers and the
+// optional `ignore` body do not. `radius` is the walker's clearance.
+luabridge::LuaRef FindPath(const Vector2 &from, const Vector2 &to, float cell, float radius, int max_nodes) {
+    if (!std::isfinite(radius) || radius < 0.0f || radius > 1e6f)
+        throw std::invalid_argument("Physics.FindPath radius must be finite and nonnegative");
+    const bool has_world = RayCast::HasPhysicsWorld();
+    const auto blocked = [&](float x, float y) {
+        if (ComponentManager::IsSolidTileAt(x, y)) return true;
+        if (!has_world) return false;
+        struct Hit { bool any = false; } hit;
+        const b2Vec2 point{x, y};
+        const b2ShapeProxy proxy = b2MakeProxy(&point, 1, std::max(radius, 0.001f));
+        b2World_OverlapShape(RayCast::GetPhysicsWorld(), &proxy, b2DefaultQueryFilter(),
+            [](b2ShapeId shape, void *context) {
+                const auto *metadata = RayCast::FindShapeMetadata(shape);
+                if (metadata == nullptr || metadata->kind != RayCast::FixtureKind::Collider) return true;
+                if (b2Body_GetType(b2Shape_GetBody(shape)) != b2_staticBody) return true;
+                static_cast<Hit *>(context)->any = true;
+                return false;
+            }, &hit);
+        return hit.any;
+    };
+    const auto path = PhysicsQueries::FindPath(from, to, cell, max_nodes, blocked);
+    lua_State *state = LuaState();
+    luabridge::LuaRef result = luabridge::newTable(state);
+    for (std::size_t i = 0; i < path.size(); ++i) result[static_cast<int>(i + 1)] = path[i];
+    return result;
+}
+
 void InjectPhysicsAPI() {
     luabridge::getGlobalNamespace(LuaState())
         .beginClass<RayCast::HitResult>("HitResult")
@@ -211,6 +240,7 @@ void InjectPhysicsAPI() {
         .addFunction("GetGravity", &PhysicsQueries::GetGravity)
         .addFunction("SetGravity", &PhysicsQueries::SetGravity)
         .addFunction("MoveCharacter", &MoveCharacter)
+        .addFunction("FindPath", &FindPath)
         .addFunction("ConnectDistance", &ConnectDistance)
         .addFunction("ConnectRevolute", &ConnectRevolute)
         .addFunction("ConnectWeld", &ConnectWeld)
