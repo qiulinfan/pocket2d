@@ -23,6 +23,11 @@ Pocket2D 的目标栈和总体范围见 [roadmap.md](roadmap.md)。当前 defens
 | 世界切换与镜头反馈 | `U:Assets/Scripts/World/TransportPortal.cs` 有配对 portal、到达冷却、方向偏移、淡出、Cinemachine warp、世界事件；`DevilTree/WorldManager.cs` 切换两世界引导 UI。 | `P:tests/fixtures/two_world_village` 已实现同一 scene 内两个常驻区域、成对门户、42 tick淡出/黑屏/淡入、到达保护与离开触发区后重新武装；切换玩家位置、输入锁和镜头。村庄倒计时与入侵在地下访问期间继续，世界状态纳入同一检查点。门户不调用 Scene.Load。 | `agent_two_world_village_test.py` 已在 Debug、Release 和 ASan/UBSan 验证往返、持续停留防重复传送、缺失配对端点拒绝、过渡期间失败后恢复及跨进程世界恢复；`two_world_render_test.cpp` 的 software、Metal、OpenGL 路径检查实际画面。 | **单岛配对门户切片已实现；P1/P2**：多岛路线、发现/解锁引导、完整原作世界事件与镜头手感仍缺；常驻双区域不证明异步流式加载。人类需验收过渡节奏、战斗可读性和移动反馈。 |
 | 编辑、导入和资产可追溯性 | Unity scenes/prefabs/ScriptableObjects、`.meta` GUID、InputAction 与各类 Inspector 构成当前作者工作流。 | `P:src/editor/documents/SceneDocument.cpp`、`SceneMutations.cpp` 和各 panel 已有 scene/template/component 编辑；新增 `P:src/editor/documents/TilemapDocument.cpp` 负责地图作者副本、数值编辑、undo/redo、显式原子保存、磁盘Revert与纯内存Discard。Overlay按资源匹配预览，保留无map场景下的全局草稿入口。 | `P:tests/tilemap_editor_test.cpp` 与 `P:tests/tilemap_overlay_test.cpp` 使用真实ImGui/Overlay验证绑定、dirty切换、预览、same-UID新代际重载、源文件损坏/删除时的草稿恢复；不是人类编辑效率验收。 | **地图作者工具第一片已实现；P1/P2**：画笔/自动拼接、clip/物品编辑、重命名引用追踪、Unity importer和完整资产转换清单仍缺。迁移只选择明确获准的资产子集并保留来源/许可；本矩阵不授权复制。 |
 
+**真实世界导入（2026-10-16）。** `Projects/VillageRim` 用 Unity YAML 导入器导出了 Gameplay 场景的
+tilemap、精灵、碰撞体和实体占位，并移植了玩家、哥布林战斗与 A/B 传送门的可玩切片；
+发现的引擎缺口与修复见 [game-completeness-tests.md](game-completeness-tests.md)。
+该项目不在引擎仓库中，原游戏资产不随引擎分发。
+
 ## 已执行的第一步与下一可运行切片
 
 本矩阵最初选择“原生64×64双层Tilemap + 可修改格子”作为下一步，完整工程合同保留在 [tilemap-slice.md](tilemap-slice.md)。本轮已按该方向落地数据/API、ground-solid碰撞、可见区域提交、4×4种收、作者编辑草稿和agent查询；实际fixture独立放在 `tests/fixtures/tilemap_farm/`，没有重写原defense fixture，也没有导入Unity内容。
