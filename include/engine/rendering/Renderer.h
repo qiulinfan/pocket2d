@@ -110,6 +110,9 @@ public:
     static SDL_Texture *LoadTexture(const std::string &image_name,
                                     SDL_Renderer *renderer, float *width,
                                     float *height);
+    // Pixel size of an image resource, decoded without a renderer (headless
+    // runs too) and cached until images reload. False when it cannot load.
+    static bool GetImageSize(const std::string &image_name, int &width, int &height);
     static void QueueSceneImageDraw(const ImageDrawRequest &request);
     static void QueueSceneParticleBatch(const ParticleBatchRequest &request);
     static void QueueUIImageDraw(const ImageDrawRequest &request);

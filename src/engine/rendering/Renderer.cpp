@@ -57,6 +57,15 @@ std::string ResolveSystemFontPath() {
     return std::filesystem::exists(system_font) ? system_font.string() : "";
 }
 
+struct ImageSizeCache {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::pair<int, int>> sizes;
+};
+ImageSizeCache &ImageSizes() {
+    static ImageSizeCache cache;
+    return cache;
+}
+
 std::string ResolveImagePath(const std::string &image_name) {
     const std::filesystem::path exact(image_name);
     if (exact.is_absolute()) {
@@ -405,6 +414,10 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
 }
 
 int Renderer::ReloadChangedImages() {
+    {
+        const std::lock_guard lock(ImageSizes().mutex);
+        ImageSizes().sizes.clear();
+    }
     int dropped = 0;
     for (auto it = image_cache.begin(); it != image_cache.end();) {
         const CachedImageTexture &cached = it->second;
@@ -474,6 +487,29 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(const ImageDrawReque
         image_cache_by_id[index] = cached;
     }
     return cached;
+}
+
+bool Renderer::GetImageSize(const std::string &image_name, int &width, int &height) {
+    auto &cache = ImageSizes();
+    {
+        const std::lock_guard lock(cache.mutex);
+        const auto found = cache.sizes.find(image_name);
+        if (found != cache.sizes.end()) {
+            width = found->second.first;
+            height = found->second.second;
+            return true;
+        }
+    }
+    const std::string path = ResolveImagePath(image_name);
+    if (path.empty()) return false;
+    SDL_Surface *surface = IMG_Load(path.c_str());
+    if (surface == nullptr) return false;
+    width = surface->w;
+    height = surface->h;
+    SDL_DestroySurface(surface);
+    const std::lock_guard lock(cache.mutex);
+    cache.sizes[image_name] = {width, height};
+    return true;
 }
 
 SDL_Texture *Renderer::LoadTexture(const std::string &image_name,
@@ -710,7 +746,13 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
             draw_height = source_rect.h;
         }
 
-        SDL_FRect dst = {request.x, request.y, draw_width, draw_height};
+        // UI scale (DrawUIScaled) stretches from the top-left corner; a negative
+        // scale mirrors the image in place.
+        SDL_FRect dst = {request.x, request.y, draw_width * std::abs(request.scale_x),
+                         draw_height * std::abs(request.scale_y)};
+        SDL_FlipMode ui_flip = SDL_FLIP_NONE;
+        if (request.scale_x < 0.0f) ui_flip = static_cast<SDL_FlipMode>(ui_flip | SDL_FLIP_HORIZONTAL);
+        if (request.scale_y < 0.0f) ui_flip = static_cast<SDL_FlipMode>(ui_flip | SDL_FLIP_VERTICAL);
         SDL_SetTextureColorMod(texture, static_cast<Uint8>(ClampByte(request.r)),
                                static_cast<Uint8>(ClampByte(request.g)),
                                static_cast<Uint8>(ClampByte(request.b)));
@@ -718,7 +760,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
 
         SDLRenderHelper::SDL_RenderTextureRotated(Actor::kInvalidUID, "", renderer,
                                           texture, source_rect_ptr,
-                                          &dst, 0.0f, nullptr, SDL_FLIP_NONE);
+                                          &dst, 0.0f, nullptr, ui_flip);
 
         SDL_SetTextureColorMod(texture, 255, 255, 255);
         SDL_SetTextureAlphaMod(texture, 255);
@@ -801,6 +843,10 @@ void Renderer::RenderAndClearAllPixels(SDL_Renderer *renderer) {
 
 // Clear resource caches and per-frame draw queues.
 void Renderer::ClearImageTextureCache() {
+    {
+        const std::lock_guard lock(ImageSizes().mutex);
+        ImageSizes().sizes.clear();
+    }
     image_cache_by_id.clear();
     for (auto &entry : image_cache) {
         if (entry.second.texture != nullptr) {

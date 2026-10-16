@@ -209,6 +209,26 @@ void TestRuntime(Engine &engine, const std::string &backend,
           "frame requests must not leak into next render");
     engine.StepSimulation();
     Check(FrameClock::GetFrameNumber() == 2, "nonrendered step advances exactly once");
+    // UI scaling stretches from the top-left corner; a negative scale mirrors.
+    int width = 0, height = 0;
+    Check(Renderer::GetImageSize("red", width, height) && width == 8 && height == 8,
+          "image size resolves without drawing");
+    Check(!Renderer::GetImageSize("missing_image", width, height), "missing image has no size");
+    ImageDrawRequest scaled;
+    scaled.image_name = "red";
+    scaled.x = 40.0f; scaled.y = 4.0f; scaled.scale_x = 2.0f; scaled.scale_y = 3.0f;
+    Renderer::QueueUIImageDraw(scaled);
+    ImageDrawRequest mirrored;
+    mirrored.image_name = "checker";
+    mirrored.x = 40.0f; mirrored.y = 40.0f; mirrored.scale_x = -1.0f;
+    Renderer::QueueUIImageDraw(mirrored);
+    engine.RunSingleFrame(false);
+    Surface ui = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
+    Check(Pixel(ui.get(), 55, 27) == std::array<Uint8, 4>{240, 20, 30, 255}, "scaled UI covers 16x24");
+    Check(Pixel(ui.get(), 56, 10) == std::array<Uint8, 4>{3, 7, 11, 255} &&
+          Pixel(ui.get(), 45, 28) == std::array<Uint8, 4>{3, 7, 11, 255}, "scaled UI stops at its size");
+    Check(Pixel(ui.get(), 40, 40) == std::array<Uint8, 4>{255, 255, 255, 255},
+          "negative UI scale mirrors (checker corner turns white)");
     TestFractionalTexturePath(renderer);
     TestParticleBatchPath(renderer);
 }

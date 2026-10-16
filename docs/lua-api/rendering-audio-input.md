@@ -8,6 +8,8 @@
 | --- | --- |
 | `Image.DrawUI(image_name, x, y)` | Draws a UI image with default tint |
 | `Image.DrawUIEx(image_name, x, y, r, g, b, a, sorting_order)` | Draws a UI image with tint and sorting order |
+| `Image.DrawUIScaled(image_name, x, y, scale_x, scale_y, r, g, b, a, sorting_order)` | Draws a UI image scaled from its top-left corner; a negative scale mirrors it in place |
+| `Image.GetSize(image_name)` | The image's pixel size as a `Vector2` (works headless; raises if the image cannot load) |
 
 ### World-space drawing
 
