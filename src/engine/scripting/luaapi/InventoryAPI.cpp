@@ -182,13 +182,15 @@ int GetItem(lua_State *state) {
     const auto catalog = CatalogAt(state, 1);
     const auto *item = ItemCatalog::Find(*catalog, String(state, 2, 64));
     if (!item) { lua_pushnil(state); return 1; }
-    lua_createtable(state, 0, 10);
+    lua_createtable(state, 0, 14);
     TextField(state, "id", item->id); TextField(state, "display_name", item->display_name);
     TextField(state, "description", item->description); TextField(state, "kind", item->kind);
     TextField(state, "equipment_slot", item->equipment_slot);
     IntField(state, "max_stack", item->max_stack); IntField(state, "health_restore", item->health_restore);
     IntField(state, "attack", item->attack); IntField(state, "defense", item->defense);
-    lua_pushnumber(state, item->move_speed_bonus); lua_setfield(state, -2, "move_speed_bonus"); return 1;
+    lua_pushnumber(state, item->move_speed_bonus); lua_setfield(state, -2, "move_speed_bonus");
+    TextField(state, "icon", item->icon); IntField(state, "tool_power", item->tool_power);
+    TextField(state, "places", item->places); TextField(state, "use", item->use); return 1;
 }
 int GetSlot(lua_State *state) {
     Arity(state, 2, 2); const auto inventory = InventoryAt(state, 1); const int index = SlotIndex(state, 2);

@@ -128,19 +128,38 @@ void ValidateData(Data &data) {
         Text(item.description, 4096, where + ".description");
         Text(item.kind, 16, where + ".kind", true);
         Text(item.equipment_slot, 16, where + ".equipment_slot");
-        Require(item.kind == "material" || item.kind == "food" || item.kind == "weapon" || item.kind == "armor", where + ": unsupported kind");
+        Require(item.kind == "material" || item.kind == "food" || item.kind == "weapon" || item.kind == "armor" ||
+                    item.kind == "tool" || item.kind == "placeable" || item.kind == "consumable",
+                where + ": unsupported kind");
         Require(item.equipment_slot.empty() || item.equipment_slot == "subweapon" || item.equipment_slot == "head" ||
                 item.equipment_slot == "chest" || item.equipment_slot == "legs", where + ": unsupported equipment slot");
         Require(item.max_stack >= 1 && item.max_stack <= 9999, where + ".max_stack must be 1..9999");
         Require(item.health_restore >= 0 && item.health_restore <= 1000000 && item.attack >= 0 && item.attack <= 1000000 &&
-                item.defense >= 0 && item.defense <= 1000000, where + ": integer stats must be 0..1000000");
+                item.defense >= 0 && item.defense <= 1000000 && item.tool_power >= 0 && item.tool_power <= 1000000,
+                where + ": integer stats must be 0..1000000");
         Require(std::isfinite(item.move_speed_bonus) && item.move_speed_bonus >= 0 && item.move_speed_bonus <= 100,
                 where + ".move_speed_bonus must be finite and 0..100");
-        if (item.kind == "material" || item.kind == "food") {
+        Text(item.icon, 256, where + ".icon");
+        Require(item.icon.empty() || (item.icon.front() != '/' && item.icon.find("..") == std::string::npos &&
+                                      item.icon.find('\\') == std::string::npos),
+                where + ".icon must be a relative image path");
+        Text(item.places, 64, where + ".places", item.kind == "placeable");
+        Text(item.use, 64, where + ".use", item.kind == "consumable");
+        Require(item.kind == "tool" ? item.tool_power >= 1 : item.tool_power == 0,
+                where + ": tool requires tool_power >= 1; other kinds have none");
+        Require(item.kind == "placeable" || item.places.empty(), where + ": only placeables have places");
+        Require(item.kind == "consumable" || item.use.empty(), where + ": only consumables have use");
+        if (item.kind == "material" || item.kind == "food" || item.kind == "placeable" || item.kind == "consumable") {
             Require(item.equipment_slot.empty() && item.attack == 0 && item.defense == 0 && item.move_speed_bonus == 0,
-                    where + ": food/material cannot have equipment or combat stats");
-            Require(item.kind == "food" ? item.health_restore >= 1 : item.health_restore == 0,
-                    where + ": food requires health_restore >=1; material requires zero");
+                    where + ": stackable kinds cannot have equipment or combat stats");
+            if (item.kind == "food")
+                Require(item.health_restore >= 1, where + ": food requires health_restore >= 1");
+            else if (item.kind != "consumable")
+                Require(item.health_restore == 0, where + ": only food and consumables restore health");
+        } else if (item.kind == "tool") {
+            Require(item.max_stack == 1 && item.health_restore == 0 && item.defense == 0 && item.move_speed_bonus == 0 &&
+                        (item.equipment_slot.empty() || item.equipment_slot == "subweapon"),
+                    where + ": tool requires max_stack 1, no healing or armor stats, and no slot or subweapon");
         } else {
             Require(item.max_stack == 1 && item.health_restore == 0, where + ": equipment requires max_stack 1 and no healing");
             if (item.kind == "weapon")
@@ -168,7 +187,8 @@ Data LoadFile(const std::filesystem::path &path) {
     for (const auto &entry : json["items"].GetArray()) {
         const auto where = "items[" + std::to_string(data.items.size()) + "]";
         Keys(entry, {"id", "display_name", "kind", "max_stack"},
-             {"description", "equipment_slot", "health_restore", "attack", "defense", "move_speed_bonus"}, where);
+             {"description", "equipment_slot", "health_restore", "attack", "defense", "move_speed_bonus",
+              "icon", "tool_power", "places", "use"}, where);
         Definition item;
         item.id = String(entry, "id", where);
         item.display_name = String(entry, "display_name", where);
@@ -179,6 +199,10 @@ Data LoadFile(const std::filesystem::path &path) {
         if (entry.HasMember("health_restore")) item.health_restore = Integer(entry, "health_restore", where);
         if (entry.HasMember("attack")) item.attack = Integer(entry, "attack", where);
         if (entry.HasMember("defense")) item.defense = Integer(entry, "defense", where);
+        if (entry.HasMember("icon")) item.icon = String(entry, "icon", where);
+        if (entry.HasMember("tool_power")) item.tool_power = Integer(entry, "tool_power", where);
+        if (entry.HasMember("places")) item.places = String(entry, "places", where);
+        if (entry.HasMember("use")) item.use = String(entry, "use", where);
         if (entry.HasMember("move_speed_bonus")) {
             Require(entry["move_speed_bonus"].IsNumber(), where + ".move_speed_bonus must be a number");
             item.move_speed_bonus = entry["move_speed_bonus"].GetDouble();

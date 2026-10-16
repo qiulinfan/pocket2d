@@ -328,13 +328,17 @@ local _SaveReadSuccess = {}
 ---@field id string # mutable
 ---@field display_name string # mutable
 ---@field description string # mutable
----@field kind "material"|"food"|"weapon"|"armor" # mutable
+---@field kind "material"|"food"|"weapon"|"armor"|"tool"|"placeable"|"consumable" # mutable
 ---@field equipment_slot ""|"subweapon"|"head"|"chest"|"legs" # mutable
 ---@field max_stack integer # mutable
 ---@field health_restore integer # mutable
 ---@field attack integer # mutable
 ---@field defense integer # mutable
 ---@field move_speed_bonus number # mutable
+---@field icon string # mutable
+---@field tool_power integer # mutable
+---@field places string # mutable
+---@field use string # mutable
 local _ItemDefinition = {}
 
 ---Mutable copy. Empty slots have empty item_id/instance_id and count 0. Native slot indices are 1-based.

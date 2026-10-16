@@ -58,7 +58,10 @@
             "material",
             "food",
             "weapon",
-            "armor"
+            "armor",
+            "tool",
+            "placeable",
+            "consumable"
           ]
         },
         "equipment_slot": {
@@ -89,6 +92,29 @@
           "type": "number",
           "minimum": 0,
           "maximum": 100
+        },
+        "icon": {
+          "description": "Image path relative to images/ for the item.",
+          "type": "string",
+          "maxLength": 256
+        },
+        "tool_power": {
+          "description": "Tools only: mining/chopping strength.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "places": {
+          "description": "Placeables only: what the item places.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "use": {
+          "description": "Consumables only: the effect it is used up for.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
         }
       },
       "additionalProperties": false,

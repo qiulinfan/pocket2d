@@ -19,6 +19,13 @@ struct Definition {
     int attack = 0;
     int defense = 0;
     double move_speed_bonus = 0;
+    // Optional image (relative to images/) the game shows for the item.
+    std::string icon;
+    // tool: mining/chopping strength; placeable: what it places (a terrain or
+    // object name the game interprets); consumable: the effect name used up.
+    int tool_power = 0;
+    std::string places;
+    std::string use;
 };
 struct Data {
     int version = 1;

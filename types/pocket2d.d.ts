@@ -242,13 +242,17 @@ interface ItemDefinition {
     id: string;
     display_name: string;
     description: string;
-    kind: "material" | "food" | "weapon" | "armor";
+    kind: "material" | "food" | "weapon" | "armor" | "tool" | "placeable" | "consumable";
     equipment_slot: "" | "subweapon" | "head" | "chest" | "legs";
     max_stack: number;
     health_restore: number;
     attack: number;
     defense: number;
     move_speed_bonus: number;
+    icon: string;
+    tool_power: number;
+    places: string;
+    use: string;
 }
 
 /** Mutable copy. Empty slots have empty item_id/instance_id and count 0. Native slot indices are 1-based. */

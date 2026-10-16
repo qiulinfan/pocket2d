@@ -39,7 +39,10 @@ const std::string valid = R"({"version":1,"items":[
  {"id":"100","display_name":"Sword","kind":"weapon","max_stack":1,"equipment_slot":"subweapon","attack":10},
  {"id":"hat","display_name":"Hat","kind":"armor","max_stack":1,"equipment_slot":"head","defense":2,"move_speed_bonus":0.5},
  {"id":"vest","display_name":"Vest","kind":"armor","max_stack":1,"equipment_slot":"chest"},
- {"id":"boots","display_name":"Boots","kind":"armor","max_stack":1,"equipment_slot":"legs","move_speed_bonus":100}
+ {"id":"boots","display_name":"Boots","kind":"armor","max_stack":1,"equipment_slot":"legs","move_speed_bonus":100},
+ {"id":"pick","display_name":"Pickaxe","kind":"tool","max_stack":1,"tool_power":35,"attack":4,"icon":"items/pick.png"},
+ {"id":"dirt","display_name":"Dirt","kind":"placeable","max_stack":999,"places":"dirt"},
+ {"id":"eye","display_name":"Odd Eye","kind":"consumable","max_stack":20,"use":"summon:eye"}
 ]})";
 const std::string simple = R"({"id":"one","display_name":"One","kind":"material","max_stack":1})";
 std::string Wrap(const std::string &item) { return "{\"version\":1,\"items\":[" + item + "]}"; }
@@ -48,7 +51,10 @@ void Run() {
     const auto path = fixture.project / "items/catalog.items.json";
     Put(path, valid);
     auto data = ItemCatalog::LoadResource("catalog.items.json");
-    Check(data.version == 1 && data.items.size() == 6 && data.index.size() == 6, "valid schema lost entries");
+    Check(data.version == 1 && data.items.size() == 9 && data.index.size() == 9, "valid schema lost entries");
+    Check(ItemCatalog::Find(data, "pick")->tool_power == 35 && ItemCatalog::Find(data, "pick")->icon == "items/pick.png" &&
+          ItemCatalog::Find(data, "dirt")->places == "dirt" && ItemCatalog::Find(data, "eye")->use == "summon:eye",
+          "tool, placeable and consumable fields load");
     Check(ItemCatalog::Find(data, "wood")->display_name == "木材", "UTF8 display name lost");
     Check(ItemCatalog::Find(data, "wood")->description.empty() && ItemCatalog::Find(data, "wood")->attack == 0,
           "optional defaults incorrect");
@@ -116,6 +122,17 @@ void Run() {
     reject_data([](auto &bad) { bad.items[3].equipment_slot = "subweapon"; }, "armor wrong slot");
     reject_data([](auto &bad) { bad.items[3].health_restore = 1; }, "armor healing");
     reject_data([](auto &bad) { bad.items[3].attack = 1; }, "armor attack");
+    reject_data([](auto &bad) { bad.items[6].tool_power = 0; }, "tool without power");
+    reject_data([](auto &bad) { bad.items[6].max_stack = 5; }, "stackable tool");
+    reject_data([](auto &bad) { bad.items[6].equipment_slot = "head"; }, "tool in an armor slot");
+    reject_data([](auto &bad) { bad.items[0].tool_power = 1; }, "tool power on a material");
+    reject_data([](auto &bad) { bad.items[7].places.clear(); }, "placeable without places");
+    reject_data([](auto &bad) { bad.items[0].places = "dirt"; }, "places on a material");
+    reject_data([](auto &bad) { bad.items[7].attack = 1; }, "placeable attack");
+    reject_data([](auto &bad) { bad.items[8].use.clear(); }, "consumable without use");
+    reject_data([](auto &bad) { bad.items[0].use = "x"; }, "use on a material");
+    reject_data([](auto &bad) { bad.items[0].icon = "../outside.png"; }, "icon escaping images");
+    reject_data([](auto &bad) { bad.items[0].icon = "/abs.png"; }, "absolute icon");
     for (double speed : {-0.5, 100.001, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
         reject_data([&](auto &bad) { bad.items[3].move_speed_bonus = speed; }, "invalid speed");
 
@@ -125,7 +142,7 @@ void Run() {
     for (const std::string &text : std::vector<std::string>{"", "{", "[]", "null", "{}", "{\"version\":2,\"items\":[]}",
             "{\"version\":1,\"items\":{},\"extra\":1}", "{\"version\":1,\"version\":1,\"items\":[]}",
             "{\"version\":1,\"items\":[null]}", Wrap("{}"), Wrap(simple + "," + simple),
-            Wrap("{\"id\":\"x\",\"display_name\":\"X\",\"kind\":\"material\",\"max_stack\":1,\"icon\":\"x.png\"}"),
+            Wrap("{\"id\":\"x\",\"display_name\":\"X\",\"kind\":\"material\",\"max_stack\":1,\"sprite\":\"x.png\"}"),
             Wrap("{\"id\":\"x\",\"display_name\":\"X\",\"kind\":\"material\",\"max_stack\":1,\"id\":\"y\"}")}) reject_json(text);
     for (const auto *number : {"1.0", "1.5", "true", "\"1\"", "null", "2147483648", "9223372036854775808", "1e999"}) {
         auto text = Wrap(simple);
@@ -149,12 +166,12 @@ void Run() {
     for (int i = 0; i < 4097; ++i) { if (i) oversized_count += ','; oversized_count += simple; }
     oversized_count += "]}"; reject_json(oversized_count);
     auto exact_size = valid; exact_size.resize(4 * 1024 * 1024, ' ');
-    Put(path, exact_size); Check(ItemCatalog::LoadFile(path).items.size() == 6, "exact 4MiB file rejected");
+    Put(path, exact_size); Check(ItemCatalog::LoadFile(path).items.size() == 9, "exact 4MiB file rejected");
     exact_size.push_back(' '); reject_json(exact_size);
 
     Put(path, valid);
     Put(fixture.project / "items/nested/only.items.json", valid);
-    Check(ItemCatalog::LoadResource("nested/only.items.json").items.size() == 6, "explicit nested resource failed");
+    Check(ItemCatalog::LoadResource("nested/only.items.json").items.size() == 9, "explicit nested resource failed");
     Reject([&] { ItemCatalog::LoadResource("only.items.json"); }, "basename fallback");
     for (const auto &relative : std::vector<std::string>{"", "../catalog.items.json", "/catalog.items.json", "C:/catalog.items.json", "nested\\only.items.json", "catalog.json", std::string("catalog.items.json\0suffix", 25)})
         Reject([&] { ItemCatalog::LoadResource(relative); }, "invalid resource path");
@@ -166,7 +183,7 @@ void Run() {
         fs::create_directory_symlink(fixture.root, fixture.project / "items/escape");
         Reject([&] { ItemCatalog::LoadResource("escape/outside.items.json"); }, "outside directory symlink");
         fs::create_symlink(path, fixture.project / "items/alias.items.json");
-        Check(ItemCatalog::LoadResource("alias.items.json").items.size() == 6, "inside alias rejected");
+        Check(ItemCatalog::LoadResource("alias.items.json").items.size() == 9, "inside alias rejected");
     } else {
 #ifdef _WIN32
         std::cout << "symlink checks skipped: " << error.message() << '\n';
@@ -176,11 +193,11 @@ void Run() {
     }
     const auto unicode = fs::path(std::u8string(u8"目录/物品.items.json"));
     Put(fixture.project / "items" / unicode, valid);
-    Check(ItemCatalog::LoadResource("目录/物品.items.json").items.size() == 6, "UTF8 resource path failed");
+    Check(ItemCatalog::LoadResource("目录/物品.items.json").items.size() == 9, "UTF8 resource path failed");
     Put(path, Wrap(simple));
     auto reloaded = ItemCatalog::LoadResource("catalog.items.json");
     Check(reloaded.index.size() == 1 && ItemCatalog::Find(reloaded, "one") && !ItemCatalog::Find(reloaded, "wood"), "reload kept previous index");
-    Check(ItemCatalog::Find(data, "wood") && data.items.size() == 6, "reload mutated previously loaded catalog");
+    Check(ItemCatalog::Find(data, "wood") && data.items.size() == 9, "reload mutated previously loaded catalog");
     Put(path, "{\"version\":1,\"items\":[]}");
     Check(ItemCatalog::LoadFile(path).index.empty(), "empty catalog did not produce empty index");
     Check(!fs::exists(fixture.project / ".pocketengine"), "catalog loader wrote editor state");

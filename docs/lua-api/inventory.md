@@ -27,14 +27,24 @@ copies; changing them does not change the catalog or container.
 
 Version 1 resources use `{ "version": 1, "items": [...] }`. A definition requires
 `id`, `display_name`, `kind`, and `max_stack`. Optional fields are `description`,
-`equipment_slot`, `health_restore`, `attack`, `defense`, and `move_speed_bonus`.
-Kinds are material, food, weapon and armor. Weapons require subweapon and stack
-limit 1; armor requires head/chest/legs and stack limit 1; food and materials have
-no equipment slot. Food has positive healing; only weapons have attack, and only
-armor has defense or movement bonus. Numeric ranges and strict parser rules are
-specified by the executable ItemCatalog validator. Unknown/duplicate fields and
-invalid combinations are rejected. There is no icon lookup, prefab conversion or
-implicit game effect: gameplay uses the definition's values explicitly.
+`equipment_slot`, `health_restore`, `attack`, `defense`, `move_speed_bonus`,
+`icon`, `tool_power`, `places` and `use`. Kinds:
+
+| Kind | Rules |
+| --- | --- |
+| `material` | No equipment, combat stats or healing. |
+| `food` | Positive `health_restore`; no equipment or combat stats. |
+| `weapon` | `subweapon` slot, `max_stack` 1, `attack`; no armor stats. |
+| `armor` | `head`/`chest`/`legs` slot, `max_stack` 1, `defense`/`move_speed_bonus`; no attack. |
+| `tool` | `max_stack` 1, `tool_power` >= 1 (mining/chopping strength), optional `attack`, no slot or `subweapon`. |
+| `placeable` | Stackable; `places` names what it places (a terrain or object the game interprets). |
+| `consumable` | Stackable; `use` names the effect it is used up for (for example `summon:eye`); may restore health. |
+
+`icon` is an optional image path relative to `images/` for any item;
+`tool_power`, `places` and `use` belong only to their kind. Numeric ranges and
+strict parser rules are specified by the executable ItemCatalog validator.
+Unknown/duplicate fields and invalid combinations are rejected. Gameplay applies
+these values explicitly; the catalog has no implicit game effect.
 
 IDs are case-sensitive ASCII `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`. Catalogs are bounded
 to 4096 items and 4 MiB. Native catalog allocations are not part of the Lua

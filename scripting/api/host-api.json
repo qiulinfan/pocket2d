@@ -1670,6 +1670,15 @@
               },
               {
                 "literal": "armor"
+              },
+              {
+                "literal": "tool"
+              },
+              {
+                "literal": "placeable"
+              },
+              {
+                "literal": "consumable"
               }
             ]
           },
@@ -1721,6 +1730,26 @@
         {
           "name": "move_speed_bonus",
           "type": "number",
+          "access": "mutable"
+        },
+        {
+          "name": "icon",
+          "type": "string",
+          "access": "mutable"
+        },
+        {
+          "name": "tool_power",
+          "type": "integer",
+          "access": "mutable"
+        },
+        {
+          "name": "places",
+          "type": "string",
+          "access": "mutable"
+        },
+        {
+          "name": "use",
+          "type": "string",
           "access": "mutable"
         }
       ],
