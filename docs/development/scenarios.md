@@ -36,6 +36,8 @@ project, for example
   property (`component` key, or world `x`/`y`/`rotation` without one),
   `weight` × the number of published events of a type, and `per_frame` × the
   ticks advanced.
+- `game: true` adds game-declared observations (`OnAgentObserve`) to every
+  observation.
 - `select` narrows observations as in the agent protocol; actors referenced by
   rewards are always kept when `names` is given.
 

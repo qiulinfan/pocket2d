@@ -108,6 +108,13 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   `min_x/min_y/max_x/max_y` box, and the filters combine. `limit` keeps the
   lowest UIDs and `components:false` omits component properties. Selected
   responses add `actors_matched`, the count before `limit`.
+- `observe`, `step` and `run_until` accept `game: true` to add game-declared
+  observations: each observed actor's Lua component that defines
+  `OnAgentObserve(self)` contributes `{actor_uid, key, value}` to `game`,
+  sorted by UID then key, with `value` serialized like event payloads. A
+  failing observer yields `value: null` and `error`. Observers run as gameplay
+  code within the request's script budget and must not change state, or
+  replays and checkpoints diverge.
 - `observe`, `step` and `run_until` accept `image: {width, height}` (at most
   1920×1080). The worker renders the current frame with SDL's software renderer
   into an offscreen surface, from the game camera with the configured window

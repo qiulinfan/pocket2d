@@ -268,6 +268,11 @@
         "width",
         "height"
       ]
+    },
+    "game": {
+      "type": "boolean",
+      "default": false,
+      "description": "Add game-declared observations: for every observed actor's Lua component that defines OnAgentObserve(self), its return value as bounded JSON (as event payloads) in game: [{actor_uid, key, value[, error]}], sorted by UID then key. The functions run as gameplay code within the request's budget and must not change game state, or replays and checkpoints diverge."
     }
   },
   "commands": [
@@ -300,6 +305,9 @@
           },
           "image": {
             "$ref": "#/definitions/image"
+          },
+          "game": {
+            "$ref": "#/definitions/game"
           }
         }
       }
@@ -334,6 +342,9 @@
           },
           "image": {
             "$ref": "#/definitions/image"
+          },
+          "game": {
+            "$ref": "#/definitions/game"
           }
         }
       }
@@ -375,6 +386,9 @@
           },
           "image": {
             "$ref": "#/definitions/image"
+          },
+          "game": {
+            "$ref": "#/definitions/game"
           }
         },
         "required": [

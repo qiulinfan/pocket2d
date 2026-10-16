@@ -140,7 +140,12 @@ class PocketEnv(_Base):
             super().reset(seed=seed)
         command = {"cmd": "reset", "seed": self.scenario.seed if seed is None else seed}
         self.runtime.request(command)
-        observation = self.runtime.request({"cmd": "observe", **({"select": self._select} if self._select else {})})
+        command = {"cmd": "observe"}
+        if self._select:
+            command["select"] = self._select
+        if self.scenario.game:
+            command["game"] = True
+        observation = self.runtime.request(command)
         self._start_frame = observation["frame"]
         self._last = observation
         return observation, {"frame": observation["frame"], "outcome": None}
@@ -158,6 +163,8 @@ class PocketEnv(_Base):
             command["select"] = self._select
         if self._events:
             command["events"] = self._events
+        if self.scenario.game:
+            command["game"] = True
         observation = self.runtime.request(command)
         result = observation["run_until"]
         events = observation.get("events", [])

@@ -186,6 +186,10 @@
         "failure",
         "truncated"
       ]
+    },
+    "game": {
+      "type": "boolean",
+      "description": "Request game-declared observations (OnAgentObserve) with every observation."
     }
   },
   "additionalProperties": true,

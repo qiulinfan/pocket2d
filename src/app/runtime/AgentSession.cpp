@@ -819,6 +819,40 @@ std::string WithImage(Engine &engine, const std::string &observation, const Imag
     return buffer.GetString();
 }
 
+std::string WithGameObservations(const Engine &engine, const std::string &observation,
+                                 const ActorSelection *selection) {
+    rapidjson::Document response;
+    response.Parse(observation.data(), observation.size());
+    auto &allocator = response.GetAllocator();
+    std::vector<const Actor *> actors;
+    for (const auto &actor : engine.GetRuntimeActors())
+        if (!actor.runtime_destroyed && (!selection || Selected(*selection, actor))) actors.push_back(&actor);
+    std::sort(actors.begin(), actors.end(), [](const auto *a, const auto *b) { return a->uid < b->uid; });
+    rapidjson::Value entries(rapidjson::kArrayType);
+    for (const Actor *actor : actors) {
+        auto specs = ComponentManager::GetRuntimeComponentSpecs(actor->uid);
+        std::sort(specs.begin(), specs.end(), [](const auto &a, const auto &b) { return a.key < b.key; });
+        for (const auto &spec : specs) {
+            std::string json, error;
+            if (!ComponentManager::CallAgentObserve(actor->uid, spec.key, json, error)) continue;
+            rapidjson::Value entry(rapidjson::kObjectType);
+            entry.AddMember("actor_uid", rapidjson::Value(std::to_string(actor->uid).c_str(), allocator), allocator);
+            entry.AddMember("key", rapidjson::Value(spec.key.c_str(), allocator), allocator);
+            rapidjson::Document value;
+            value.Parse(json.data(), json.size());
+            rapidjson::Value copy;
+            if (!value.HasParseError()) copy.CopyFrom(value, allocator);
+            entry.AddMember("value", copy, allocator);
+            if (!error.empty()) entry.AddMember("error", rapidjson::Value(error.c_str(), allocator), allocator);
+            entries.PushBack(entry, allocator);
+        }
+    }
+    response.AddMember("game", entries, allocator);
+    rapidjson::StringBuffer buffer;
+    Writer writer(buffer); response.Accept(writer);
+    return buffer.GetString();
+}
+
 struct RunSummary {
     const char *reason;
     int frames;
@@ -990,7 +1024,15 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
             }
             const ActorSelection *selected = selection ? &*selection : nullptr;
             std::optional<ImageRequest> image;
+            bool game_observations = false;
             if (name == "observe" || name == "step" || name == "run_until") {
+                if (command.HasMember("game")) {
+                    if (!command["game"].IsBool()) {
+                        EmitResponse(responses, Error("game must be a boolean", "invalid_argument"), request_id);
+                        continue;
+                    }
+                    game_observations = command["game"].GetBool();
+                }
                 try {
                     image = ReadImageRequest(command);
                 } catch (const std::invalid_argument &error) {
@@ -1101,10 +1143,20 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
             if (name == "observe" && command.HasMember("tilemaps")) {
                 const auto queries = ReadTileQueries(command["tilemaps"]);
                 std::string observation = Observe(*engine, seed, &queries, selected);
+                if (game_observations) {
+                    observation = WithGameObservations(*engine, observation, selected);
+                    if (ScriptBudget::GetFailure() != ScriptBudget::Failure::None)
+                        throw std::runtime_error(ScriptBudget::FailureMessage());
+                }
                 if (image) observation = WithImage(*engine, observation, *image);
                 EmitResponse(responses, observation, request_id);
             } else {
                 std::string observation = Observe(*engine, seed, nullptr, selected);
+                if (game_observations) {
+                    observation = WithGameObservations(*engine, observation, selected);
+                    if (ScriptBudget::GetFailure() != ScriptBudget::Failure::None)
+                        throw std::runtime_error(ScriptBudget::FailureMessage());
+                }
                 if (image) observation = WithImage(*engine, observation, *image);
                 if (run_summary)
                     observation = WithRunResult(observation, run_summary->reason, run_summary->frames,

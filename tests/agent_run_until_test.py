@@ -14,7 +14,8 @@ def write_project(root):
     (root / "scenes/main.scene").write_text(json.dumps({"actors": [
         {"name": "ticker", "uid": 1, "components": {
             "transform": {"type": "Transform"}, "logic": {"type": "Ticker"}}},
-        {"name": "doomed", "uid": 2, "components": {"transform": {"type": "Transform"}}}]}))
+        {"name": "doomed", "uid": 2, "components": {"transform": {"type": "Transform"}}},
+        {"name": "broken", "uid": 3, "components": {"probe": {"type": "Broken"}}}]}))
     # Ticks count OnUpdate calls: tick n runs on the n-th simulated frame.
     (root / "component_types/Ticker.lua").write_text('''Ticker = {
       ticks = 0, phase = "start",
@@ -30,7 +31,10 @@ def write_project(root):
         if self.ticks == 15 then self.phase = "middle" end
         if self.ticks == 20 then Actor.Destroy(Actor.Find("doomed")) end
         if self.ticks == 90 then Application.Quit() end
-      end }''')
+      end,
+      OnAgentObserve = function(self) return {ticks = self.ticks, phase = self.phase} end }''')
+    (root / "component_types/Broken.lua").write_text('''Broken = {
+      OnAgentObserve = function(self) error("cannot describe") end }''')
 
 
 def frame(response):
@@ -92,13 +96,22 @@ def run(executable):
                   "a quitting game stops the run: " + json.dumps(result["run_until"]))
             check("events" not in result, "run_until reports events only on request")
             successful(agent, {"cmd": "reset"})
+            game = successful(agent, {"cmd": "step", "frames": 2, "game": True})["game"]
+            check(game[0] == {"actor_uid": "1", "key": "logic", "value": {"ticks": 2, "phase": "start"}},
+                  "game-declared observation: " + json.dumps(game))
+            check(game[1]["actor_uid"] == "3" and game[1]["value"] is None and "cannot describe" in game[1]["error"],
+                  "a failing observer reports its error")
+            check(len(game) == 2 and "game" not in successful(agent, {"cmd": "observe"}), "opt-in, Lua components only")
+            check([e["actor_uid"] for e in successful(agent, {"cmd": "observe", "game": True,
+                   "select": {"names": ["broken"]}})["game"]] == ["3"], "selection narrows game observations")
+            successful(agent, {"cmd": "reset"})
             def selected(select, command="observe"):
                 response = successful(agent, {"cmd": command, "select": select})
                 return [a["name"] for a in response["actors"]], response["actors_matched"], response
             check(selected({"names": ["ticker"]})[:2] == (["ticker"], 1), "select by name")
             check(selected({"types": ["Ticker"]})[:2] == (["ticker"], 1), "select by component type")
             check(selected({"uids": ["2"]})[:2] == (["doomed"], 1), "select by uid")
-            check(selected({"limit": 1})[:2] == (["ticker"], 2), "limit keeps the lowest uids")
+            check(selected({"limit": 1})[:2] == (["ticker"], 3), "limit keeps the lowest uids")
             names, matched, response = selected({"region": {"min_x": 0.5, "min_y": -1, "max_x": 2, "max_y": 1},
                                                  "components": False}, "step")
             check(names == ["ticker"] and matched == 1 and "components" not in response["actors"][0] and

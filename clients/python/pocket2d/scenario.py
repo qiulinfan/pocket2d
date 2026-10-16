@@ -43,6 +43,7 @@ class Scenario:
     description: str = ""
     script: list = None
     expect: str = "success"
+    game: bool = False
     path: Path = None
 
     @classmethod
@@ -105,8 +106,10 @@ class Scenario:
                          where + ".frames must be in 1..36000")
                 _require(isinstance(entry.get("keys", []), list) and isinstance(entry.get("actions", {}), dict),
                          where + " keys must be a list and actions an object")
+        game = data.get("game", False)
+        _require(isinstance(game, bool), "game must be a boolean")
         expect = data.get("expect", "success")
         _require(expect in ("success", "failure", "truncated"), "expect must be success, failure or truncated")
         return cls(name=name, seed=seed, max_frames=max_frames, frames_per_step=frames_per_step,
                    controls=controls, success=success, failure=failure, reward=reward, select=select,
-                   description=data.get("description", ""), script=script, expect=expect, path=path)
+                   description=data.get("description", ""), script=script, expect=expect, game=game, path=path)

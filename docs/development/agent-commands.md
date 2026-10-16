@@ -25,6 +25,7 @@ Access: `read`.
 | `tilemaps` | object[] (max items 16) | no | At most 16 queries and 256 cells in total. |
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 | `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
+| `game` | boolean | no | Add game-declared observations: for every observed actor's Lua component that defines OnAgentObserve(self), its return value as bounded JSON (as event payloads) in game: [{actor_uid, key, value[, error]}], sorted by UID then key. The functions run as gameplay code within the request's budget and must not change game state, or replays and checkpoints diverge. Default false. |
 
 ## `step`
 
@@ -41,6 +42,7 @@ Access: `simulate`.
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 | `actions` | object | no | Complete set of agent-held semantic actions declared in the project's actions.json (see describe.actions): true/false for buttons, a number in [-1, 1] for axes, [x, y] for 2D axes. Omit to keep the previous values; {} releases all. Combined with any bound key or mouse input. |
 | `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
+| `game` | boolean | no | Add game-declared observations: for every observed actor's Lua component that defines OnAgentObserve(self), its return value as bounded JSON (as event payloads) in game: [{actor_uid, key, value[, error]}], sorted by UID then key. The functions run as gameplay code within the request's budget and must not change game state, or replays and checkpoints diverge. Default false. |
 
 ## `run_until`
 
@@ -58,6 +60,7 @@ Access: `simulate`.
 | `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
 | `actions` | object | no | Complete set of agent-held semantic actions declared in the project's actions.json (see describe.actions): true/false for buttons, a number in [-1, 1] for axes, [x, y] for 2D axes. Omit to keep the previous values; {} releases all. Combined with any bound key or mouse input. |
 | `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
+| `game` | boolean | no | Add game-declared observations: for every observed actor's Lua component that defines OnAgentObserve(self), its return value as bounded JSON (as event payloads) in game: [{actor_uid, key, value[, error]}], sorted by UID then key. The functions run as gameplay code within the request's budget and must not change game state, or replays and checkpoints diverge. Default false. |
 
 ## `reload_scripts`
 

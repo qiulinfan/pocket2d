@@ -77,6 +77,13 @@ callbacks directly on the component or on a statically inherited prototype.
 Dispatch of discovered callbacks still uses protected runtime lookup. Dynamic
 data getters and protected runtime lookup of `OnAnimationEvent` remain supported.
 
+### Agent observations
+
+A component may define `OnAgentObserve(self)` returning a table (or any
+value) that summarizes it for agents, for example
+`return {health = self.health, inventory = self.bag_summary}`. Agents receive it
+when they request `game: true` observations. It must only read state.
+
 ### Batched updates
 
 A component type may define `OnUpdateBatch(instances)` on its type table

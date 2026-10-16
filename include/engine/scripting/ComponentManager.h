@@ -164,6 +164,10 @@ public:
     static void InitializeSpriteAnimations(Actor::UID actor_uid);
     static SpriteAnimation *GetSpriteAnimation(Actor::UID actor_uid, const std::string &key);
     static SpriteRenderer *GetSpriteRenderer(Actor::UID actor_uid, const std::string &key);
+    // Calls the Lua component's OnAgentObserve(self) in a protected call and
+    // stores its result as bounded JSON (or "null" with the Lua error).
+    // Returns false when the component has no such method.
+    static bool CallAgentObserve(Actor::UID actor_uid, const std::string &key, std::string &json, std::string &error);
     // The native object of the built-in component at (uid, key), or nullptr.
     // Built-ins compare it with `this` to check that they are still bound.
     static const void *FindBuiltinComponent(Actor::UID actor_uid, const std::string &key);
