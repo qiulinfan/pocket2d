@@ -35,36 +35,41 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
 
 ## 发现并已修复的引擎问题
 
-| 问题 | 修复 |
+| 问题（来源） | 修复 |
 | --- | --- |
-| `auto_sorting_order` 用 `int(y)` 取代 sorting_order，丢失图层且 1 格粒度 | 绘制请求增加 `sort_y` 次键：先 sorting_order，再 y，再提交顺序 |
-| 相邻 tile 在浮点下各自取整，镜头偏移时出现 1 像素缝 | 无旋转绘制在输出像素空间吸附两侧边缘；再加 1e-3 px 偏置，避免 0.27 这类不可精确表示的缩放在回乘时被截断 |
-| `Physics.MoveCharacter` / `Rigidbody:SetPosition` 只移动 Box2D body，非动态刚体在下一物理步被 Transform 拉回 | 同时写回所属 Transform（换算到父级局部坐标）；physics_api 测试覆盖跨步保持 |
+| `auto_sorting_order` 以 `int(y)` 取代 sorting_order（VR） | 绘制请求增加 `sort_y` 次键：sorting_order → y → 提交顺序 |
+| 相邻 tile 浮点取整出现 1 px 缝（VR、PT） | 无旋转绘制在输出像素空间吸附边缘，并加 1e-3 px 偏置防止回乘截断 |
+| `MoveCharacter`/`SetPosition` 移动的运动学刚体下一步被 Transform 拉回（VR） | 同时写回 Transform；文档说明运动所有权 |
+| 没有自动拼接，Terraria 方块帧需游戏自写（PT） | Tilemap `autotile` 地形：16 种四邻掩码 × 变体，`frame_on_load`，`SetTerrain`/`GetTerrain` |
+| UI 图片不能缩放、不知道尺寸（PT） | `Image.DrawUIScaled`（含镜像）、`Image.GetSize`（headless 可用） |
+| 没有屏幕↔世界换算（PT） | `Camera.ScreenToWorld`/`WorldToScreen`/`GetScreenSize`/`GetViewSize` |
+| 逐格 `GetCell` 建镜像（17.6 万次）（PT） | `Tilemap:GetCells` 矩形批量读取 |
+| `step` 后还要 `observe` 才能看格子（PT bot） | `step`/`run_until` 接受 `tilemaps` 查询，推进前校验 |
+| 动画资源只能引用一张图（VR） | clip 可选 `sheet`，原样使用 Unity 每动作一张的表 |
+| Box2D mover 只有胶囊，方块边缘滑落（PT） | box 碰撞体按轴扫掠，直角不滑；文档注明需从无重叠位置开始 |
+| 没有寻路（VR，原 NavMesh） | `Physics.FindPath`：网格 A*，静态碰撞体与实心 tile 阻挡，部分路径 |
+| Lua 光照每帧 ~1,450 次绘制（PT） | `Tilemap:ComputeLight` 原生光照写入 `dynamic:` 动态图片；PT headless 1.18 → 0.076 ms/帧 |
+| 物品 kind 固定、无图标（PT） | 新增 `tool`/`placeable`/`consumable` 与 `icon` 字段 |
+
+（VR = Village_Rim，PT = PocketTerraria。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
 ## 仍存在的缺口
 
-- **动画资源**只能引用一张图；Unity 那种每个动作一张表需要工具打包。
-- **寻路**：没有 navmesh/网格寻路，敌人直线追击并贴着碰撞体滑动。
-- **2D 光照**：没有光照系统。Village_Rim B 世界用 UI 叠加色调模拟；
-  PocketTerraria 在 Lua 中计算光照网格，每帧约 1,450 次叠加绘制。
-- **Box2D mover 只有胶囊体**：方块平台需要方形碰撞，PocketTerraria 改用 Lua 格子碰撞。
-- **Tilemap 只有 ground/solid 两层**：Village_Rim 的 49 个 Unity tilemap 变成 49 个 actor；
-  泰拉瑞亚的背景墙和树共用 ground 层；Unity Sprite 形状碰撞近似为整格；
-  有缩放/旋转的 tilemap（2 个）被忽略。
-- **UI 图片不能缩放，也不能指定源矩形**：HUD 美术预先放大 2 倍，血条用 4 px 小段拼接。
-- **屏幕→世界坐标**：没有窗口尺寸或坐标换算 API，脚本只能硬编码 1280×720 与缩放来换算。
-- **物品目录**的 kind 固定（material/food/weapon/armor），没有工具/放置物/消耗品类型，也没有图标；游戏只能自己维护对照表。
-- **新实例化的 actor** 下一帧才执行 OnStart，同一帧内读到的字段为空；agent 观测也是空值。
-- **SetCell 要到提交后才对 GetCell 可见**：游戏启动时用 176k 次 GetCell 建立 Lua 镜像。
-- **agent 协议**：`step` 不支持 tilemaps 查询（只有 `observe` 支持）；按请求计算的指令预算
-  会限制一次 step 的帧数（PocketTerraria 每帧约 8 万条 Lua 指令，600 帧超出默认 5,000 万上限）。
+- **Tilemap 只有 ground/solid 两层**：Village_Rim 的 49 个 Unity tilemap 对应 49 个 actor；
+  泰拉瑞亚的背景墙和树干共用 ground 层。Unity Sprite 形状碰撞近似为整格；有缩放/旋转的
+  tilemap（2 个）被忽略。
+- **新实例化的 actor 下一帧才 OnStart**：同一帧内 OnStart 设置的字段为空，agent 观测也为空值。
+  这是现有生命周期设计（类似 Unity 的 Start），脚本需在使用前检查。
+- **agent 指令预算按请求计算**：长 step 需拆分或用 `--instruction-budget` 调大；属于设计内的隔离。
+- **Unity 导入器位于 Village_Rim 项目内**（`tools/import_unity_world.py`），尚未成为 `pocket import unity`。
 - **Village_Rim 未迁移**：对话/任务、背包与快捷栏 UI、祭坛与元素、入侵、Boss、农场、存档、音频；
-  行为树（Behavior Designer）；原工程玩家出生点位于水面碰撞体内（运行时另有放置逻辑，未迁移）。
+  原工程玩家出生点位于水面碰撞体内（运行时另有放置逻辑，未迁移）。
 
 ## 性能
 
 Release、macOS（Apple M5）：PocketTerraria 在 headless agent 模式下（带逐指令计数钩子）
-约 1.56 ms/帧，Village_Rim 约 0.12 ms/帧；窗口模式被垂直同步锁在 60 Hz。
+从 Lua 光照时的 1.56 ms/帧降到原生光照后的 0.076 ms/帧，Village_Rim 约 0.12 ms/帧；
+窗口模式被垂直同步锁在 60 Hz。
 绘制排序键从 8 字节增加到 16 字节后，bunnymark 50k 交替 A/B 的结果落在噪声范围内
 （前 17.9/16.0/21.1 ms，后 22.6/18.3/16.1 ms），W1 sprites 也在噪声内。
 原始输出保留在被忽略的 `build/` 中。以上不是跨引擎对比。
