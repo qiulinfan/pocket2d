@@ -1,6 +1,6 @@
 # 第一切片实施计划：World 实例化 + Box2D 3.1.1
 
-日期：2026-10-16。上位规划：[agent-native-modernization.md](agent-native-modernization.md) 的 M1 与 M2a。
+日期：2026-10-16。状态：A1–A7、B1、B2、B4 已完成；B3 推迟（见 ADR 008 与下文）。上位规划：[agent-native-modernization.md](agent-native-modernization.md) 的 M1 与 M2a。
 每一步结束时 Debug 构建下 72 个 CTest 全部通过，阶段结束时再跑 Release 与 ASan/UBSan；每个通过的步骤单独提交。
 
 ## 设计：World 与“当前 World”
@@ -55,7 +55,7 @@
    - 触发事件：只在 trigger 与 trigger 之间；3.1 的传感器可以检测其他传感器，每个方向各产生一个事件。为保持 2.4 的“至少一方为 dynamic”规则，宿主记录已报告的 begin 对，只对已报告的对发 end。
    - phantom shape 不产生事件，也不被射线命中。
    - Lua 可见身份（actor UID、generation、组件键）保存在宿主表中，不依赖 Box2D user data 或 id 跨快照存活。
-3. **B3 接入 TaskExecutor**：通过 `b2WorldDef.enqueueTask/finishTask` 使用现有线程池；验证 1 个与多个 worker 的结果逐帧一致。
+3. **B3 接入 TaskExecutor（推迟）**：Box2D 求解器为每个 worker 派发一个任务，这些任务在共享的阶段计数上自旋，必须同时运行；`TaskExecutor::ParallelFor` 是同步执行，接入会死锁。需要先给线程池加异步提交/等待接口，或等 Box2D 3.2 自带调度器。当前每个 World 只有几十个 body，环境级并行已由多 World 多线程提供。
 4. **B4 收尾**：更新 status、build-and-test、第三方许可说明；跑 Release 与 ASan/UBSan 全量矩阵，并做图形截图检查。
 
 ## 风险

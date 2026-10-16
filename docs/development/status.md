@@ -1,8 +1,8 @@
 # Pocket2D verified checkpoint
 
-Updated: 2026-10-15. Revision 15. Verified engine/two-world checkpoint; local commits, no push.
-The owner requested autonomous work to stop after this verified round. This checkpoint
-is not SOTA certification or completion of the Village_Rim migration.
+Updated: 2026-10-16. Revision 16. World instancing and Box2D 3.1.1 on top of the
+verified engine/two-world checkpoint; local commits, no push. This checkpoint is not
+SOTA certification or completion of the Village_Rim migration.
 
 ## Owner direction
 
@@ -10,6 +10,34 @@ C++26, native SDL3, multiple rendering backends, Lua and multithreading, with
 agent-native gameplay. Improve the Lua embedding and evaluate TypeScript as a
 possible second authoring language. Existing OMP + GLM/DeepSeek may be used for
 bounded external-agent development evaluations. Full scope: `roadmap.md`.
+
+2026-10-16: 2D only; agent-first, agent-native gameplay; the Lua runtime and C++
+host stay. Plan: `agent-native-modernization.md`. First slice: World instancing and
+Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
+
+## Revision 16: World instancing and Box2D 3.1.1
+
+- A `World` owns one simulation's mutable state (scripting runtime, EventBus,
+  physics, input, particles, frame draw queues, frame clock, budget, templates).
+  Several Worlds run in one process, interleaved on a thread or on separate
+  threads. Renderer caches, the audio device and the particle pool stay
+  process-wide; headless Worlds never touch the audio mixer.
+- `world_isolation_test` checks the defense and two-world fixtures: replayed,
+  interleaved and two-thread runs match a sequential digest of actors, exact
+  float poses and all supported properties every ten frames. ThreadSanitizer
+  reports no races.
+- Box2D 3.1.1 replaces the vendored 2.4, fetched by tag and linked statically.
+  Lua sees an engine `Vector2`. Contact and trigger callbacks now run after the
+  step from copied events; exits caused by disabling or destroying arrive after
+  the next step. The 2.4 trigger rule (one dynamic body, both enabled) is kept by
+  the host. ADR 008 lists all semantic differences, the rotation precision
+  choice and the world-registry lock.
+- All **74 CTest cases pass in Debug, Release and ASan/UBSan**. Metal captures of
+  the default game, village defense and two-world village were inspected.
+- Measured cost: on the 10k-actor animation benchmark, step p50 rose about 10%
+  (native) and 8% (Lua loop) from thread-local World lookups; see ADR 008.
+  Box2D's multithreaded solver is not connected: it needs an asynchronous task
+  API that `TaskExecutor` lacks.
 
 ## Completed and verified in this slice
 
@@ -453,6 +481,11 @@ pass correctness. The full results remain in rigidbody-activation.md and ignored
 phase15 benchmark directories. No performance gain or SOTA conclusion is claimed.
 
 ## Remaining work after an owner-requested resume
+
+0. Modernization slice follow-ups (ADR 008): build Lua with `LUA_USE_POSIX` so
+   `pcall` stops saving the signal mask on macOS; add an asynchronous task API
+   and connect Box2D's solver; consider Box2D 3.2 snapshots for branching; then
+   the command schema, MCP and replay work in `agent-native-modernization.md`.
 
 1. Profile representative mixed gameplay and agent observation costs; recheck
    activation overhead under controlled conditions before broader optimization.

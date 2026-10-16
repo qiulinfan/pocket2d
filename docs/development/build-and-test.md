@@ -7,9 +7,11 @@ compilers should fail configuration rather than silently lowering the standard.
 SDL 3.4.18, SDL_image 3.4.8, SDL_ttf 3.2.2 and SDL_mixer 3.2.4 are fetched from
 pinned official release tags. FreeType, HarfBuzz and PNG development libraries
 are currently discovered on the host. This dependency provision was verified
-on macOS; Windows/Linux packaging remains a separate gate. CMake's normal
-`FETCHCONTENT_SOURCE_DIR_SDL3`, `_SDL3_IMAGE`, `_SDL3_TTF` and `_SDL3_MIXER`
-overrides can use existing offline checkouts of those releases.
+on macOS; Windows/Linux packaging remains a separate gate. Box2D 3.1.1 is
+fetched from its release tag and linked statically; its CMake compiles it with
+`-ffp-contract=off` for deterministic math. CMake's normal
+`FETCHCONTENT_SOURCE_DIR_SDL3`, `_SDL3_IMAGE`, `_SDL3_TTF`, `_SDL3_MIXER` and
+`_BOX2D` overrides can use existing offline checkouts of those releases.
 
 ```sh
 cmake -S . -B build/modern-debug -DCMAKE_BUILD_TYPE=Debug
