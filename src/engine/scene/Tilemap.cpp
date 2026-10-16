@@ -266,6 +266,22 @@ bool Tilemap::SetCell(const std::string &layer, double x, double y, double id) {
     else pending_[command] = static_cast<int>(id);
     return true;
 }
+std::vector<int> Tilemap::GetCells(const std::string &layer, double x, double y, double width, double height) const {
+    const int index = LayerIndex(layer);
+    RequireInteger(x, "cell x"); RequireInteger(y, "cell y");
+    RequireInteger(width, "width"); RequireInteger(height, "height");
+    if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
+    if (x < 0 || y < 0 || width < 0 || height < 0 || x + width > data_.width || y + height > data_.height)
+        throw std::runtime_error("tilemap: GetCells rectangle must lie inside the map");
+    std::vector<int> cells;
+    cells.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    const auto &source = LayerAt(data_, index).cells;
+    for (int row = static_cast<int>(y); row < static_cast<int>(y + height); ++row) {
+        const auto begin = source.begin() + static_cast<std::ptrdiff_t>(row) * data_.width + static_cast<std::ptrdiff_t>(x);
+        cells.insert(cells.end(), begin, begin + static_cast<std::ptrdiff_t>(width));
+    }
+    return cells;
+}
 // The cell value after pending edits; outside the map counts as connected (1).
 int Tilemap::EffectiveCell(int layer, int x, int y) const {
     const auto &asset = replacement_ ? *replacement_ : data_;

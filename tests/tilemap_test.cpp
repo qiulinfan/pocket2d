@@ -315,6 +315,9 @@ void Autotile(const Fixture &fixture) {
     Check(*map.GetCell("solid", 3, 2) == 0 && *map.GetCell("solid", 2, 2) == 2,
           "clearing re-frames the neighbour back");
     Reject([&] { map.SetTerrain("solid", 1, 1, "lava"); }, "unknown terrain rejects");
+    Check(map.GetCells("solid", 1, 1, 2, 2) == std::vector<int>{0, 5, 3, 2}, "bulk read is row-major");
+    Check(map.GetCells("solid", 0, 0, 0, 0).empty(), "an empty rectangle reads nothing");
+    Reject([&] { map.GetCells("solid", 4, 4, 2, 1); }, "bulk read must stay inside the map");
     map.OnDestroy();
 }
 } // namespace

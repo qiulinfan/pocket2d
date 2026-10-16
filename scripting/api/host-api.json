@@ -1387,6 +1387,36 @@
           "returns": "boolean"
         },
         {
+          "name": "GetCells",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "layer",
+              "type": "TileLayer"
+            },
+            {
+              "name": "x",
+              "type": "integer"
+            },
+            {
+              "name": "y",
+              "type": "integer"
+            },
+            {
+              "name": "width",
+              "type": "integer"
+            },
+            {
+              "name": "height",
+              "type": "integer"
+            }
+          ],
+          "returns": {
+            "array": "integer"
+          },
+          "description": "Committed tile IDs of a rectangle inside the map as one row-major array; raises when the rectangle leaves the map."
+        },
+        {
           "name": "GetTerrain",
           "call": "instance",
           "parameters": [

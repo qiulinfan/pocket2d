@@ -266,6 +266,14 @@ function _Tilemap:GetCell(layer, x, y) end
 ---@param id integer
 ---@return boolean
 function _Tilemap:SetCell(layer, x, y, id) end
+---Committed tile IDs of a rectangle inside the map as one row-major array; raises when the rectangle leaves the map.
+---@param layer TileLayer
+---@param x integer
+---@param y integer
+---@param width integer
+---@param height integer
+---@return (integer)[]
+function _Tilemap:GetCells(layer, x, y, width, height) end
 ---Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map.
 ---@param layer TileLayer
 ---@param x integer

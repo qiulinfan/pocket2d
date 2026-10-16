@@ -79,6 +79,20 @@ luabridge::LuaRef GetTileCell(Tilemap *map, const std::string &layer, double x, 
     return value ? luabridge::LuaRef(LuaState(), *value) : luabridge::LuaRef(LuaState());
 }
 
+// One Lua array (1-based, row-major) built with raw sets.
+luabridge::LuaRef GetTileCells(Tilemap *map, const std::string &layer, double x, double y, double width, double height) {
+    const std::vector<int> cells = map->GetCells(layer, x, y, width, height);
+    lua_State *state = LuaState();
+    lua_createtable(state, static_cast<int>(cells.size()), 0);
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        lua_pushinteger(state, cells[i]);
+        lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+    }
+    luabridge::LuaRef table = luabridge::LuaRef::fromStack(state, -1);
+    lua_pop(state, 1);
+    return table;
+}
+
 luabridge::LuaRef GetTileTerrain(Tilemap *map, const std::string &layer, double x, double y) {
     const auto value = map->GetTerrain(layer, x, y);
     return value ? luabridge::LuaRef(LuaState(), *value) : luabridge::LuaRef(LuaState());
@@ -131,6 +145,7 @@ void InjectTilemapAPI() {
         .addFunction("InBounds", &Tilemap::InBounds)
         .addFunction("GetCell", &GetTileCell)
         .addFunction("SetCell", &Tilemap::SetCell)
+        .addFunction("GetCells", &GetTileCells)
         .addFunction("GetTerrain", &GetTileTerrain)
         .addFunction("SetTerrain", &Tilemap::SetTerrain)
         .addFunction("GetRevision", &Tilemap::GetRevision)

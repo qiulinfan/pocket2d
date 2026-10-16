@@ -51,6 +51,9 @@ public:
     bool InBounds(double x, double y) const;
     std::optional<int> GetCell(const std::string &layer, double x, double y) const;
     bool SetCell(const std::string &layer, double x, double y, double id);
+    // Committed IDs of a rectangle inside the map, row-major (bulk reads for
+    // game-side mirrors and planners). Raises when the rectangle leaves the map.
+    std::vector<int> GetCells(const std::string &layer, double x, double y, double width, double height) const;
     // Autotiling: the terrain name at a cell ("" when none; nullopt outside),
     // and placing/clearing ("") a terrain, which chooses the cell's tile from
     // its neighbours and re-chooses the four neighbours. Pending edits count.

@@ -153,6 +153,7 @@ local map = terrain:GetComponentByKey("map")
 | `InBounds(x, y)` | 坐标是否位于 `[0,width) × [0,height)`。 |
 | `GetCell(layer, x, y)` | 已提交的整数 ID；地图外返回 `nil`，地图内空格返回 `0`。 |
 | `SetCell(layer, x, y, id)` | 校验后排队。有效的新写入返回 `true`；地图外、无有效地图或值与已有待提交/当前值相同返回 `false`。 |
+| `GetCells(layer, x, y, width, height)` | 已提交格子的矩形批量读取，返回一个按行排列（row-major）的 Lua 数组（从 1 开始）；矩形必须完全在地图内，否则报错。用于游戏侧镜像或规划，避免逐格调用 `GetCell`。 |
 | `GetRevision()` | 初始为 `0`；一次提交至少有一个最终 cell 值改变时加 `1`。 |
 
 `layer` 必须精确为 `"ground"` 或 `"solid"`。cell 坐标和 ID 必须是有限整数数值；
