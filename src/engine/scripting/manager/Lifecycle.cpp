@@ -371,25 +371,28 @@ void ComponentManager::ProcessPendingOnStart() {
     ProcessPendingOnAwake();
     auto pending = std::move(Runtime().pending_on_start);
     Runtime().pending_on_start.clear();
-    std::vector<CallbackTarget> targets;
+    // Built-in components of the batch start first (in order), so every Lua
+    // OnStart sees the batch's bodies and colliders, as Unity's Start does.
+    std::vector<CallbackTarget> builtins, scripts;
     for (const auto &entry : pending) {
         const auto *component = FindComponentRecord(entry.actor_uid, entry.component_key);
-        if (component && !component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
-    }
-    for (auto &target : targets) {
-        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
-        auto *component = Alive(Runtime(), target);
         if (!component || component->on_start_called) continue;
+        (IsBuiltinComponentType(component->type) ? builtins : scripts).push_back(Snapshot(entry.actor_uid, *component));
+    }
+    // Returns false only when the component stays pending because it is disabled.
+    const auto start = [](CallbackTarget &target) {
+        auto *component = Alive(Runtime(), target);
+        if (!component || component->on_start_called) return true;
         // Disabled components have not started. Retain their pending entry so
         // later activation observes the same one-time lifecycle boundary.
         try {
             const luabridge::LuaRef reference = component->instance_table;
             const auto enabled = ProtectedField(reference, "enabled");
             component = Alive(Runtime(), target);
-            if (!component || component->on_start_called) continue;
+            if (!component || component->on_start_called) return true;
             if (!LuaBoundary::IsEnabled(enabled)) {
                 Runtime().pending_on_start.emplace_back(target.uid, component->key);
-                continue;
+                return false;
             }
             const bool has_callback = component->has_on_start;
             // Mark before calling user code, but after the enabled getter has
@@ -406,6 +409,29 @@ void ComponentManager::ProcessPendingOnStart() {
             if (component && !component->on_start_called)
                 Runtime().pending_on_start.emplace_back(target.uid, component->key);
         }
+        return true;
+    };
+    std::vector<CallbackTarget> deferred;
+    for (auto &target : builtins) {
+        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
+        if (!start(target)) deferred.push_back(target);
+    }
+    for (auto &target : scripts) {
+        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
+        start(target);
+    }
+    // A built-in that a Lua OnStart of this batch enabled starts in this batch too.
+    for (auto &target : deferred) {
+        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
+        auto *component = Alive(Runtime(), target);
+        if (!component || component->on_start_called) continue;
+        auto &queue = Runtime().pending_on_start;
+        const auto queued = std::find_if(queue.begin(), queue.end(), [&](const auto &entry) {
+            return entry.actor_uid == target.uid && entry.component_key == component->key;
+        });
+        if (queued == queue.end()) continue;
+        queue.erase(queued);
+        start(target);
     }
 }
 

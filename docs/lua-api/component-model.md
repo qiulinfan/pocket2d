@@ -76,6 +76,11 @@ as it is published: `Actor.Instantiate` and `actor:AddComponent` return
 components whose `OnAwake` already ran, and every component of a loaded scene
 wakes before any `OnStart`. `OnStart` still runs at the next frame start (like
 Unity's `Awake`/`Start`), so initialize what spawners read in `OnAwake`.
+Within one frame-start batch the built-in components (Rigidbody, ...) start
+before any Lua `OnStart`, so an `OnStart` can query every body and collider of
+its scene; a body that an `OnStart` enables still starts in the same batch.
+Bodies of actors instantiated during that `OnStart` start in the next batch,
+which is why a spawner may still set their `x`/`y` fields after `Instantiate`.
 
 Construction does not call function-valued `__index` getters. Such a getter
 cannot synthesize membership in the core lifecycle callback cache. Define these

@@ -76,6 +76,8 @@ struct Fixture {
         std::ofstream(root / "component_types/ActivationControl.lua") << R"(
           ActivationControl={drive=true,
             OnStart=function(self)
+              -- the scene's later bodies already exist when the first OnStart runs
+              WALL_SEEN=#Physics.OverlapCircle(Vector2(10,0),0.3,false)
               early=Actor.Find('early'):GetComponent('Rigidbody')
               late=Actor.Find('late'):GetComponent('Rigidbody')
               early.enabled=true
@@ -105,6 +107,8 @@ void Run() {
     Step(engine, 1);
     Check(early->enabled && early->HasBody() && Field(early_probe, "starts") == 1,
           "OnStart activation did not start initially disabled body/script");
+    Check(LuaBoundary::Cast<int>(luabridge::getGlobal(state, "WALL_SEEN")) == 1,
+          "an earlier actor's OnStart could not query a later actor's static body");
     auto early_body = early->body; const float first_x = early->GetPosition().x;
     Step(engine, 5);
     Check(early->GetPosition().x > first_x + 0.1f,
