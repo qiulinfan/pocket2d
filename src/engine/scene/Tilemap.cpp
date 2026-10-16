@@ -230,14 +230,14 @@ bool Tilemap::SetCell(const std::string &layer, double x, double y, double id) {
     else pending_[command] = static_cast<int>(id);
     return true;
 }
-b2Vec2 Tilemap::WorldToCell(double x, double y) const {
+Vector2 Tilemap::WorldToCell(double x, double y) const {
     FiniteFloat(x, "world x"); FiniteFloat(y, "world y");
     const double cx = std::floor((x - origin_x_) / data_.cell_size);
     const double cy = std::floor((y - origin_y_) / data_.cell_size);
     FiniteFloat(cx, "converted cell x"); FiniteFloat(cy, "converted cell y");
     return {static_cast<float>(cx), static_cast<float>(cy)};
 }
-b2Vec2 Tilemap::GetCellCenter(double x, double y) const {
+Vector2 Tilemap::GetCellCenter(double x, double y) const {
     RequireInteger(x, "cell x"); RequireInteger(y, "cell y");
     const double wx = origin_x_ + (x + 0.5) * data_.cell_size;
     const double wy = origin_y_ + (y + 0.5) * data_.cell_size;

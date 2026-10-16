@@ -65,13 +65,13 @@ void MethodsAndForces() {
     Reject([&] { body.SetRightDirection({0, inf}); });
     Reject([&] { body.SetEffectiveBodyType("wrong"); });
     Check(body.body == native && body.x == 0 && body.y == 0 && body.rotation == 0 &&
-          body.gravity_scale == 0 && body.GetPosition() == b2Vec2_zero &&
-          body.GetVelocity() == b2Vec2_zero && body.GetAngularVelocity() == 0,
+          body.gravity_scale == 0 && body.GetPosition() == Vector2() &&
+          body.GetVelocity() == Vector2() && body.GetAngularVelocity() == 0,
           "rejected methods changed configuration or body");
     body.x = 10;
-    Check(body.GetPosition() == b2Vec2_zero, "raw position unexpectedly changed live body");
+    Check(body.GetPosition() == Vector2(), "raw position unexpectedly changed live body");
     body.SetPosition({10, 0});
-    Check(body.GetPosition() == b2Vec2(10, 0), "SetPosition compared pending field instead of live pose");
+    Check(body.GetPosition() == Vector2(10, 0), "SetPosition compared pending field instead of live pose");
     const float live_mass = body.body->GetMass();
     body.density = 1e-40f; // Pending configuration is invalid for a future reconstruction.
     body.SetEffectiveBodyType("dynamic");
@@ -81,7 +81,7 @@ void MethodsAndForces() {
     body.density = 1;
     body.SetPosition({2, 3}); body.SetRotation(45); body.SetVelocity({1, 2});
     body.SetAngularVelocity(10); body.SetGravityScale(0.5f);
-    Check(body.GetPosition() == b2Vec2(2, 3) && body.GetVelocity() == b2Vec2(1, 2) &&
+    Check(body.GetPosition() == Vector2(2, 3) && body.GetVelocity() == Vector2(1, 2) &&
           std::abs(body.GetRotation() - 45) < 0.001f && body.GetGravityScale() == 0.5f,
           "valid methods failed after rejected inputs");
     body.SetUpDirection({1e38f, 1e38f}); Check(std::isfinite(body.GetRotation()), "large finite direction overflowed");
@@ -92,7 +92,7 @@ void MethodsAndForces() {
     Reject([&] { body.AddForce({4e19f, 0}); }); // Each single force fits; their same-step sum does not.
     body.AddForce({-4e19f, 0});
     Rigidbody::StepPhysicsWorld();
-    Check(body.GetPosition() == b2Vec2_zero && body.GetVelocity() == b2Vec2_zero,
+    Check(body.GetPosition() == Vector2() && body.GetVelocity() == Vector2(),
           "rejected force entered Box2D accumulation");
     body.AddForce({4e19f, 0}); Rigidbody::StepPhysicsWorld();
     Check(body.GetPosition().IsValid() && body.GetVelocity().IsValid(), "accepted force produced nonfinite state");
@@ -104,7 +104,7 @@ void MethodsAndForces() {
 }
 void MomentumCombination() {
     Rigidbody light; light.has_trigger = false; light.gravity_scale = 0; light.OnStart();
-    const b2Vec2 velocity(2e17f, 0);
+    const Vector2 velocity(2e17f, 0);
     light.SetVelocity(velocity);
     Check(light.GetVelocity() == velocity, "test velocity is not independently valid");
     light.OnDestroy();
@@ -113,11 +113,11 @@ void MomentumCombination() {
     auto *native = heavy.body;
     const float mass = native->GetMass();
     Reject([&] { heavy.SetVelocity(velocity); });
-    Check(heavy.body == native && native->GetMass() == mass && heavy.GetVelocity() == b2Vec2_zero &&
-          heavy.GetPosition() == b2Vec2_zero,
+    Check(heavy.body == native && native->GetMass() == mass && heavy.GetVelocity() == Vector2() &&
+          heavy.GetPosition() == Vector2(),
           "rejected mass/velocity product changed live body");
     heavy.SetVelocity({1, 0});
-    Check(heavy.GetVelocity() == b2Vec2(1, 0), "valid heavy-body control failed after rejection");
+    Check(heavy.GetVelocity() == Vector2(1, 0), "valid heavy-body control failed after rejection");
     heavy.OnDestroy(); Rigidbody::DestroyPhysicsWorld();
 }
 struct Fixture {
@@ -161,7 +161,7 @@ void LuaTypesAndStaleReferences() {
       r:SetPosition(Vector2(2,3));r:SetVelocity(Vector2(1,0));r:SetRotation(30)
       r:SetAngularVelocity(5);r:SetGravityScale(0)
     )");
-    Check(body->body == native && body->GetPosition() == b2Vec2(2, 3), "Lua rejection or valid control replaced body");
+    Check(body->body == native && body->GetPosition() == Vector2(2, 3), "Lua rejection or valid control replaced body");
     ComponentManager::RemoveComponent(1, instance); ComponentManager::FinalizeFrameMutations();
     Check(body->body == nullptr, "removed Rigidbody kept native body");
     const auto count = RayCast::GetPhysicsWorld()->GetBodyCount();

@@ -3,6 +3,7 @@
 
 #include "scene/ActorHandle.h"
 #include "box2d/box2d.h"
+#include "core/Vector2.h"
 #include <string>
 
 struct Actor;
@@ -61,26 +62,26 @@ public:
 
     // runtime physics controls
     // 运行时物理控制接口
-    void AddForce(const b2Vec2 &force);
-    void SetVelocity(const b2Vec2 &velocity);
-    void SetPosition(const b2Vec2 &position);
+    void AddForce(const Vector2 &force);
+    void SetVelocity(const Vector2 &velocity);
+    void SetPosition(const Vector2 &position);
     void SetRotation(float degrees_clockwise);
     void SetEffectiveBodyType(const std::string &type_name);
     // Lifecycle-only: apply the authoring enabled flag at an unlocked boundary.
     void ApplyEnabledState();
     void SetAngularVelocity(float degrees_clockwise);
     void SetGravityScale(float scale);
-    void SetUpDirection(b2Vec2 direction);
-    void SetRightDirection(b2Vec2 direction);
+    void SetUpDirection(Vector2 direction);
+    void SetRightDirection(Vector2 direction);
 
-    b2Vec2 GetPosition() const;
+    Vector2 GetPosition() const;
     float GetRotation() const;
     std::string GetEffectiveBodyType() const;
-    b2Vec2 GetVelocity() const;
+    Vector2 GetVelocity() const;
     float GetAngularVelocity() const;
     float GetGravityScale() const;
-    b2Vec2 GetUpDirection() const;
-    b2Vec2 GetRightDirection() const;
+    Vector2 GetUpDirection() const;
+    Vector2 GetRightDirection() const;
 
     // global physics world lifecycle
     // 全局物理世界生命周期
@@ -91,7 +92,7 @@ public:
 
 private:
     bool HasLiveRuntimeBinding() const;
-    b2Vec2 accumulated_force_{0.0f, 0.0f};
+    Vector2 accumulated_force_{0.0f, 0.0f};
     std::uint64_t force_step_ = 0;
 };
 

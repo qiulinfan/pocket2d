@@ -49,7 +49,7 @@ bool TryReadRigidbodyState(const Actor *actor, float &out_x, float &out_y,
     }
     if (rigidbody == nullptr) return false;
 
-    const b2Vec2 position = rigidbody->GetPosition();
+    const Vector2 position = rigidbody->GetPosition();
     out_x = position.x;
     out_y = position.y;
     out_rotation = rigidbody->GetRotation();

@@ -79,7 +79,7 @@ void TilemapAdoption() {
           "preparing candidate changed old map/native bodies");
     bool observed_new_base = false, recursive_commit_rejected = false;
     writer.on_end = [&] {
-        observed_new_base = map->GetWidth() == 4 && map->GetCellCenter(0, 0) == b2Vec2(10.5f, 20.5f);
+        observed_new_base = map->GetWidth() == 4 && map->GetCellCenter(0, 0) == Vector2(10.5f, 20.5f);
         try { map->CommitPending(); } catch (const std::exception &) { recursive_commit_rejected = true; }
         map->ReplaceAsset(MapData(3, 3));
         if (!map->SetCell("ground", 2, 2, 4)) throw std::runtime_error("callback cell edit was not queued");

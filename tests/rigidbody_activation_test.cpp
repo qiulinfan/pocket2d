@@ -169,7 +169,7 @@ void Run() {
     Check(early->body == early_body && early_body->GetType() == b2_kinematicBody &&
           engine.GetRuntimePhysicsHierarchyStateByUID(2).effective_body_type == "kinematic",
           "Lua body_type write did not update actual body and hierarchy cache");
-    Check(early->GetPosition() == b2Vec2(2, 5), "kinematic body did not follow authored Transform");
+    Check(early->GetPosition() == Vector2(2, 5), "kinematic body did not follow authored Transform");
     Lua(state, "early.body_type='dynamic';Actor.Find('controller'):GetComponent('ActivationControl').drive=true");
     Step(engine, 4);
     Check(early_body->GetType() == b2_dynamicBody && early->GetPosition().x > 2.05f &&

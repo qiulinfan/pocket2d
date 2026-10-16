@@ -222,10 +222,10 @@ void CopyComponentDefaults(const luabridge::LuaRef &instance,
                 return;
             }
             // These native userdatas are explicit values, not owned resources.
-            if (luabridge::Stack<b2Vec2>::isInstance(state, index)) {
-                auto value=luabridge::Stack<b2Vec2>::get(state,index);
+            if (luabridge::Stack<Vector2>::isInstance(state, index)) {
+                auto value=luabridge::Stack<Vector2>::get(state,index);
                 LuaBoundary::Check(value,"cloned default userdata");
-                LuaBoundary::Check(luabridge::Stack<b2Vec2>::push(state,*value),"cloned default userdata push");
+                LuaBoundary::Check(luabridge::Stack<Vector2>::push(state,*value),"cloned default userdata push");
             } else if (luabridge::Stack<glm::vec2>::isInstance(state, index)) {
                 auto value=luabridge::Stack<glm::vec2>::get(state,index);
                 LuaBoundary::Check(value,"cloned default userdata");
@@ -409,12 +409,12 @@ void SyncTransformAndRigidbodyAfterPropertyEdit(
         float world_rotation = transform->rotation;
         if (ComponentManager::TryGetRuntimeTransformWorld(
                 actor_uid, world_x, world_y, world_rotation, nullptr)) {
-            rigidbody->SetPosition(b2Vec2(world_x, world_y));
+            rigidbody->SetPosition(Vector2(world_x, world_y));
             rigidbody->SetRotation(world_rotation);
             return;
         }
 
-        rigidbody->SetPosition(b2Vec2(transform->x, transform->y));
+        rigidbody->SetPosition(Vector2(transform->x, transform->y));
         rigidbody->SetRotation(transform->rotation);
         return;
     }

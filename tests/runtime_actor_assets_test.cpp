@@ -119,7 +119,7 @@ void DetachedAndCache() {
         Records records(actor); PrepareDetachedActorAssets(actor, records.values);
         auto *map = records.Get<Tilemap>("map"); auto *animation = records.Get<SpriteAnimation>("animation");
         Check(map->GetWidth() == 4 && map->GetCell("ground", 0, 0) == 3 &&
-            map->GetCellCenter(0, 0) == b2Vec2(-3.5f, -5.5f) && map->GetFixtureCount() == 0,
+            map->GetCellCenter(0, 0) == Vector2(-3.5f, -5.5f) && map->GetFixtureCount() == 0,
             "detached map data/placement is not frame-zero ready");
         Check(animation->HasAsset() && animation->GetCurrentClip() == "idle" && animation->GetFrame() == 1 &&
             !records.Get<SpriteRenderer>("sprite")->HasAnimationOverride(), "detached animation applied a live pose");

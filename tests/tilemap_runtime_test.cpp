@@ -90,8 +90,8 @@ void PlacePlayer(float x,float y) {
     // Dynamic roots are physics-owned: the transform helper changes the pose
     // cache, while teleporting the live Box2D body requires Rigidbody's API.
     auto *body=ComponentManager::GetComponentByKey(2,"body").cast<Rigidbody *>().value();
-    body->SetPosition(b2Vec2(x,y));
-    Check(body->GetPosition()==b2Vec2(x,y),"fixture did not teleport the real body");
+    body->SetPosition(Vector2(x,y));
+    Check(body->GetPosition()==Vector2(x,y),"fixture did not teleport the real body");
 }
 float PlayerX() {
     return ComponentManager::GetComponentByKey(2,"body").cast<Rigidbody *>().value()->GetPosition().x;
@@ -290,8 +290,8 @@ void TestPreloadAssetRangePreservesWorld(const std::filesystem::path &fixture) {
 
 void TestDisableAndRemoveCollision() {
     Engine engine;Driver driver(engine);
-    Check(Map()->WorldToCell(0.5,0.5)==b2Vec2(8,8),"frame-zero map origin used incomplete Transform binding");
-    Check(Map()->GetCellCenter(8,8)==b2Vec2(0.5f,0.5f),"frame-zero cell center is wrong");
+    Check(Map()->WorldToCell(0.5,0.5)==Vector2(8,8),"frame-zero map origin used incomplete Transform binding");
+    Check(Map()->GetCellCenter(8,8)==Vector2(0.5f,0.5f),"frame-zero cell center is wrong");
     driver.Step(1);Map()->SetCell("ground",8,8,4);driver.Step(1);
     const auto revision=Map()->GetRevision();
     Check(ComponentManager::SetRuntimeComponentPropertyValue(10,"map","enabled",false),"map disable failed");
@@ -357,11 +357,11 @@ void TestFirstTransformOriginBeforeStart() {
     terrain.component_specs.push_back(std::move(secondary));
     Check(engine.LoadSceneAsset(candidate),engine.GetLastSceneLoadError());
     Check(FrameClock::GetFrameNumber()==0,"scene assembly advanced gameplay");
-    Check(Map()->WorldToCell(0.5,0.5)==b2Vec2(8,8) &&
-              Map()->GetCellCenter(8,8)==b2Vec2(0.5f,0.5f),
+    Check(Map()->WorldToCell(0.5,0.5)==Vector2(8,8) &&
+              Map()->GetCellCenter(8,8)==Vector2(0.5f,0.5f),
           "frame-zero fallback used the last Transform instead of the primary Transform");
     driver.Step(1,{SDL_SCANCODE_E});
-    Check(Map()->WorldToCell(0.5,0.5)==b2Vec2(8,8) && Map()->GetCell("ground",8,8)==3,
+    Check(Map()->WorldToCell(0.5,0.5)==Vector2(8,8) && Map()->GetCell("ground",8,8)==3,
           "first tick changed origin or planted in a different cell after binding");
 }
 void TestAuthoringDocument(const std::filesystem::path &fixture) {

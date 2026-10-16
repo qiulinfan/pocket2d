@@ -107,7 +107,7 @@ void Run(const std::string &mode) {
               map_ref.rawequal(ComponentManager::GetComponentByKey(2,"map")), "rejection replaced native userdata");
         if (mode == "guard_map") {
             Check(!body->body->IsEnabled(), "requested body disable did not complete");
-            const auto hit=RayCast::Cast(b2Vec2(-1,0.5f),b2Vec2(1,0),3);
+            const auto hit=RayCast::Cast(Vector2(-1,0.5f),Vector2(1,0),3);
             Check(hit && hit->actor_handle.uid==2, "blocked map destruction removed collision geometry");
         } else Check(body->body->IsEnabled() && !map->enabled, "requested map disable or surviving body state is wrong");
     } else if (mode == "deferred_map") {

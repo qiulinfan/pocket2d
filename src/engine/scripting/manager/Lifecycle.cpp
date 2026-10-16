@@ -367,7 +367,7 @@ void ComponentManager::StepPhysics() {
             Non-dynamic rigidbodies follow hierarchy/world-transform state into
             Box2D, rather than competing with physics as a second motion owner.
             */
-            rigidbody->SetPosition(b2Vec2(transform->world_x,
+            rigidbody->SetPosition(Vector2(transform->world_x,
                                           transform->world_y));
             rigidbody->SetRotation(transform->world_rotation);
         }
@@ -402,7 +402,7 @@ void ComponentManager::StepPhysics() {
             continue;
         }
 
-        const b2Vec2 position = rigidbody->GetPosition();
+        const Vector2 position = rigidbody->GetPosition();
         const float rotation = rigidbody->GetRotation();
         // Keep the Lua-facing Rigidbody fields in sync with the Box2D body so
         // inspector/runtime reads reflect physics-driven motion immediately.
@@ -511,9 +511,9 @@ void ComponentManager::FinalizePrePhysicsDestructions() {
 }
 
 // immediate physics event dispatch helpers
-void ComponentManager::QueueCollisionEvent(Actor *actor, Actor *other, const b2Vec2 &point,
-                                     const b2Vec2 &relative_velocity,
-                                     const b2Vec2 &normal, bool is_enter) {
+void ComponentManager::QueueCollisionEvent(Actor *actor, Actor *other, const Vector2 &point,
+                                     const Vector2 &relative_velocity,
+                                     const Vector2 &normal, bool is_enter) {
     if (actor == nullptr || other == nullptr) return;
 
     auto actor_it = Runtime().actor_by_uid.find(actor->uid);
@@ -532,9 +532,9 @@ void ComponentManager::QueueCollisionEvent(Actor *actor, Actor *other, const b2V
 }
 
 // immediate physics event dispatch helpers
-void ComponentManager::QueueTriggerEvent(Actor *actor, Actor *other, const b2Vec2 &point,
-                                   const b2Vec2 &relative_velocity,
-                                   const b2Vec2 &normal, bool is_enter) {
+void ComponentManager::QueueTriggerEvent(Actor *actor, Actor *other, const Vector2 &point,
+                                   const Vector2 &relative_velocity,
+                                   const Vector2 &normal, bool is_enter) {
     if (actor == nullptr || other == nullptr) return;
 
     auto actor_it = Runtime().actor_by_uid.find(actor->uid);

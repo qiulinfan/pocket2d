@@ -1,6 +1,7 @@
 #ifndef POCKET2D_ENGINE_TILEMAP_H
 #define POCKET2D_ENGINE_TILEMAP_H
 
+#include "core/Vector2.h"
 #include "scene/ActorHandle.h"
 #include "shared/tilemap/TilemapAsset.h"
 #include "rendering/Renderer.h"
@@ -45,8 +46,8 @@ public:
     void CommitPending();
     void CommitPending(float origin_x, float origin_y, float rotation = 0);
 
-    b2Vec2 WorldToCell(double world_x, double world_y) const;
-    b2Vec2 GetCellCenter(double x, double y) const;
+    Vector2 WorldToCell(double world_x, double world_y) const;
+    Vector2 GetCellCenter(double x, double y) const;
     bool InBounds(double x, double y) const;
     std::optional<int> GetCell(const std::string &layer, double x, double y) const;
     bool SetCell(const std::string &layer, double x, double y, double id);

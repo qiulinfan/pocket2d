@@ -104,12 +104,12 @@ void CoordinatesAndChunks(const Fixture &fixture) {
     Tilemap map, independent;
     map.Initialize(data, -8, -8); independent.Initialize(data, -8, -8);
     Check(map.GetRevision() == 0 && *map.GetCell("ground", 8, 8) == 1, "frame-zero data must be queryable");
-    Check(map.WorldToCell(-8, -8) == b2Vec2(0, 0), "origin converts exactly");
+    Check(map.WorldToCell(-8, -8) == Vector2(0, 0), "origin converts exactly");
     Check(map.WorldToCell(-8.001, -8).x == -1, "negative coordinates use floor");
     Check(map.WorldToCell(-7, -8).x == 1, "cell edge uses exact next cell");
     Check(map.WorldToCell(56, -8).x == 64, "right boundary stays out of range");
-    Check(map.GetCellCenter(8, 8) == b2Vec2(0.5f, 0.5f), "cell center conversion");
-    Check(map.GetCellCenter(-1, -1) == b2Vec2(-8.5f, -8.5f), "out-of-map centers remain mathematical");
+    Check(map.GetCellCenter(8, 8) == Vector2(0.5f, 0.5f), "cell center conversion");
+    Check(map.GetCellCenter(-1, -1) == Vector2(-8.5f, -8.5f), "out-of-map centers remain mathematical");
     Check(!map.GetCell("solid", -1, 0) && *map.GetCell("solid", 0, 0) == 0, "OOB differs from empty");
     Reject([&] { map.InBounds(1.2, 1); }, "fractional coordinate must reject");
     Reject([&] { map.WorldToCell(std::numeric_limits<double>::infinity(), 0); }, "nonfinite world coordinate rejects");
@@ -193,7 +193,7 @@ void CollisionAndLifetime(const Fixture &fixture) {
     map.CommitPending(0, 10);
     Check(map.GetChunkBody(1, 0) == unchanged && map.GetDiagnostics().collision_chunk_rebuilds == 0,
           "translation updates body transform without geometry rebuild");
-    Check(map.GetCellCenter(0, 0) == b2Vec2(0.5f, 10.5f), "translation and cell queries agree");
+    Check(map.GetCellCenter(0, 0) == Vector2(0.5f, 10.5f), "translation and cell queries agree");
     map.OnDestroy();
     map.enabled = true; map.CommitPending();
     Check(map.CollectVisible(0, 0, 64, 1).empty() && map.GetFixtureCount() == 0,

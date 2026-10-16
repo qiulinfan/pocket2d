@@ -14,8 +14,8 @@ namespace {
 
 using APIRegistrationDetail::LuaState;
 
-float CppVector2Distance(const b2Vec2 &a, const b2Vec2 &b) {
-    return b2Distance(a, b);
+float CppVector2Distance(const Vector2 &a, const Vector2 &b) {
+    return Distance(a, b);
 }
 
 template <typename T>
@@ -30,8 +30,8 @@ void InstallClassMetamethod(const char *name, lua_CFunction function) {
     lua_pop(LuaState(), 1);
 }
 
-b2Vec2 ReadVector(lua_State *state, int index) {
-    const auto result = luabridge::Stack<const b2Vec2 &>::get(state, index);
+Vector2 ReadVector(lua_State *state, int index) {
+    const auto result = luabridge::Stack<const Vector2 &>::get(state, index);
     LuaBoundary::Check(result, "Vector2 operand");
     return result.value().get();
 }
@@ -40,32 +40,32 @@ float ReadScalar(lua_State *state, int index) {
     LuaBoundary::Check(result, "Vector2 scalar operand");
     return result.value();
 }
-void PushVector(lua_State *state, const b2Vec2 &value) {
-    LuaBoundary::Check(luabridge::Stack<b2Vec2>::push(state, value), "Vector2 result");
+void PushVector(lua_State *state, const Vector2 &value) {
+    LuaBoundary::Check(luabridge::Stack<Vector2>::push(state, value), "Vector2 result");
 }
 
 int LuaVector2Add(lua_State *L) {
-    const b2Vec2 a = ReadVector(L, 1);
-    const b2Vec2 b = ReadVector(L, 2);
+    const Vector2 a = ReadVector(L, 1);
+    const Vector2 b = ReadVector(L, 2);
     PushVector(L, a + b);
     return 1;
 }
 
 int LuaVector2Sub(lua_State *L) {
-    const b2Vec2 a = ReadVector(L, 1);
-    const b2Vec2 b = ReadVector(L, 2);
+    const Vector2 a = ReadVector(L, 1);
+    const Vector2 b = ReadVector(L, 2);
     PushVector(L, a - b);
     return 1;
 }
 
 int LuaVector2Mul(lua_State *L) {
-    const bool lhs_is_vector = luabridge::Stack<b2Vec2>::isInstance(L, 1);
-    const bool rhs_is_vector = luabridge::Stack<b2Vec2>::isInstance(L, 2);
+    const bool lhs_is_vector = luabridge::Stack<Vector2>::isInstance(L, 1);
+    const bool rhs_is_vector = luabridge::Stack<Vector2>::isInstance(L, 2);
     const bool lhs_is_number = lua_isnumber(L, 1) != 0;
     const bool rhs_is_number = lua_isnumber(L, 2) != 0;
 
     if (lhs_is_vector && rhs_is_number) {
-        const b2Vec2 vec = ReadVector(L, 1);
+        const Vector2 vec = ReadVector(L, 1);
         const float scalar = ReadScalar(L, 2);
         PushVector(L, scalar * vec);
         return 1;
@@ -73,7 +73,7 @@ int LuaVector2Mul(lua_State *L) {
 
     if (lhs_is_number && rhs_is_vector) {
         const float scalar = ReadScalar(L, 1);
-        const b2Vec2 vec = ReadVector(L, 2);
+        const Vector2 vec = ReadVector(L, 2);
         PushVector(L, scalar * vec);
         return 1;
     }
@@ -83,21 +83,21 @@ int LuaVector2Mul(lua_State *L) {
 
 void InjectVector2API() {
     luabridge::getGlobalNamespace(LuaState())
-        .beginClass<b2Vec2>("Vector2")
+        .beginClass<Vector2>("Vector2")
         .addConstructor<void (*)(float, float)>()
-        .addPropertyReadWrite("x", &b2Vec2::x)
-        .addPropertyReadWrite("y", &b2Vec2::y)
-        .addFunction("Normalize", &b2Vec2::Normalize)
-        .addFunction("Length", &b2Vec2::Length)
+        .addPropertyReadWrite("x", &Vector2::x)
+        .addPropertyReadWrite("y", &Vector2::y)
+        .addFunction("Normalize", &Vector2::Normalize)
+        .addFunction("Length", &Vector2::Length)
         .addStaticFunction("Distance",
-                           static_cast<float (*)(const b2Vec2 &, const b2Vec2 &)>( &CppVector2Distance))
+                           static_cast<float (*)(const Vector2 &, const Vector2 &)>( &CppVector2Distance))
         .addStaticFunction("Dot",
-                           static_cast<float (*)(const b2Vec2 &, const b2Vec2 &)>( &b2Dot))
+                           static_cast<float (*)(const Vector2 &, const Vector2 &)>( &Dot))
         .endClass();
 
-    InstallClassMetamethod<b2Vec2>("__add", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Add>);
-    InstallClassMetamethod<b2Vec2>("__sub", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Sub>);
-    InstallClassMetamethod<b2Vec2>("__mul", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Mul>);
+    InstallClassMetamethod<Vector2>("__add", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Add>);
+    InstallClassMetamethod<Vector2>("__sub", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Sub>);
+    InstallClassMetamethod<Vector2>("__mul", &APIRegistrationDetail::CheckedRawMetamethod<LuaVector2Mul>);
 }
 
 void InjectCollisionAPI() {
@@ -111,15 +111,15 @@ void InjectCollisionAPI() {
         .endClass();
 }
 
-luabridge::LuaRef CppPhysicsRaycast(const b2Vec2 &position,
-                                    const b2Vec2 &direction, float distance) {
+luabridge::LuaRef CppPhysicsRaycast(const Vector2 &position,
+                                    const Vector2 &direction, float distance) {
                                         std::optional<RayCast::HitResult> hit = RayCast::Cast(position, direction, distance);
     if (!hit.has_value()) return luabridge::LuaRef(LuaState());
     return luabridge::LuaRef(LuaState(), *hit);
 }
 
-luabridge::LuaRef CppPhysicsRaycastAll(const b2Vec2 &position,
-                                       const b2Vec2 &direction,
+luabridge::LuaRef CppPhysicsRaycastAll(const Vector2 &position,
+                                       const Vector2 &direction,
                                        float distance) {
     luabridge::LuaRef results = luabridge::newTable(LuaState());
     const std::vector<RayCast::HitResult> hits = RayCast::CastAll(position, direction, distance);

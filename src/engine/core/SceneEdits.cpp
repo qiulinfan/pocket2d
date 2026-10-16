@@ -465,7 +465,7 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
             auto *transform=FindPrimaryComponentByType(uid,"Transform");
             if(body&&transform) {
                 const auto *pose=LuaBoundary::Cast<Transform *>(transform->instance_table);auto *native=LuaBoundary::Cast<Rigidbody *>(body->instance_table);
-                native->SetPosition(b2Vec2(pose->world_x,pose->world_y));native->SetRotation(pose->world_rotation);
+                native->SetPosition(Vector2(pose->world_x,pose->world_y));native->SetRotation(pose->world_rotation);
             }
         }
         Require(ComponentManager::GetRuntimeErrorCount()==errors_before,"scene edit commit callback failed: "+ComponentManager::GetLastRuntimeError());

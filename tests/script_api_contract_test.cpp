@@ -99,7 +99,7 @@ const rapidjson::Value *NamedType(const rapidjson::Value &contract,const std::st
 }
 bool NativeType(const luabridge::LuaRef &value,const std::string &type) {
     if(type=="Actor") return value.isInstance<ActorHandle>();
-    if(type=="Vector2") return value.isInstance<b2Vec2>();
+    if(type=="Vector2") return value.isInstance<Vector2>();
     if(type=="Transform") return value.isInstance<Transform>();
     if(type=="SpriteRenderer") return value.isInstance<SpriteRenderer>();
     if(type=="Rigidbody") return value.isInstance<Rigidbody>();

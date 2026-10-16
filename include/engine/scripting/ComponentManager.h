@@ -2,7 +2,7 @@
 #define COMPONENT_MANAGER_H
 
 #include "scene/Actor.h"
-#include "box2d/box2d.h"
+#include "core/Vector2.h"
 #include <list>
 #include <filesystem>
 #include <memory>
@@ -108,13 +108,13 @@ public:
     // immediate physics event dispatch helpers
     // 立即派发物理事件的辅助接口
     static void QueueCollisionEvent(Actor *actor, Actor *other,
-                                    const b2Vec2 &point,
-                                    const b2Vec2 &relative_velocity,
-                                    const b2Vec2 &normal, bool is_enter);
+                                    const Vector2 &point,
+                                    const Vector2 &relative_velocity,
+                                    const Vector2 &normal, bool is_enter);
     static void QueueTriggerEvent(Actor *actor, Actor *other,
-                                  const b2Vec2 &point,
-                                  const b2Vec2 &relative_velocity,
-                                  const b2Vec2 &normal, bool is_enter);
+                                  const Vector2 &point,
+                                  const Vector2 &relative_velocity,
+                                  const Vector2 &normal, bool is_enter);
 
     // component queries used by Actor's Lua-facing methods
     // 给 Actor 的 Lua 接口使用的组件查询

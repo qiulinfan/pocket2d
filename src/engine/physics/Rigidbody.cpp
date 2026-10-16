@@ -23,6 +23,9 @@ constexpr float kStep = 1.0f / 60.0f;
 struct ForceStep { std::uint64_t value = 0; };
 std::uint64_t &CurrentForceStep() { return World::Current().State<ForceStep>().value; }
 
+b2Vec2 ToBox2D(const Vector2 &value) { return {value.x, value.y}; }
+Vector2 FromBox2D(const b2Vec2 &value) { return {value.x, value.y}; }
+
 void Require(bool valid,const char *message) {
     if(!valid) throw std::invalid_argument(std::string("Rigidbody: ")+message);
 }
@@ -185,22 +188,22 @@ private:
             }
 
             ComponentManager::QueueCollisionEvent(
-                metadata_a->actor, metadata_b->actor, point, relative_velocity,
-                normal, is_enter);
+                metadata_a->actor, metadata_b->actor, FromBox2D(point), FromBox2D(relative_velocity),
+                FromBox2D(normal), is_enter);
             ComponentManager::QueueCollisionEvent(
-                metadata_b->actor, metadata_a->actor, point, relative_velocity,
-                normal, is_enter);
+                metadata_b->actor, metadata_a->actor, FromBox2D(point), FromBox2D(relative_velocity),
+                FromBox2D(normal), is_enter);
             return;
         }
 
         if (metadata_a->kind == RayCast::FixtureKind::Trigger &&
             metadata_b->kind == RayCast::FixtureKind::Trigger) {
-            const b2Vec2 sentinel(-999.0f, -999.0f);
+            const Vector2 sentinel(-999.0f, -999.0f);
             ComponentManager::QueueTriggerEvent(
-                metadata_a->actor, metadata_b->actor, sentinel, relative_velocity,
+                metadata_a->actor, metadata_b->actor, sentinel, FromBox2D(relative_velocity),
                 sentinel, is_enter);
             ComponentManager::QueueTriggerEvent(
-                metadata_b->actor, metadata_a->actor, sentinel, relative_velocity,
+                metadata_b->actor, metadata_a->actor, sentinel, FromBox2D(relative_velocity),
                 sentinel, is_enter);
         }
     }
@@ -419,9 +422,9 @@ void Rigidbody::OnDestroy() {
 }
 
 // runtime physics controls
-b2Vec2 Rigidbody::GetPosition() const {
-    if (body != nullptr) return body->GetPosition();
-    return b2Vec2(x, y);
+Vector2 Rigidbody::GetPosition() const {
+    if (body != nullptr) return FromBox2D(body->GetPosition());
+    return FromBox2D(b2Vec2(x, y));
 }
 
 // runtime physics controls
@@ -440,11 +443,12 @@ std::string Rigidbody::GetEffectiveBodyType() const {
 }
 
 // runtime physics controls
-void Rigidbody::AddForce(const b2Vec2 &force) {
+void Rigidbody::AddForce(const Vector2 &force_in) {
+    const b2Vec2 force = ToBox2D(force_in);
     FiniteVector(force);
     if (body == nullptr) return;
     if(body->GetType()!=b2_dynamicBody) return;
-    const auto previous=force_step_==CurrentForceStep()?accumulated_force_:b2Vec2_zero;
+    const auto previous=force_step_==CurrentForceStep()?accumulated_force_:Vector2();
     const double next_x=static_cast<double>(previous.x)+force.x,next_y=static_cast<double>(previous.y)+force.y;
     const auto predicted=Integration(body->GetMass(),body->GetGravityScale(),body->GetWorld()->GetGravity(),next_x,next_y,body->GetLinearVelocity());
     PointSpeed(body,predicted,body->GetAngularVelocity());
@@ -453,10 +457,11 @@ void Rigidbody::AddForce(const b2Vec2 &force) {
 }
 
 // runtime physics controls
-void Rigidbody::SetVelocity(const b2Vec2 &velocity) {
+void Rigidbody::SetVelocity(const Vector2 &velocity_in) {
+    const b2Vec2 velocity = ToBox2D(velocity_in);
     FiniteVector(velocity);SquaredVector(velocity.x,velocity.y,"linear velocity exceeds finite squared-magnitude range");
     if (body == nullptr) return;
-    const auto force=force_step_==CurrentForceStep()?accumulated_force_:b2Vec2_zero;
+    const auto force=force_step_==CurrentForceStep()?accumulated_force_:Vector2();
     PointSpeed(body,velocity,body->GetAngularVelocity());
     const auto predicted=Integration(body->GetMass(),body->GetGravityScale(),body->GetWorld()->GetGravity(),force.x,force.y,velocity);
     PointSpeed(body,predicted,body->GetAngularVelocity());
@@ -464,7 +469,8 @@ void Rigidbody::SetVelocity(const b2Vec2 &velocity) {
 }
 
 // runtime physics controls
-void Rigidbody::SetPosition(const b2Vec2 &position) {
+void Rigidbody::SetPosition(const Vector2 &position_in) {
+    const b2Vec2 position = ToBox2D(position_in);
     Position(position);
     const auto current=GetPosition();
     const bool same_position = NearlyEqual(current.x, position.x) && NearlyEqual(current.y, position.y);
@@ -532,7 +538,7 @@ void Rigidbody::SetAngularVelocity(float degrees_clockwise) {
 void Rigidbody::SetGravityScale(float scale) {
     ValidateNumericProperty("gravity_scale",scale);
     if(body) {
-        const auto force=force_step_==CurrentForceStep()?accumulated_force_:b2Vec2_zero;
+        const auto force=force_step_==CurrentForceStep()?accumulated_force_:Vector2();
         const auto predicted=Integration(body->GetMass(),scale,body->GetWorld()->GetGravity(),force.x,force.y,body->GetLinearVelocity());
         PointSpeed(body,predicted,body->GetAngularVelocity());
     }
@@ -542,7 +548,8 @@ void Rigidbody::SetGravityScale(float scale) {
 }
 
 // runtime physics controls
-void Rigidbody::SetUpDirection(b2Vec2 direction) {
+void Rigidbody::SetUpDirection(Vector2 direction_in) {
+    const b2Vec2 direction = ToBox2D(direction_in);
     FiniteVector(direction);
     if(direction.x==0&&direction.y==0) return;
     Unlocked(body);
@@ -554,7 +561,8 @@ void Rigidbody::SetUpDirection(b2Vec2 direction) {
 }
 
 // runtime physics controls
-void Rigidbody::SetRightDirection(b2Vec2 direction) {
+void Rigidbody::SetRightDirection(Vector2 direction_in) {
+    const b2Vec2 direction = ToBox2D(direction_in);
     FiniteVector(direction);
     if(direction.x==0&&direction.y==0) return;
     Unlocked(body);
@@ -566,9 +574,9 @@ void Rigidbody::SetRightDirection(b2Vec2 direction) {
 }
 
 // runtime physics controls
-b2Vec2 Rigidbody::GetVelocity() const {
-    if (body != nullptr) return body->GetLinearVelocity();
-    return b2Vec2(0.0f, 0.0f);
+Vector2 Rigidbody::GetVelocity() const {
+    if (body != nullptr) return FromBox2D(body->GetLinearVelocity());
+    return FromBox2D(b2Vec2(0.0f, 0.0f));
 }
 
 // runtime physics controls
@@ -586,19 +594,19 @@ float Rigidbody::GetGravityScale() const {
 }
 
 // runtime physics controls
-b2Vec2 Rigidbody::GetUpDirection() const {
+Vector2 Rigidbody::GetUpDirection() const {
     const float angle = (body != nullptr) ? body->GetAngle()
                                           : ClockwiseDegreesToBox2DRadians(rotation);
     b2Vec2 result(glm::sin(angle), -glm::cos(angle));
     result.Normalize();
-    return result;
+    return FromBox2D(result);
 }
 
 // runtime physics controls
-b2Vec2 Rigidbody::GetRightDirection() const {
+Vector2 Rigidbody::GetRightDirection() const {
     const float angle = (body != nullptr) ? body->GetAngle()
                                           : ClockwiseDegreesToBox2DRadians(rotation);
     b2Vec2 result(glm::cos(angle), glm::sin(angle));
     result.Normalize();
-    return result;
+    return FromBox2D(result);
 }

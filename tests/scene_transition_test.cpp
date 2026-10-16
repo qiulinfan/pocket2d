@@ -146,7 +146,7 @@ void TestCommitGateReentry(){
  const auto target=SceneFormat::LoadSceneAsset("other");
  const auto ref=Probe();const luabridge::LuaRef bag=ref["bag"];
  const ActorHandle handle(engine.GetRuntimeActorByUID(1));
- auto *body=ComponentManager::GetComponentByKey(1,"body").cast<Rigidbody *>().value();body->SetVelocity(b2Vec2(1,0));
+ auto *body=ComponentManager::GetComponentByKey(1,"body").cast<Rigidbody *>().value();body->SetVelocity(Vector2(1,0));
  for(int kind=0;kind<2;++kind){
   const int frame=FrameClock::GetFrameNumber(),updates=Value("updates");const auto position=body->GetPosition();
   int calls=0;bool nested_accepted=true;

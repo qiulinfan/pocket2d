@@ -32,8 +32,8 @@ public:
         RaycastHitCandidate candidate;
         candidate.hit.actor = metadata->actor;
         candidate.hit.actor_handle = ActorHandle(metadata->actor);
-        candidate.hit.point = point;
-        candidate.hit.normal = normal;
+        candidate.hit.point = Vector2(point.x, point.y);
+        candidate.hit.normal = Vector2(normal.x, normal.y);
         candidate.hit.is_trigger = metadata->kind == RayCast::FixtureKind::Trigger;
         candidate.fraction = fraction;
         hits_.push_back(candidate);
@@ -44,9 +44,11 @@ private:
     std::vector<RaycastHitCandidate> &hits_;
 };
 
-std::vector<RaycastHitCandidate> CollectHits(const b2Vec2 &position,
-                                             const b2Vec2 &direction,
+std::vector<RaycastHitCandidate> CollectHits(const Vector2 &position_in,
+                                             const Vector2 &direction_in,
                                              float distance) {
+    const b2Vec2 position(position_in.x, position_in.y);
+    const b2Vec2 direction(direction_in.x, direction_in.y);
     std::vector<RaycastHitCandidate> hits;
     if (Physics().physics_world == nullptr || distance <= 0.0f) return hits;
 
@@ -105,7 +107,7 @@ const FixtureMetadata *FindFixtureMetadata(const b2Fixture *fixture) {
 }
 
 // nearest hit only
-std::optional<HitResult> Cast(const b2Vec2 &position, const b2Vec2 &direction,
+std::optional<HitResult> Cast(const Vector2 &position, const Vector2 &direction,
                               float distance) {
                                   const std::vector<RaycastHitCandidate> hits = CollectHits(position, direction, distance);
     if (hits.empty()) return std::nullopt;
@@ -113,7 +115,7 @@ std::optional<HitResult> Cast(const b2Vec2 &position, const b2Vec2 &direction,
 }
 
 // return all hits, sorted by distance
-std::vector<HitResult> CastAll(const b2Vec2 &position, const b2Vec2 &direction,
+std::vector<HitResult> CastAll(const Vector2 &position, const Vector2 &direction,
                                float distance) {
                                    const std::vector<RaycastHitCandidate> hit_candidates = CollectHits(position, direction, distance);
 

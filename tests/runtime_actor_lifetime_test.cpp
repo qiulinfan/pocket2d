@@ -76,7 +76,7 @@ void TestStableSurvivors() {
     engine.StepSimulation();
     const Actor *target = engine.GetRuntimeActorByUID(1);
     Check(target != nullptr, "target actor exists");
-    auto hit = RayCast::Cast(b2Vec2(-2, 0), b2Vec2(1, 0), 4);
+    auto hit = RayCast::Cast(Vector2(-2, 0), Vector2(1, 0), 4);
     Check(hit && hit->actor == target, "initial raycast resolves target");
     Check(engine.DeleteRuntimeActorByUID(3), "delete unrelated scene actor");
     Check(engine.GetRuntimeActorByUID(1) == target,
@@ -90,7 +90,7 @@ void TestStableSurvivors() {
               "spawn/destroy churn must preserve survivor address");
         Check(engine.GetRuntimeActors().size() == 3,
               "dead nodes must be reclaimed instead of accumulating tombstones");
-        auto current_hit = RayCast::Cast(b2Vec2(-2, 0), b2Vec2(1, 0), 4);
+        auto current_hit = RayCast::Cast(Vector2(-2, 0), Vector2(1, 0), 4);
         Check(current_hit && current_hit->actor == target,
               "Box2D fixture metadata must stay bound after actor removal");
         Check(ComponentManager::GetRuntimeErrorCount() == 0,

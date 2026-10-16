@@ -2,6 +2,7 @@
 #define RAYCAST_H
 
 #include "box2d/box2d.h"
+#include "core/Vector2.h"
 #include "scene/ActorHandle.h"
 #include <optional>
 #include <vector>
@@ -13,8 +14,8 @@ namespace RayCast {
 struct HitResult {
     Actor *actor = nullptr;
     ActorHandle actor_handle;
-    b2Vec2 point = b2Vec2(0.0f, 0.0f);
-    b2Vec2 normal = b2Vec2(0.0f, 0.0f);
+    Vector2 point = Vector2(0.0f, 0.0f);
+    Vector2 normal = Vector2(0.0f, 0.0f);
     bool is_trigger = false;
 };
 
@@ -53,12 +54,12 @@ const FixtureMetadata *FindFixtureMetadata(const b2Fixture *fixture);
 
 // nearest hit only
 // 只返回最近命中
-std::optional<HitResult> Cast(const b2Vec2 &position, const b2Vec2 &direction,
+std::optional<HitResult> Cast(const Vector2 &position, const Vector2 &direction,
                               float distance);
 
 // return all hits, sorted by distance
 // 返回所有命中结果, 并按距离排序
-std::vector<HitResult> CastAll(const b2Vec2 &position, const b2Vec2 &direction,
+std::vector<HitResult> CastAll(const Vector2 &position, const Vector2 &direction,
                                float distance);
 
 } // namespace RayCast

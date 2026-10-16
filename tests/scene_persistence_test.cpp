@@ -53,7 +53,7 @@ void Run(){
  auto *child_body=ComponentManager::GetComponentByKey(2,"body").cast<Rigidbody *>().value();
  auto *state=parent_ref.state();
  Check(Global(state,"ROOT_LOADS")==1 && Field(1,"starts")==1 && Field(2,"starts")==1,"startup did not execute/start once");
- parent_body->SetVelocity(b2Vec2(1,0));
+ parent_body->SetVelocity(Vector2(1,0));
  const auto original_source=ComponentManager::GetComponentScriptSource("Probe");
  const auto original_directory=Scene::GetActiveSceneSubdirectory();
  auto retained_identity=[&]{
