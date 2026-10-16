@@ -33,7 +33,7 @@ void ValidatePoses(const std::vector<std::unique_ptr<ComponentRecord>> &records)
     for(const auto &record:records) has_body|=record->type=="Rigidbody";
     for(const auto &record:records) {
         if(record->type!="Transform") continue;
-        auto *transform=LuaBoundary::Cast<Transform *>(record->instance_table);
+        auto *transform=record->Native<Transform>();
         Require(std::isfinite(transform->x)&&std::isfinite(transform->y)&&std::isfinite(transform->rotation),
                 "runtime actor Transform pose must be finite");
         if(has_body) {

@@ -30,15 +30,12 @@ bool SpriteAnimation::HasLiveBinding() const {
     // Unbound native authoring/test objects can play, but never apply poses.
     if (actor_handle.generation == 0) return true;
     if (!actor_handle.IsValid()) return false;
-    const auto reference = ComponentManager::GetComponentByKey(actor_handle.uid, key);
-    return reference.isInstance<SpriteAnimation>() && LuaBoundary::Cast<SpriteAnimation *>(reference) == this;
+    return ComponentManager::FindBuiltinComponent(actor_handle.uid, key) == this;
 }
 
 SpriteRenderer *SpriteAnimation::ResolveTarget(const ActorHandle &owner, const std::string &target_key) const {
     if (owner.generation == 0 || !owner.IsValid()) return nullptr;
-    const auto reference = ComponentManager::GetComponentByKey(owner.uid, target_key);
-    if (!reference.isInstance<SpriteRenderer>()) return nullptr;
-    return LuaBoundary::Cast<SpriteRenderer *>(reference);
+    return ComponentManager::GetSpriteRenderer(owner.uid, target_key);
 }
 
 void SpriteAnimation::ClearOwnedPose() {
@@ -148,7 +145,11 @@ void SpriteAnimation::Stop() {
     pending_events_.clear();
 }
 std::vector<SpriteAnimation::Event> SpriteAnimation::AdvanceTick() {
-    if (!IsPlaying()) return {};
+    if (!HasLiveBinding()) return {};
+    return AdvanceBoundTick(ResolveTarget(actor_handle, renderer_key));
+}
+std::vector<SpriteAnimation::Event> SpriteAnimation::AdvanceBoundTick(SpriteRenderer *target) {
+    if (destroyed_ || !selected_ || !enabled || paused_ || completed_) return {};
     auto events = std::move(pending_events_);
     pending_events_.clear();
     const auto &current = *CurrentClip();
@@ -164,21 +165,27 @@ std::vector<SpriteAnimation::Event> SpriteAnimation::AdvanceTick() {
             events.push_back({"completed", current.name, "", GetFrame(), playback_id_});
         }
     }
-    ApplyPose();
+    ApplyBoundPose(target);
     return events;
 }
 void SpriteAnimation::ApplyPose() {
-    if (!HasLiveBinding() || !selected_) { ClearOwnedPose(); return; }
+    if (!HasLiveBinding()) { ClearOwnedPose(); return; }
+    ApplyBoundPose(ResolveTarget(actor_handle, renderer_key));
+}
+void SpriteAnimation::ApplyBoundPose(SpriteRenderer *target) {
+    if (destroyed_ || !selected_) { ClearOwnedPose(); return; }
     if (actor_handle.generation == 0) return;
     if (posed_actor_.uid != actor_handle.uid || posed_actor_.generation != actor_handle.generation ||
         posed_target_ != renderer_key) ClearOwnedPose();
-    auto *target = ResolveTarget(actor_handle, renderer_key);
     if (!target) return;
+    if (pose_image_data_ != data_.get()) {
+        pose_image_ = data_->resolved_image_path.empty() ? data_->image : data_->resolved_image_path.string();
+        pose_image_data_ = data_.get();
+    }
     const auto &frame = CurrentClip()->frames[frame_index_];
-    target->SetAnimationPose(pose_owner_, {data_->resolved_image_path.empty() ? data_->image : data_->resolved_image_path.string(),
-                                         data_->columns, data_->rows, frame.row, frame.column});
+    target->SetAnimationPose(pose_owner_, pose_image_, data_->columns, data_->rows, frame.row, frame.column);
     posed_actor_ = actor_handle;
-    posed_target_ = renderer_key;
+    if (posed_target_ != renderer_key) posed_target_ = renderer_key;
 }
 void SpriteAnimation::OnStart() { ApplyPose(); }
 void SpriteAnimation::OnDestroy() {

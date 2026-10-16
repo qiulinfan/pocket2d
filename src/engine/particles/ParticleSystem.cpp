@@ -84,8 +84,7 @@ void ParticleSystem::ValidateConfiguration() const {
 bool ParticleSystem::HasLiveRuntimeBinding() const {
     if (actor_handle.generation == 0) return true;
     if (!actor_handle.IsValid()) return false;
-    const auto current = ComponentManager::GetComponentByKey(actor_handle.uid, key);
-    return current.isInstance<ParticleSystem>() && LuaBoundary::Cast<ParticleSystem *>(current) == this;
+    return ComponentManager::FindBuiltinComponent(actor_handle.uid, key) == this;
 }
 
 // Initialize the emitter on first use and sync its enabled state into runtime.

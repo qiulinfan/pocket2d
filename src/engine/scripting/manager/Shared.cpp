@@ -8,6 +8,8 @@
 #include "scripting/EventBus.h"
 #include "scene/Transform.h"
 #include "physics/Rigidbody.h"
+#include "rendering/SpriteAnimation.h"
+#include "scene/Tilemap.h"
 #include "scene/ActorHandle.h"
 #include <algorithm>
 #include <cmath>
@@ -22,6 +24,23 @@ RuntimeErrors &Errors() { return World::Current().State<RuntimeErrors>(); }
 } // namespace
 
 namespace ManagerDetail {
+
+namespace {
+template<class T> NativeComponent NativeOf(const luabridge::LuaRef &instance) {
+    if (!instance.isInstance<T>()) return {};
+    return {kNativeKindOf<T>, LuaBoundary::Cast<T *>(instance)};
+}
+}
+NativeComponent ResolveNativeComponent(const std::string &type, const luabridge::LuaRef &instance) {
+    if (!instance.isUserdata()) return {};
+    if (type == "Transform") return NativeOf<Transform>(instance);
+    if (type == "Rigidbody") return NativeOf<Rigidbody>(instance);
+    if (type == "SpriteRenderer") return NativeOf<SpriteRenderer>(instance);
+    if (type == "SpriteAnimation") return NativeOf<SpriteAnimation>(instance);
+    if (type == "ParticleSystem") return NativeOf<ParticleSystem>(instance);
+    if (type == "Tilemap") return NativeOf<Tilemap>(instance);
+    return {};
+}
 
 bool IsBuiltinComponentType(const std::string &type_name) {
     return type_name == "Rigidbody" || type_name == "ParticleSystem" ||
@@ -187,29 +206,41 @@ struct LuaStackScope {
 int ReadField(lua_State *state) { lua_settop(state, 2); lua_gettable(state, 1); return 1; }
 int WriteField(lua_State *state) { lua_settop(state, 3); lua_settable(state, 1); return 0; }
 }
+bool PushRawField(lua_State *state, const char *name) {
+    // Ordinary prototype inheritance is a chain of raw table reads, not user
+    // code. Keep one table on the stack and bound traversal; functions,
+    // userdata, unusual metamethod values and cycles need Lua's own semantics.
+    const int top = lua_gettop(state);
+    if (!lua_istable(state, top) || !lua_checkstack(state, 6)) return false;
+    // [table, current, key, "__index"]: intern each name once per lookup.
+    lua_pushvalue(state, top);
+    lua_pushstring(state, name);
+    const int current = top + 1, key = top + 2;
+    bool index_pushed = false;
+    constexpr int max_raw_depth = 64;
+    for (int depth = 0; depth < max_raw_depth; ++depth) {
+        lua_pushvalue(state, key);
+        if (lua_rawget(state, current) != LUA_TNIL) break;
+        lua_pop(state, 1);
+        if (!lua_getmetatable(state, current)) { lua_pushnil(state); break; }
+        if (!index_pushed) { lua_pushliteral(state, "__index"); lua_insert(state, key + 1); index_pushed = true; }
+        lua_pushvalue(state, key + 1);
+        const int index_type = lua_rawget(state, -2);
+        lua_remove(state, -2); // metatable
+        if (index_type == LUA_TNIL) break;
+        if (index_type != LUA_TTABLE || depth + 1 == max_raw_depth) { lua_settop(state, top); return false; }
+        lua_replace(state, current); // next table replaces the current one
+    }
+    lua_replace(state, top + 1);
+    lua_settop(state, top + 1);
+    return true;
+}
 luabridge::LuaRef ProtectedField(const luabridge::LuaRef &object, const char *name) {
     auto *state = Runtime().lua_state;
     const LuaStackScope stack{state, lua_gettop(state)};
-    // Ordinary prototype inheritance is a chain of raw table reads, not user
-    // code. Resolve that common case without a protected Lua call. Keep one
-    // table on the stack and bound traversal; functions, userdata, unusual
-    // metamethod values and cycles still use Lua's own protected semantics.
     if (object.isTable()) {
         object.push(state);
-        constexpr int max_raw_depth = 64;
-        for (int depth = 0; depth < max_raw_depth; ++depth) {
-            lua_pushstring(state, name);
-            lua_rawget(state, -2);
-            if (!lua_isnil(state, -1)) return luabridge::LuaRef::fromStack(state);
-            lua_pop(state, 1);
-            if (!lua_getmetatable(state, -1)) return luabridge::LuaRef(state);
-            lua_pushliteral(state, "__index");
-            lua_rawget(state, -2);
-            lua_remove(state, -2); // metatable; leave current table + __index
-            if (lua_isnil(state, -1)) return luabridge::LuaRef(state);
-            if (!lua_istable(state, -1)) break;
-            lua_replace(state, stack.top + 1); // next table replaces the current one
-        }
+        if (PushRawField(state, name)) return luabridge::LuaRef::fromStack(state);
         lua_settop(state, stack.top);
     }
     lua_pushcfunction(state, ReadField); object.push(state); lua_pushstring(state, name);
@@ -239,18 +270,21 @@ bool IsComponentEnabled(const ComponentRecord &component) {
 
 void SyncBuiltinParticleSystemState(ComponentRecord &component) {
     if (component.type != "ParticleSystem") return;
-    ParticleSystem *system = LuaBoundary::Cast<ParticleSystem *>(component.instance_table);
+    ParticleSystem *system = component.Native<ParticleSystem>();
     if (system == nullptr) return;
     system->SyncRuntimeState();
 }
 
 ComponentRecord *FindPrimaryComponentByType(RuntimeState &runtime, Actor::UID actor_uid,
                                             const std::string &type_name) {
-    auto type_it = runtime.component_first_key_by_type.find(actor_uid);
-    if (type_it == runtime.component_first_key_by_type.end()) return nullptr;
-    auto key_it = type_it->second.find(type_name);
-    if (key_it == type_it->second.end()) return nullptr;
-    return FindComponentRecord(runtime, actor_uid, key_it->second);
+    // Records stay sorted by key and the type index is rebuilt from them at
+    // every change, so the first live record of the type is the indexed one.
+    // A short scan beats two string-keyed hash lookups.
+    auto actor_it = runtime.actor_components.find(actor_uid);
+    if (actor_it == runtime.actor_components.end()) return nullptr;
+    for (const auto &component : actor_it->second)
+        if (!component->removed && component->type == type_name) return component.get();
+    return nullptr;
 }
 
 void RotateClockwise(float x, float y, float rotation_degrees, float &out_x,
@@ -312,7 +346,7 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
             if (component.removed) continue;
             if (component.type != "SpriteRenderer") continue;
 
-            SpriteRenderer *sprite_renderer = LuaBoundary::Cast<SpriteRenderer *>(component.instance_table);
+            SpriteRenderer *sprite_renderer = component.Native<SpriteRenderer>();
             if (sprite_renderer == nullptr) continue;
             if (sprite_renderer->actor_handle.generation != 0 && destroyed) continue;
             if (!pose_resolved) {
@@ -471,7 +505,7 @@ public:
                                ? nullptr : actor_it->second;
             auto *component = ManagerDetail::FindPrimaryComponentByType(runtime_, actor_uid, "Transform");
             Transform *transform = component == nullptr
-                                       ? nullptr : LuaBoundary::Cast<Transform *>(component->instance_table);
+                                       ? nullptr : component->Native<Transform>();
             const Actor::UID parent_uid = actor == nullptr
                                              ? Actor::kInvalidUID : actor->parent_uid;
             path_.push_back({actor_uid, parent_uid, transform});
@@ -495,7 +529,7 @@ public:
                     auto *component = ManagerDetail::FindPrimaryComponentByType(
                         runtime_, entry.parent_uid, "Transform");
                     if (component != nullptr) {
-                        parent = LuaBoundary::Cast<Transform *>(component->instance_table);
+                        parent = component->Native<Transform>();
                     }
                 }
                 Transform &transform = *entry.transform;
@@ -543,7 +577,7 @@ void ComponentManager::ResolveTransformHierarchy() {
         if (entry.second->parent_uid == Actor::kInvalidUID) {
             auto *component = ManagerDetail::FindPrimaryComponentByType(runtime, entry.first, "Transform");
             Transform *transform = component == nullptr
-                                       ? nullptr : LuaBoundary::Cast<Transform *>(component->instance_table);
+                                       ? nullptr : component->Native<Transform>();
             if (transform != nullptr) {
                 transform->world_x = transform->x;
                 transform->world_y = transform->y;
@@ -565,7 +599,7 @@ bool ComponentManager::TryGetRuntimeTransformWorld(
         ManagerDetail::FindPrimaryComponentByType(actor_uid, "Transform");
     if (transform_component == nullptr) return false;
 
-    Transform *transform = LuaBoundary::Cast<Transform *>(transform_component->instance_table);
+    Transform *transform = transform_component->Native<Transform>();
     if (transform == nullptr) return false;
 
     x = transform->world_x;
@@ -591,7 +625,7 @@ bool ComponentManager::SetRuntimeTransformWorldPosition(Actor::UID actor_uid,
         ManagerDetail::FindPrimaryComponentByType(actor_uid, "Transform");
     if (transform_component == nullptr) return false;
 
-    Transform *transform = LuaBoundary::Cast<Transform *>(transform_component->instance_table);
+    Transform *transform = transform_component->Native<Transform>();
     if (transform == nullptr) return false;
 
     if (actor->parent_uid == Actor::kInvalidUID ||

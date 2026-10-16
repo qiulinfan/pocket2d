@@ -78,7 +78,7 @@ bool TryCastRuntimeRigidbody(ComponentRecord *component, Rigidbody *&out_rigidbo
     out_rigidbody = nullptr;
     if (component == nullptr || component->removed) return false;
     try {
-        out_rigidbody = LuaBoundary::Cast<Rigidbody *>(component->instance_table);
+        out_rigidbody = component->Native<Rigidbody>();
     } catch (const LuaBoundary::Error &) {
         return false;
     }
@@ -89,7 +89,7 @@ bool TryCastRuntimeTransform(ComponentRecord *component, Transform *&out_transfo
     out_transform = nullptr;
     if (component == nullptr || component->removed) return false;
     try {
-        out_transform = LuaBoundary::Cast<Transform *>(component->instance_table);
+        out_transform = component->Native<Transform>();
     } catch (const LuaBoundary::Error &) {
         return false;
     }
@@ -134,32 +134,52 @@ void ResolveLocalTransformFromWorld(Actor *actor, float world_x, float world_y,
     out_local_rotation = world_rotation - parent_transform->world_rotation;
 }
 
-struct CallbackTarget {
-    Actor::UID uid;
-    std::string key;
-    luabridge::LuaRef reference;
-};
-CallbackTarget Snapshot(Actor::UID uid, const ComponentRecord &component) {
-    return {uid, component.key, component.instance_table};
-}
-bool Alive(RuntimeState &runtime, const CallbackTarget &target) {
-    return IsComponentRefAlive(runtime, target.reference, target.uid, target.key);
-}
-void Invoke(const CallbackTarget &target, const char *method, const Collision *collision = nullptr) {
+using CallbackTarget = RecordSnapshot;
+CallbackTarget Snapshot(Actor::UID uid, const ComponentRecord &component) { return SnapshotRecord(uid, component); }
+ComponentRecord *Alive(RuntimeState &runtime, CallbackTarget &target) { return ResolveSnapshot(runtime, target); }
+// Calls self[method](self[, collision]) unless self.enabled is false. Plain
+// tables and their table __index chains are read on the stack; any metamethod
+// that may run user code takes the protected path, which revalidates the
+// component after each read.
+void Invoke(CallbackTarget &target, const char *method, const Collision *collision = nullptr) {
     RuntimeState &runtime = Runtime();
-    const int top = lua_gettop(runtime.lua_state);
+    lua_State *state = runtime.lua_state;
+    const int top = lua_gettop(state);
+    struct Restore { lua_State *state; int top; ~Restore() { lua_settop(state, top); } } restore{state, top};
     try {
-        if (!Alive(runtime, target)) return;
-        const auto enabled = ProtectedField(target.reference, "enabled");
+        ComponentRecord *record = Alive(runtime, target);
+        if (record == nullptr) return;
+        if (!lua_checkstack(state, 8)) throw LuaBoundary::Error("Lua callback could not reserve stack space");
+        record->instance_table.push(state);
+        if (PushRawField(state, "enabled")) {
+            const bool enabled = lua_type(state, -1) != LUA_TBOOLEAN || lua_toboolean(state, -1) != 0;
+            lua_pop(state, 1);
+            if (!enabled) return;
+            if (PushRawField(state, method)) {
+                if (!lua_isfunction(state, -1)) return;
+                lua_insert(state, -2);
+                if (collision != nullptr) {
+                    try {
+                        LuaBoundary::Check(luabridge::Stack<Collision>::push(state, *collision), "Lua callback argument");
+                    } catch (const luabridge::LuaException &failure) {
+                        throw LuaBoundary::Error(failure.what());
+                    }
+                }
+                LuaBoundary::ProtectedCall(state, collision != nullptr ? 2 : 1, 0);
+                return;
+            }
+        }
+        lua_settop(state, top);
+        const luabridge::LuaRef reference = record->instance_table;
+        const auto enabled = ProtectedField(reference, "enabled");
         if (!Alive(runtime, target) || !LuaBoundary::IsEnabled(enabled)) return;
-        const auto callback = ProtectedField(target.reference, method);
+        const auto callback = ProtectedField(reference, method);
         if (!Alive(runtime, target) || !callback.isFunction()) return;
-        if (collision) LuaBoundary::CallDiscard(callback, target.reference, *collision);
-        else LuaBoundary::CallDiscard(callback, target.reference);
+        if (collision) LuaBoundary::CallDiscard(callback, reference, *collision);
+        else LuaBoundary::CallDiscard(callback, reference);
     } catch (const LuaBoundary::Error &error) {
         ReportError(GetActorNameByUID(target.uid), error);
     }
-    lua_settop(runtime.lua_state, top);
 }
 void DispatchContact(Actor::UID uid, const Collision &collision, const char *method,
                      bool ComponentRecord::*has_method) {
@@ -169,7 +189,7 @@ void DispatchContact(Actor::UID uid, const Collision &collision, const char *met
     for (const auto &component : found->second)
         if (!component->removed && component->on_start_called && component.get()->*has_method)
             targets.push_back(Snapshot(uid, *component));
-    for (const auto &target : targets) Invoke(target, method, &collision);
+    for (auto &target : targets) Invoke(target, method, &collision);
 }
 // Physics events still reach actors whose destruction is pending this frame,
 // but never a destroyed actor or a later actor reusing the UID.
@@ -226,13 +246,16 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
     std::vector<CallbackTarget> targets;
     for (const auto &actor_components_entry : Runtime().actor_components) {
         const auto uid = actor_components_entry.first;
+        // Most actors have no Rigidbody; skip the keyed lookup for them.
+        if (std::none_of(actor_components_entry.second.begin(), actor_components_entry.second.end(),
+                         [](const auto &record) { return record->template Native<Rigidbody>() != nullptr; }))
+            continue;
         const auto *component = FindRuntimeRigidbodyComponent(uid);
         if (component && !component->removed) targets.push_back(Snapshot(uid, *component));
     }
-    for (const auto &target : targets) {
+    for (auto &target : targets) {
         if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
-        if (!Alive(Runtime(), target)) continue;
-        auto *rigidbody_component = FindComponentRecord(target.uid, target.key);
+        auto *rigidbody_component = Alive(Runtime(), target);
         Rigidbody *rigidbody = nullptr;
         if (!TryCastRuntimeRigidbody(rigidbody_component, rigidbody) ||
             rigidbody == nullptr) {
@@ -252,7 +275,7 @@ void ComponentManager::ApplyEffectiveRigidbodyBodyTypes() {
         before OnStart / physics step consume it.
         */
         rigidbody->SetEffectiveBodyType(effective_body_type);
-        if (!Alive(Runtime(), target)) continue;
+        if (Alive(Runtime(), target) == nullptr) continue;
         rigidbody->ApplyEnabledState();
     }
 }
@@ -267,19 +290,19 @@ void ComponentManager::ProcessPendingOnStart() {
         const auto *component = FindComponentRecord(entry.actor_uid, entry.component_key);
         if (component && !component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
     }
-    for (const auto &target : targets) {
+    for (auto &target : targets) {
         if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
-        auto *component = FindComponentRecord(target.uid, target.key);
-        if (!component || !Alive(Runtime(), target) || component->on_start_called) continue;
+        auto *component = Alive(Runtime(), target);
+        if (!component || component->on_start_called) continue;
         // Disabled components have not started. Retain their pending entry so
         // later activation observes the same one-time lifecycle boundary.
         try {
-            const auto enabled = ProtectedField(target.reference, "enabled");
-            if (!Alive(Runtime(), target)) continue;
-            component = FindComponentRecord(target.uid, target.key);
+            const luabridge::LuaRef reference = component->instance_table;
+            const auto enabled = ProtectedField(reference, "enabled");
+            component = Alive(Runtime(), target);
             if (!component || component->on_start_called) continue;
             if (!LuaBoundary::IsEnabled(enabled)) {
-                Runtime().pending_on_start.emplace_back(target.uid, target.key);
+                Runtime().pending_on_start.emplace_back(target.uid, component->key);
                 continue;
             }
             const bool has_callback = component->has_on_start;
@@ -287,15 +310,15 @@ void ComponentManager::ProcessPendingOnStart() {
             // succeeded. Do not read enabled twice (it may be a Lua getter).
             component->on_start_called = true;
             if (has_callback) {
-                const auto callback = ProtectedField(target.reference, "OnStart");
+                const auto callback = ProtectedField(reference, "OnStart");
                 if (Alive(Runtime(), target) && callback.isFunction())
-                    LuaBoundary::CallDiscard(callback, target.reference);
+                    LuaBoundary::CallDiscard(callback, reference);
             }
         } catch (const LuaBoundary::Error &error) {
             ReportError(GetActorNameByUID(target.uid), error);
-            component = FindComponentRecord(target.uid, target.key);
-            if (component && Alive(Runtime(), target) && !component->on_start_called)
-                Runtime().pending_on_start.emplace_back(target.uid, target.key);
+            component = Alive(Runtime(), target);
+            if (component && !component->on_start_called)
+                Runtime().pending_on_start.emplace_back(target.uid, component->key);
         }
     }
 }
@@ -310,10 +333,11 @@ void ComponentManager::ProcessOnUpdate() {
         if (!component || component->removed) continue;
         if (component->on_start_called) targets.push_back(Snapshot(entry.actor_uid, *component));
     }
-    for (const auto &target : targets) {
-        if (BoundEngine() && BoundEngine()->RequiresSceneReset()) return;
-        auto *component = FindComponentRecord(runtime, target.uid, target.key);
-        if (!component || !Alive(runtime, target)) continue;
+    Engine *engine = BoundEngine();
+    for (auto &target : targets) {
+        if (engine && engine->RequiresSceneReset()) return;
+        auto *component = Alive(runtime, target);
+        if (!component) continue;
         // Preserve original per-component ordering: earlier Lua updates can
         // change this emitter's enabled state during the same tick.
         SyncBuiltinParticleSystemState(*component);
@@ -328,7 +352,7 @@ void ComponentManager::ProcessOnLateUpdate() {
     for (const auto &entry : Runtime().on_late_update_components)
         if (entry.component && !entry.component->removed && entry.component->on_start_called)
             targets.push_back(Snapshot(entry.actor_uid, *entry.component));
-    for (const auto &target : targets) Invoke(target, "OnLateUpdate");
+    for (auto &target : targets) Invoke(target, "OnLateUpdate");
 }
 
 // per-frame lifecycle entry points

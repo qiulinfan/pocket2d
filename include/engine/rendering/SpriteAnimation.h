@@ -47,6 +47,11 @@ public:
     void Stop();
     std::vector<Event> AdvanceTick();
     void ApplyPose();
+    // Same as AdvanceTick/ApplyPose for a component whose caller has already
+    // verified it is bound to its actor and resolved the renderer named by
+    // renderer_key (nullptr when absent), skipping both lookups.
+    std::vector<Event> AdvanceBoundTick(SpriteRenderer *target);
+    void ApplyBoundPose(SpriteRenderer *target);
     void OnStart();
     void OnDestroy();
 
@@ -78,6 +83,9 @@ private:
     std::uint64_t playback_id_ = 0;
     std::uint64_t pose_owner_;
     std::vector<Event> pending_events_;
+    // The pose image path for pose_image_data_, built once per asset.
+    std::string pose_image_;
+    const SpriteAnimationAsset::Data *pose_image_data_ = nullptr;
     ActorHandle posed_actor_;
     std::string posed_target_;
 };

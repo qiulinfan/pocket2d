@@ -482,8 +482,7 @@ bool Rigidbody::HasBody() const {
 bool Rigidbody::HasLiveRuntimeBinding() const {
     if (actor_handle.generation == 0) return true;
     if (!actor_handle.IsValid()) return false;
-    const auto current = ComponentManager::GetComponentByKey(actor_handle.uid, key);
-    return current.isInstance<Rigidbody>() && LuaBoundary::Cast<Rigidbody *>(current) == this;
+    return ComponentManager::FindBuiltinComponent(actor_handle.uid, key) == this;
 }
 
 // Create the Box2D body and shapes from the serialized runtime config.

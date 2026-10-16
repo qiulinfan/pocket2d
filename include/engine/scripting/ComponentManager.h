@@ -13,6 +13,7 @@ class Engine;
 struct lua_State;
 class Tilemap;
 class SpriteAnimation;
+class SpriteRenderer;
 
 // Owner-thread scene preparation. Destroy before Lua shutdown, and after every
 // prepared instance/ref that relies on its GC pause has been released.
@@ -162,6 +163,10 @@ public:
     static void ClearPreparedSpriteAnimationAssets();
     static void InitializeSpriteAnimations(Actor::UID actor_uid);
     static SpriteAnimation *GetSpriteAnimation(Actor::UID actor_uid, const std::string &key);
+    static SpriteRenderer *GetSpriteRenderer(Actor::UID actor_uid, const std::string &key);
+    // The native object of the built-in component at (uid, key), or nullptr.
+    // Built-ins compare it with `this` to check that they are still bound.
+    static const void *FindBuiltinComponent(Actor::UID actor_uid, const std::string &key);
     static void ProcessSpriteAnimations();
     static void ApplySpriteAnimationPoses();
     static bool SetSpriteAnimationProperty(Actor::UID actor_uid, const std::string &key,

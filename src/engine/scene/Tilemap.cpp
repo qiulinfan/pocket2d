@@ -102,8 +102,7 @@ bool Tilemap::HasLiveBinding() const {
     if (destroyed_) return false;
     if (actor_handle.generation == 0) return true;
     if (!actor_handle.IsValid()) return false;
-    const auto component = ComponentManager::GetComponentByKey(actor_handle.uid, key);
-    return component.isInstance<Tilemap>() && LuaBoundary::Cast<Tilemap *>(component) == this;
+    return ComponentManager::FindBuiltinComponent(actor_handle.uid, key) == this;
 }
 int Tilemap::LayerIndex(const std::string &layer) {
     if (layer == "ground") return 0;

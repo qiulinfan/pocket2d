@@ -161,7 +161,7 @@ std::unique_ptr<SceneComponentPlan> PrepareSceneComponents(const std::vector<Act
         for(std::size_t index=0;index<actors.size();++index) {
             Transform *transform=nullptr;bool body=false;
             for(const auto &record:plan->state_->actors[index].records) {
-                if(record->type=="Transform" && !transform)transform=LuaBoundary::Cast<Transform *>(record->instance_table);
+                if(record->type=="Transform" && !transform)transform=record->Native<Transform>();
                 body |= record->type=="Rigidbody";
             }
             if(transform)poses.emplace(actors[index].uid,Pose{actors[index].parent_uid,transform->x,transform->y,transform->rotation,body,false});

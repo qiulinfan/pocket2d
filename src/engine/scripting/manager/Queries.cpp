@@ -459,6 +459,16 @@ void MergeDynamicLuaTableProperties(
 // ComponentManager public API: queries
 // -----------------------------------------------------------------------------
 
+SpriteRenderer *ComponentManager::GetSpriteRenderer(Actor::UID actor_uid, const std::string &key) {
+    const ComponentRecord *component = FindComponentRecord(actor_uid, key);
+    return component == nullptr ? nullptr : component->Native<SpriteRenderer>();
+}
+
+const void *ComponentManager::FindBuiltinComponent(Actor::UID actor_uid, const std::string &key) {
+    const ComponentRecord *component = FindComponentRecord(actor_uid, key);
+    return component == nullptr ? nullptr : component->native.object;
+}
+
 // component queries used by Actor's Lua-facing methods
 luabridge::LuaRef ComponentManager::GetComponentByKey(Actor::UID actor_uid,
                                                       const std::string &key) {

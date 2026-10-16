@@ -16,6 +16,14 @@ void SpriteRenderer::SetAnimationPose(std::uint64_t owner, const AnimationPose &
     animation_pose_ = pose;
     animation_owner_ = owner;
 }
+void SpriteRenderer::SetAnimationPose(std::uint64_t owner, const std::string &image, int columns, int rows,
+                                      int row, int column) {
+    if (!animation_pose_) animation_pose_.emplace();
+    if (animation_pose_->image != image) animation_pose_->image = image;
+    animation_pose_->columns = columns; animation_pose_->rows = rows;
+    animation_pose_->row = row; animation_pose_->column = column;
+    animation_owner_ = owner;
+}
 void SpriteRenderer::ClearAnimationPose(std::uint64_t owner) {
     if (animation_owner_ != owner) return;
     animation_pose_.reset();

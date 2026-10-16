@@ -398,8 +398,8 @@ void SyncTransformAndRigidbodyAfterPropertyEdit(
         Transform *transform = nullptr;
         Rigidbody *rigidbody = nullptr;
         try {
-            transform = LuaBoundary::Cast<Transform *>(edited_component.instance_table);
-            rigidbody = LuaBoundary::Cast<Rigidbody *>(rigidbody_component->instance_table);
+            transform = edited_component.Native<Transform>();
+            rigidbody = rigidbody_component->Native<Rigidbody>();
         } catch (const LuaBoundary::Error &) {
             return;
         }
@@ -434,8 +434,8 @@ void SyncTransformAndRigidbodyAfterPropertyEdit(
     Transform *transform = nullptr;
     Rigidbody *rigidbody = nullptr;
     try {
-        transform = LuaBoundary::Cast<Transform *>(transform_component->instance_table);
-        rigidbody = LuaBoundary::Cast<Rigidbody *>(edited_component.instance_table);
+        transform = transform_component->Native<Transform>();
+        rigidbody = edited_component.Native<Rigidbody>();
     } catch (const LuaBoundary::Error &) {
         return;
     }
@@ -702,7 +702,7 @@ bool ComponentManager::SetComponentPropertyValue(
         component = FindComponentRecord(actor_uid, component_key);
 
         if (component->type == "ParticleSystem" && property_name == "enabled") {
-            ParticleSystem *system = LuaBoundary::Cast<ParticleSystem *>(component->instance_table);
+            ParticleSystem *system = component->Native<ParticleSystem>();
             if (system != nullptr) {
                 system->SyncRuntimeState();
             }

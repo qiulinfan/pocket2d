@@ -328,7 +328,7 @@ void PrepareFinal(Plan &plan) {
             }
         }
         for(auto &component:actor.components)if(!component->removed&&component->spec.type=="Transform"&&component->prepared) {
-            auto *transform=LuaBoundary::Cast<Transform *>(component->prepared->instance_table);
+            auto *transform=component->prepared->Native<Transform>();
             transform->world_x=world.x;transform->world_y=world.y;transform->world_rotation=world.rotation;
         }
         if(!actor.original)plan.nodes.push_back(actor.candidate);
@@ -451,8 +451,8 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
                 auto &component=*entry;if(component.removed||component.original.isNil()||component.replace)continue;
                 Require(IsComponentRefAlive(component.original,uid,component.spec.key),"edited component changed during commit");
                 if(component.adopt) {
-                    if(component.spec.type=="Tilemap")LuaBoundary::Cast<Tilemap *>(component.original)->AdoptPreparedState(*LuaBoundary::Cast<Tilemap *>(component.prepared->instance_table));
-                    else LuaBoundary::Cast<SpriteAnimation *>(component.original)->AdoptPreparedState(*LuaBoundary::Cast<SpriteAnimation *>(component.prepared->instance_table));
+                    if(component.spec.type=="Tilemap")LuaBoundary::Cast<Tilemap *>(component.original)->AdoptPreparedState(*component.prepared->Native<Tilemap>());
+                    else LuaBoundary::Cast<SpriteAnimation *>(component.original)->AdoptPreparedState(*component.prepared->Native<SpriteAnimation>());
                 } else for(const auto &[name,value]:component.patches) {
                     if(component.spec.type=="Transform")AssignPropertyValueToLuaField(component.original,name,value);
                     else Require(ComponentManager::SetComponentPropertyValue(uid,component.spec.key,name,value),"prepared property commit failed: "+component.spec.key+"."+name);
@@ -465,7 +465,7 @@ bool Engine::ApplySceneEditCommand(const SceneFormat::SceneEditCommand &command)
             auto *body=FindPrimaryComponentByType(uid,"Rigidbody");
             auto *transform=FindPrimaryComponentByType(uid,"Transform");
             if(body&&transform) {
-                const auto *pose=LuaBoundary::Cast<Transform *>(transform->instance_table);auto *native=LuaBoundary::Cast<Rigidbody *>(body->instance_table);
+                const auto *pose=transform->Native<Transform>();auto *native=body->Native<Rigidbody>();
                 native->SetPosition(Vector2(pose->world_x,pose->world_y));native->SetRotation(pose->world_rotation);
             }
         }

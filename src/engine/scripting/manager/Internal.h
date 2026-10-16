@@ -7,6 +7,7 @@
 #include "lua.hpp"
 #include "scripting/LuaBoundary.h"
 #include "LuaBridge/LuaBridge.h"
+#include <atomic>
 #include <cstdint>
 #include <list>
 #include <memory>
@@ -21,11 +22,38 @@
 // 3) runtime scene mutation + physics event bridging
 // register APIs -> build/query component state -> execute per-frame work.
 
+class Transform; class Rigidbody; class SpriteRenderer; class SpriteAnimation;
+class ParticleSystem; class Tilemap;
+
 namespace ManagerDetail {
 
 // -----------------------------------------------------------------------------
 // Internal runtime records
 // -----------------------------------------------------------------------------
+
+// Built-in component userdata never moves, so its native object is resolved
+// once when the record is created instead of on every per-frame lookup.
+enum class NativeKind : std::uint8_t {
+    None, Transform, Rigidbody, SpriteRenderer, SpriteAnimation, ParticleSystem, Tilemap
+};
+template<class T> inline constexpr NativeKind kNativeKindOf = NativeKind::None;
+template<> inline constexpr NativeKind kNativeKindOf<Transform> = NativeKind::Transform;
+template<> inline constexpr NativeKind kNativeKindOf<Rigidbody> = NativeKind::Rigidbody;
+template<> inline constexpr NativeKind kNativeKindOf<SpriteRenderer> = NativeKind::SpriteRenderer;
+template<> inline constexpr NativeKind kNativeKindOf<SpriteAnimation> = NativeKind::SpriteAnimation;
+template<> inline constexpr NativeKind kNativeKindOf<ParticleSystem> = NativeKind::ParticleSystem;
+template<> inline constexpr NativeKind kNativeKindOf<Tilemap> = NativeKind::Tilemap;
+struct NativeComponent { NativeKind kind = NativeKind::None; void *object = nullptr; };
+// The built-in object behind a component instance of the given type name.
+NativeComponent ResolveNativeComponent(const std::string &type, const luabridge::LuaRef &instance);
+
+// Records are owned by unique_ptr and never change instance_table, so a record
+// address identifies one component until the record is destroyed. Destroying
+// any record advances this process-wide epoch; a snapshot taken at the same
+// epoch may use its record pointer directly, otherwise it re-finds the record
+// by serial. Records may be destroyed on any World's thread.
+inline std::atomic<std::uint64_t> component_record_epoch{0};
+inline std::atomic<std::uint64_t> component_record_serial{0};
 
 // component instace 在 C++ 侧的 record
 // Note: 真正的数据和函数都在 instance_table（Lua table）里. 这里为了快速做生命周期调度和查询.
@@ -44,7 +72,18 @@ struct ComponentRecord {
     bool on_start_called = false;
     bool on_destroy_called = false;
     bool removed = false;
+    const std::uint64_t serial = component_record_serial.fetch_add(1, std::memory_order_relaxed) + 1;
+    NativeComponent native;
 
+    // The built-in object of type T, or nullptr for other component types.
+    template<class T> T *Native() const {
+        static_assert(kNativeKindOf<T> != NativeKind::None);
+        return native.kind == kNativeKindOf<T> ? static_cast<T *>(native.object) : nullptr;
+    }
+
+    ComponentRecord(const ComponentRecord &) = delete;
+    ComponentRecord &operator=(const ComponentRecord &) = delete;
+    ~ComponentRecord() { component_record_epoch.fetch_add(1, std::memory_order_relaxed); }
     ComponentRecord(std::string key_in, std::string type_in,
                     luabridge::LuaRef instance_table_in, bool has_on_start_in,
                     bool has_on_destroy_in, bool has_on_update_in,
@@ -61,7 +100,8 @@ struct ComponentRecord {
           has_on_collision_enter(has_on_collision_enter_in),
           has_on_collision_exit(has_on_collision_exit_in),
           has_on_trigger_enter(has_on_trigger_enter_in),
-          has_on_trigger_exit(has_on_trigger_exit_in) {}
+          has_on_trigger_exit(has_on_trigger_exit_in),
+          native(ResolveNativeComponent(type, instance_table)) {}
 };
 
 // 待执行 OnStart 的队列元素 (按 actor_uid + component_key 定位)
@@ -144,6 +184,37 @@ struct RuntimeState {
 // The scripting runtime of World::Current().
 inline RuntimeState &Runtime() { return World::Current().State<RuntimeState>(); }
 
+// Names a component across Lua calls without a registry reference. The record
+// pointer is trusted only while no record has been destroyed since it was
+// read; otherwise the record is found again by serial.
+struct RecordSnapshot {
+    Actor::UID uid = Actor::kInvalidUID;
+    ComponentRecord *record = nullptr;
+    std::uint64_t serial = 0;
+    std::uint64_t epoch = 0;
+};
+inline RecordSnapshot SnapshotRecord(Actor::UID uid, const ComponentRecord &component) {
+    // Runtime records are never const objects; the snapshot only names them.
+    return {uid, const_cast<ComponentRecord *>(&component), component.serial,
+            component_record_epoch.load(std::memory_order_relaxed)};
+}
+// The snapshot's record while it exists and is not removed, else nullptr.
+inline ComponentRecord *ResolveSnapshot(RuntimeState &runtime, RecordSnapshot &snapshot) {
+    const std::uint64_t epoch = component_record_epoch.load(std::memory_order_relaxed);
+    if (snapshot.epoch != epoch) {
+        snapshot.epoch = epoch;
+        ComponentRecord *found = nullptr;
+        if (snapshot.record != nullptr) {
+            const auto components = runtime.actor_components.find(snapshot.uid);
+            if (components != runtime.actor_components.end())
+                for (const auto &component : components->second)
+                    if (component->serial == snapshot.serial) { found = component.get(); break; }
+        }
+        snapshot.record = found;
+    }
+    return snapshot.record != nullptr && !snapshot.record->removed ? snapshot.record : nullptr;
+}
+
 // Owner-thread nested GC pause shared by scene plans and detached component
 // tokens. Release all owned LuaRefs before Resume; never outlive Lua Shutdown.
 void PauseScenePreparationGC(lua_State *state);
@@ -204,6 +275,10 @@ void RebuildLifecycleListsForDirtyActors(
 // Metamethods are user code: protect the complete lookup and restore the caller's
 // stack on both success and failure. Callers still revalidate component identity.
 luabridge::LuaRef ProtectedField(const luabridge::LuaRef &object, const char *name);
+// Pushes table[name] when the table at the stack top resolves it through raw
+// reads and plain-table __index chains, without running user code. Returns
+// false, with the stack unchanged, when a metamethod would be needed.
+bool PushRawField(lua_State *state, const char *name);
 void ProtectedSetField(const luabridge::LuaRef &object, const char *name,
                        const luabridge::LuaRef &value);
 void SetSystemField(const luabridge::LuaRef &object, const char *name,

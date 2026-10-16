@@ -70,6 +70,19 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   pushed out. The curated script contract, `.d.ts` and LuaLS files include the
   new API. `physics_api_test` covers it; **77 CTest cases pass in Debug,
   Release and ASan/UBSan.**
+- Per-frame component dispatch no longer creates Lua registry references.
+  Records carry a serial, a cached native pointer for built-in components, and
+  a process-wide destruction epoch; callback snapshots keep record pointers and
+  re-find them by serial only after some record was destroyed. Plain-table
+  `enabled`/callback reads stay on the Lua stack; metamethods still take the
+  protected, revalidating path. The animation pass resolves each renderer once
+  per snapshot instead of three keyed lookups per tick. Release, 10k actors, 8
+  warmup, 180 samples, four interleaved runs: native animation step p50
+  4.06–4.31 ms before, 0.65–0.77 ms after; Lua loop 3.70–4.16 ms before,
+  1.10–1.19 ms after. 77 CTest cases pass in Debug, Release and ASan/UBSan;
+  under TSan the World isolation and editor play tests pass, while
+  `agent_two_world_village` exceeds its agent deadline from instrumentation
+  slowdown without race reports.
 
 ## Completed and verified in this slice
 

@@ -132,7 +132,7 @@ void ComponentManager::ClearPreparedTilemapAssets() { PreparedForWorld().clear()
 Tilemap *ComponentManager::GetTilemap(Actor::UID uid, const std::string &key) {
     auto *record = ManagerDetail::FindComponentRecord(uid, key);
     if (record == nullptr || record->type != "Tilemap") return nullptr;
-    return LuaBoundary::Cast<Tilemap *>(record->instance_table);
+    return record->Native<Tilemap>();
 }
 
 void ComponentManager::InitializeTilemap(Actor::UID uid, const std::string &key) {
@@ -186,7 +186,7 @@ void ComponentManager::CommitTilemaps() {
                 throw std::runtime_error("Tilemap must remain a root actor");
             float x, y, rotation;
             Origin(uid, x, y, rotation);
-            LuaBoundary::Cast<Tilemap *>(entry->instance_table)->CommitPending(x, y, rotation);
+            entry->Native<Tilemap>()->CommitPending(x, y, rotation);
         }
     }
 }
@@ -201,7 +201,7 @@ void ComponentManager::QueueTilemaps(float min_x, float min_y, float max_x, floa
         if (components == ManagerDetail::Runtime().actor_components.end()) continue;
         for (auto &entry : components->second) {
             if (entry->removed || entry->type != "Tilemap") continue;
-            LuaBoundary::Cast<Tilemap *>(entry->instance_table)->QueueVisible(min_x, min_y, max_x, max_y);
+            entry->Native<Tilemap>()->QueueVisible(min_x, min_y, max_x, max_y);
         }
     }
 }
@@ -216,13 +216,13 @@ void PrepareDetachedTilemapAssets(const Actor &actor,
         if (record->type == "Transform" && (!primary || record->key < primary->key)) primary = record.get();
     }
     if (primary) {
-        const auto *transform = LuaBoundary::Cast<Transform *>(primary->instance_table);
+        const auto *transform = primary->Native<Transform>();
         x = transform->x; y = transform->y; rotation = transform->rotation;
     }
     for (const auto &record : records) {
         if (record->type != "Tilemap") continue;
         try {
-            auto *map = LuaBoundary::Cast<Tilemap *>(record->instance_table);
+            auto *map = record->Native<Tilemap>();
             if (map->actor != nullptr || map->actor_handle.generation != 0 || map->HasAsset())
                 throw std::runtime_error("expected a fresh detached Tilemap");
             if (!std::isfinite(rotation) || rotation != 0)

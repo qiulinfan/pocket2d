@@ -18,6 +18,8 @@ public:
         int columns = 1, rows = 1, row = 1, column = 1;
     };
     void SetAnimationPose(std::uint64_t owner, const AnimationPose &pose);
+    // Updates the pose in place, reusing the stored image string.
+    void SetAnimationPose(std::uint64_t owner, const std::string &image, int columns, int rows, int row, int column);
     void ClearAnimationPose(std::uint64_t owner);
     bool HasAnimationOverride() const { return animation_pose_.has_value(); }
     std::uint64_t GetAnimationOverrideOwner() const { return animation_owner_; }

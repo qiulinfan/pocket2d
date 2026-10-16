@@ -4,6 +4,7 @@
 #include "Internal.h"
 #include "scripting/RuntimeActorAssets.h"
 #include "rendering/SpriteAnimation.h"
+#include "rendering/SpriteRenderer.h"
 #include "shared/animation/SpriteAnimationAsset.h"
 #include "scripting/ComponentManager.h"
 #include <algorithm>
@@ -56,16 +57,18 @@ void ValidateLiveTarget(Actor::UID uid, const std::string &key, const std::strin
     if (found == Runtime().actor_components.end()) return;
     for (const auto &record : found->second) {
         if (record->removed || record->type != "SpriteAnimation" || record->key == key) continue;
-        auto *other = LuaBoundary::Cast<SpriteAnimation *>(record->instance_table);
+        auto *other = record->Native<SpriteAnimation>();
         if (!other->animation_resource.empty() && other->renderer_key == target)
             throw std::runtime_error("SpriteAnimation target '" + target + "' has multiple animators");
     }
 }
 struct LiveAnimation {
     ActorHandle owner;
-    std::string key;
-    luabridge::LuaRef reference;
+    ManagerDetail::RecordSnapshot record;
     SpriteAnimation *native;
+    // The renderer named by renderer_key when the snapshot was taken. Valid
+    // only until Lua runs; native ticking and posing never run Lua.
+    SpriteRenderer *target;
 };
 std::vector<LiveAnimation> SnapshotAnimations() {
     ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
@@ -77,15 +80,23 @@ std::vector<LiveAnimation> SnapshotAnimations() {
         if (!handle.IsValid()) continue;
         const auto components = runtime.actor_components.find(uid);
         if (components == runtime.actor_components.end()) continue;
-        for (const auto &record : components->second)
-            if (!record->removed && record->type == "SpriteAnimation")
-                result.push_back({handle, record->key, record->instance_table,
-                                  LuaBoundary::Cast<SpriteAnimation *>(record->instance_table)});
+        for (const auto &record : components->second) {
+            auto *native = record->removed ? nullptr : record->Native<SpriteAnimation>();
+            if (native == nullptr) continue;
+            SpriteRenderer *target = nullptr;
+            for (const auto &candidate : components->second)
+                if (!candidate->removed && candidate->key == native->renderer_key) {
+                    target = candidate->Native<SpriteRenderer>();
+                    break;
+                }
+            result.push_back({handle, ManagerDetail::SnapshotRecord(uid, *record), native, target});
+        }
     }
     return result;
 }
-bool Alive(const LiveAnimation &animation) {
-    return animation.owner.IsValid() && IsComponentRefAlive(animation.reference, animation.owner.uid, animation.key);
+bool Alive(LiveAnimation &animation) {
+    return animation.owner.IsValid() &&
+           ManagerDetail::ResolveSnapshot(ManagerDetail::Runtime(), animation.record) != nullptr;
 }
 }
 
@@ -121,7 +132,7 @@ void ComponentManager::PrepareSpriteAnimationAssets(const std::vector<Actor> &ac
 void ComponentManager::ClearPreparedSpriteAnimationAssets() { PreparedForWorld().clear(); }
 SpriteAnimation *ComponentManager::GetSpriteAnimation(Actor::UID uid, const std::string &key) {
     const auto *record = FindComponentRecord(uid, key);
-    return record && !record->removed && record->type == "SpriteAnimation" ? LuaBoundary::Cast<SpriteAnimation *>(record->instance_table) : nullptr;
+    return record && !record->removed && record->type == "SpriteAnimation" ? record->Native<SpriteAnimation>() : nullptr;
 }
 void ComponentManager::InitializeSpriteAnimations(Actor::UID uid) {
     const auto actor = Runtime().actor_by_uid.find(uid);
@@ -131,7 +142,7 @@ void ComponentManager::InitializeSpriteAnimations(Actor::UID uid) {
     if (records == Runtime().actor_components.end()) return;
     for (const auto &record : records->second) {
         if (record->removed || record->type != "SpriteAnimation") continue;
-        auto *animation = LuaBoundary::Cast<SpriteAnimation *>(record->instance_table);
+        auto *animation = record->Native<SpriteAnimation>();
         if (animation->HasAsset() || animation->animation_resource.empty()) continue;
         ValidateLiveTarget(uid, record->key, animation->renderer_key);
         const auto cached = PreparedForWorld().find({uid, record->key});
@@ -180,8 +191,8 @@ bool ComponentManager::SetSpriteAnimationProperty(Actor::UID uid, const std::str
     return true;
 }
 void ComponentManager::ApplySpriteAnimationPoses() {
-    for (const auto &animation : SnapshotAnimations())
-        if (Alive(animation)) animation.native->ApplyPose();
+    for (auto &animation : SnapshotAnimations())
+        if (Alive(animation)) animation.native->ApplyBoundPose(animation.target);
 }
 void ComponentManager::ProcessSpriteAnimations() {
     POCKET_ZONE("ProcessSpriteAnimations");
@@ -190,12 +201,14 @@ void ComponentManager::ProcessSpriteAnimations() {
     std::vector<Delivery> deliveries;
     for (auto &animation : SnapshotAnimations()) {
         if (!Alive(animation)) continue;
-        auto events = animation.native->AdvanceTick();
+        auto events = animation.native->AdvanceBoundTick(animation.target);
         deliveries.push_back({std::move(animation), std::move(events)});
     }
-    for (const auto &delivery : deliveries) {
-        const auto &animation = delivery.animation;
-        if (delivery.events.empty()) continue;
+    for (auto &delivery : deliveries) {
+        auto &animation = delivery.animation;
+        // Earlier deliveries ran Lua and may have destroyed this animation.
+        if (delivery.events.empty() || !Alive(animation)) continue;
+        const std::string animation_key = animation.record.record->key;
         // Retain values, not vector iterators or ComponentRecord pointers, across Lua calls.
         std::vector<std::pair<std::string, luabridge::LuaRef>> recipients;
         const auto found = runtime.actor_components.find(animation.owner.uid);
@@ -227,7 +240,7 @@ void ComponentManager::ProcessSpriteAnimations() {
                     auto payload = luabridge::newTable(runtime.lua_state);
                     payload["type"] = event.type; payload["clip"] = event.clip;
                     payload["frame"] = event.frame; payload["marker"] = event.marker;
-                    payload["component_key"] = animation.key;
+                    payload["component_key"] = animation_key;
                     LuaBoundary::CallDiscard(callback, reference, payload);
                 } catch (const LuaBoundary::Error &error) {
                     ReportError(GetActorNameByUID(animation.owner.uid) + "/" + key + ".OnAnimationEvent", error);
@@ -248,7 +261,7 @@ void PrepareDetachedAnimationAssets(const Actor &actor,
     for (const auto &record : records) {
         if (record->type != "SpriteAnimation") continue;
         try {
-            auto *animation = LuaBoundary::Cast<SpriteAnimation *>(record->instance_table);
+            auto *animation = record->Native<SpriteAnimation>();
             if (animation->actor != nullptr || animation->actor_handle.generation != 0 || animation->HasAsset())
                 throw std::runtime_error("expected a fresh detached SpriteAnimation");
             if (animation->animation_resource.empty()) continue;
@@ -276,7 +289,7 @@ void ApplyDetachedActorPoses(Actor::UID uid) {
     if (records == Runtime().actor_components.end()) return;
     for (const auto &record : records->second) {
         if (!record->removed && record->type == "SpriteAnimation")
-            LuaBoundary::Cast<SpriteAnimation *>(record->instance_table)->ApplyPose();
+            record->Native<SpriteAnimation>()->ApplyPose();
     }
 }
 }
