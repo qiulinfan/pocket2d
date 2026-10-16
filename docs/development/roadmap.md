@@ -13,6 +13,13 @@ development. A second language does not by itself require a second VM. The
 owner also authorized using existing OMP with GLM/DeepSeek for bounded, isolated
 game-authoring evaluations; model self-reports require independent runtime tests.
 
+Owner direction, 2026-10-16: Pocket2D is a 2D engine, not 3D. The goal is
+agent-first, agent-native gameplay. The Lua runtime and C++ hosting stay; every
+other part may be replanned. The owner chose World instancing, a Box2D 3.1
+migration, and one command schema served over both MCP and JSONL, starting with
+World instancing plus Box2D v3. The plan and remaining open decisions are in
+[agent-native-modernization.md](agent-native-modernization.md).
+
 ## Required end state
 
 1. C++26 is required at configure time. SDL3 is used natively by runtime and
