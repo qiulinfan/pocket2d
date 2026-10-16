@@ -5,6 +5,7 @@
 #include "scripting/ComponentManager.h"
 #include "scripting/EventBus.h"
 #include "scene/Transform.h"
+#include "physics/Rigidbody.h"
 #include "scene/ActorHandle.h"
 #include <algorithm>
 #include <cmath>
@@ -259,8 +260,28 @@ void RotateClockwise(float x, float y, float rotation_degrees, float &out_x,
     out_y = -sin_theta * x + cos_theta * y;
 }
 
+// World pose for an actor's sprites: Transform when present, so scene edits
+// have one source of truth, else Rigidbody for scenes without a Transform.
+bool ResolveSpritePose(RuntimeState &runtime, Actor::UID uid, float &x, float &y,
+                       float &rotation) {
+    if (ComponentRecord *record = FindPrimaryComponentByType(runtime, uid, "Transform")) {
+        if (const auto transform = record->instance_table.cast<Transform *>(); transform && *transform) {
+            x = (*transform)->world_x; y = (*transform)->world_y; rotation = (*transform)->world_rotation;
+            return true;
+        }
+    }
+    if (ComponentRecord *record = FindPrimaryComponentByType(runtime, uid, "Rigidbody")) {
+        if (const auto rigidbody = record->instance_table.cast<Rigidbody *>(); rigidbody && *rigidbody) {
+            const Vector2 position = (*rigidbody)->GetPosition();
+            x = position.x; y = position.y; rotation = (*rigidbody)->GetRotation();
+            return true;
+        }
+    }
+    return false;
+}
+
 void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
-    ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
+    RuntimeState &runtime = Runtime();
     // Built-in render components draw during the render phase itself so they
     // still appear in editor frozen frames where gameplay updates are paused.
     // Sorting-order ties must preserve authored scene order, not hash-table
@@ -277,7 +298,12 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
             (actor == nullptr || !actor->IsSceneBacked())) {
             continue;
         }
+        // An actor destroyed this frame stops drawing immediately.
+        const bool destroyed = actor == nullptr || actor->runtime_destroyed ||
+                               runtime.pending_destroy_actor_uids.contains(uid);
 
+        bool pose_resolved = false, has_pose = false;
+        float x = 0.0f, y = 0.0f, rotation = 0.0f;
         for (std::unique_ptr<ComponentRecord> &component_ptr :
              components_it->second) {
             ComponentRecord &component = *component_ptr;
@@ -286,7 +312,12 @@ void QueueBuiltinSpriteRendererDraws(bool scene_backed_only) {
 
             SpriteRenderer *sprite_renderer = LuaBoundary::Cast<SpriteRenderer *>(component.instance_table);
             if (sprite_renderer == nullptr) continue;
-            sprite_renderer->QueueDraw();
+            if (sprite_renderer->actor_handle.generation != 0 && destroyed) continue;
+            if (!pose_resolved) {
+                has_pose = ResolveSpritePose(runtime, uid, x, y, rotation);
+                pose_resolved = true;
+            }
+            if (has_pose) sprite_renderer->QueueDraw(x, y, rotation);
         }
     }
 }
@@ -499,9 +530,23 @@ private:
 } // namespace
 
 void ComponentManager::ResolveTransformHierarchy() {
+    ManagerDetail::RuntimeState &runtime = ManagerDetail::Runtime();
     WorldTransformResolver resolver;
-    for (const auto &entry : ManagerDetail::Runtime().actor_by_uid) {
+    for (const auto &entry : runtime.actor_by_uid) {
         if (entry.second == nullptr || entry.second->runtime_destroyed) continue;
+        // A root's world pose is its local pose; only children need the
+        // memoized parent walk.
+        if (entry.second->parent_uid == Actor::kInvalidUID) {
+            auto *component = ManagerDetail::FindPrimaryComponentByType(runtime, entry.first, "Transform");
+            Transform *transform = component == nullptr
+                                       ? nullptr : LuaBoundary::Cast<Transform *>(component->instance_table);
+            if (transform != nullptr) {
+                transform->world_x = transform->x;
+                transform->world_y = transform->y;
+                transform->world_rotation = transform->rotation;
+            }
+            continue;
+        }
         resolver.Resolve(entry.first);
     }
 }

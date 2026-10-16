@@ -48,3 +48,34 @@ Raw samples and CSV summaries stay in ignored `build/verification/`; this page
 records the reproducible workload and bounded engineering conclusion. Functional
 render tests separately cover atlas IDs, solid-layer alpha, sorting ties,
 viewport clipping, 2× target scaling and zoom on software, Metal and OpenGL.
+
+## Sprite submission path (2026-10-16)
+
+Profiling the 256×256 individual-sprite case showed about 77% of main-thread
+samples in `SpriteRenderer::QueueDraw`, mostly spritesheet metadata validation
+and key building with `std::filesystem` for every sprite, plus a new LuaRef per
+sprite to find its Transform. Actual draw submission was about 9%.
+
+The change resolves each sprite's grid once per metadata revision, checks the
+project root by comparing its native string in place (also in the texture
+cache), resolves the pose in the render-phase loop from the component records,
+orders draws by sorting 64-bit (sorting order, submission index) keys instead
+of stable-sorting the requests, and writes root Transforms' world pose without
+the hierarchy walk. Draw order and pixels are unchanged; the benchmark's
+per-scenario sprite/native pixel comparison passed in every run.
+
+Five interleaved before/after Release runs on the same Mac, Metal, 21 timed
+frames each, p50 ranges in milliseconds per render-and-present frame:
+
+| Individual sprites | Before | After |
+| --- | ---: | ---: |
+| 64×64 (4,096) | 8.54–8.75 | 8.08–8.56 |
+| 128×128 (16,384) | 18.88–19.84 | 8.05–8.59 |
+| 256×256 (65,536) | 76.63–77.83 | 10.23–12.83 |
+
+Native Tilemap results were unchanged (7.81–8.92 after). Every case at or
+below 16,384 sprites now sits at the same roughly 8 ms per-frame floor as the
+native path with 32 tiles, so that floor, not sprite submission, bounds those
+cases; it has not been attributed yet. At 65,536 sprites the remaining CPU time
+is mostly per-actor component lookup and Lua userdata casts in transform
+resolution and queueing, the target of native component pools.

@@ -1,6 +1,7 @@
 #ifndef SPRITESHEET_CONFIG_H
 #define SPRITESHEET_CONFIG_H
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -11,6 +12,10 @@ struct SpritesheetGridSpec {
 
 class SpritesheetConfig {
 public:
+    // Changes whenever cached grid specs may differ: a project root change,
+    // a metadata reload or a write. Callers may cache specs per revision.
+    static std::uint64_t Revision();
+
     // Project-local metadata path used by the editor and runtime alike.
     static std::filesystem::path MetadataPath();
 

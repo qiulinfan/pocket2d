@@ -4,6 +4,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "shared/resources/ResourcePath.h"
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -13,11 +14,15 @@ namespace {
 
 constexpr const char *kSpritesheetsKey = "spritesheets";
 
+// Process-wide; used by the editor and by the thread that renders.
 struct SpritesheetMetadataCache {
     bool loaded = false;
-    std::filesystem::path metadata_path;
-    std::filesystem::path resources_root;
+    // Project root the metadata was loaded for. The metadata file lives
+    // under it, so the root alone identifies the loaded file.
+    std::filesystem::path::string_type resources_root;
+    std::uint64_t revision = 0;
     std::unordered_map<std::string, SpritesheetGridSpec> grid_specs;
+    // Logical image name resolved against a scene subdirectory.
     std::unordered_map<std::string, SpritesheetGridSpec> resource_specs;
 };
 
@@ -100,20 +105,16 @@ bool WriteSpritesheetMetadataDocument(const rapidjson::Document &document) {
     return true;
 }
 
+// Called for every queued sprite: the up-to-date check compares the root's
+// native string in place and allocates nothing.
 void EnsureSpritesheetMetadataLoaded() {
     SpritesheetMetadataCache &cache = GetSpritesheetMetadataCache();
-    const std::filesystem::path metadata_path =
-        SpritesheetConfig::MetadataPath();
-    const std::filesystem::path resources_root =
-        ResourcePath::ResourcesRootPath();
-    if (cache.loaded && cache.metadata_path == metadata_path &&
-        cache.resources_root == resources_root) {
-        return;
-    }
+    const auto &resources_root = ResourcePath::MutableResourcesRootPath().native();
+    if (cache.loaded && cache.resources_root == resources_root) return;
 
     cache.loaded = true;
-    cache.metadata_path = metadata_path;
     cache.resources_root = resources_root;
+    ++cache.revision;
     cache.grid_specs.clear();
     cache.resource_specs.clear();
 
@@ -159,6 +160,11 @@ bool PersistSpritesheetMetadata() {
 
 } // namespace
 
+std::uint64_t SpritesheetConfig::Revision() {
+    EnsureSpritesheetMetadataLoaded();
+    return GetSpritesheetMetadataCache().revision;
+}
+
 std::filesystem::path SpritesheetConfig::MetadataPath() {
     return ResourcePath::ProjectSpritesheetMetadataPath();
 }
@@ -188,6 +194,7 @@ bool SpritesheetConfig::WriteForImagePath(
     cache.grid_specs[BuildMetadataKey(resources_root, image_path)] = {
         std::max(1, spec.rows), std::max(1, spec.columns)};
     cache.resource_specs.clear();
+    ++cache.revision;
     return PersistSpritesheetMetadata();
 }
 
@@ -197,14 +204,11 @@ SpritesheetGridSpec SpritesheetConfig::ReadForImageResource(
     EnsureSpritesheetMetadataLoaded();
 
     SpritesheetMetadataCache &cache = GetSpritesheetMetadataCache();
-    std::stringstream cache_key_stream;
-    cache_key_stream << ResourcePath::ResourcesRootPath().generic_string()
-                     << '\n'
-                     << preferred_subdirectory.lexically_normal()
-                            .generic_string()
-                     << '\n'
-                     << image_name;
-    const std::string cache_key = cache_key_stream.str();
+    // resource_specs is cleared whenever the root changes, so the key needs
+    // only the subdirectory spelling and the name.
+    std::string cache_key = preferred_subdirectory.generic_string();
+    cache_key += '\n';
+    cache_key += image_name;
     const auto cached_spec = cache.resource_specs.find(cache_key);
     if (cached_spec != cache.resource_specs.end()) {
         return cached_spec->second;

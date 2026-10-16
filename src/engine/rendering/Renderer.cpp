@@ -73,10 +73,18 @@ Uint8 ClampByteU8(int value) {
     return static_cast<Uint8>(ClampByte(value));
 }
 
-bool CompareImageRequests(const ImageDrawRequest &a,
-                          const ImageDrawRequest &b) {
-    return a.sorting_order < b.sorting_order;
+// Draw order: ascending sorting_order, then submission order. Sorting 64-bit
+// keys (biased order, index) gives the stable order without moving requests.
+void BuildDrawOrder(const std::vector<ImageDrawRequest> &requests,
+                    std::vector<std::uint64_t> &order) {
+    order.resize(requests.size());
+    for (std::size_t i = 0; i < requests.size(); ++i) {
+        const auto biased = static_cast<std::uint32_t>(requests[i].sorting_order) ^ 0x80000000u;
+        order[i] = (static_cast<std::uint64_t>(biased) << 32) | static_cast<std::uint32_t>(i);
+    }
+    std::sort(order.begin(), order.end());
 }
+std::size_t OrderIndex(std::uint64_t key) { return static_cast<std::uint32_t>(key); }
 
 bool CompareParticleBatchRequests(const ParticleBatchRequest &a,
                                   const ParticleBatchRequest &b) {
@@ -311,8 +319,8 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
     const std::string &image_name, SDL_Renderer *renderer) {
     if (image_name.empty() || renderer == nullptr) return nullptr;
 
-    const std::filesystem::path resources_root =
-        ResourcePath::ResourcesRootPath();
+    // Called for every draw: compare the root's native string in place.
+    const auto &resources_root = ResourcePath::MutableResourcesRootPath().native();
     if (image_cache_resources_root.empty()) {
         image_cache_resources_root = resources_root;
     } else if (image_cache_resources_root != resources_root) {
@@ -479,19 +487,14 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                        ShouldDiscardUIRequest),
         Queues().ui_draw_requests.end());
 
-    if (Queues().scene_draw_requests.size() > 1) {
-        std::stable_sort(Queues().scene_draw_requests.begin(), Queues().scene_draw_requests.end(),
-                         CompareImageRequests);
-    }
+    RenderQueueState &queues = Queues();
+    BuildDrawOrder(queues.scene_draw_requests, queues.scene_draw_order);
     if (Queues().scene_particle_batches.size() > 1) {
         std::stable_sort(Queues().scene_particle_batches.begin(),
                          Queues().scene_particle_batches.end(),
                          CompareParticleBatchRequests);
     }
-    if (Queues().ui_draw_requests.size() > 1) {
-        std::stable_sort(Queues().ui_draw_requests.begin(), Queues().ui_draw_requests.end(),
-                         CompareImageRequests);
-    }
+    BuildDrawOrder(queues.ui_draw_requests, queues.ui_draw_order);
 
     const float safe_zoom = (zoom_factor > 0.0f) ? zoom_factor : 1.0f;
     const float viewport_width = static_cast<float>(camera_width) * (1.0f / safe_zoom);
@@ -564,16 +567,19 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                       safe_zoom * output_scale_y);
     size_t scene_request_index = 0;
     size_t particle_batch_index = 0;
-    while (scene_request_index < Queues().scene_draw_requests.size() ||
-           particle_batch_index < Queues().scene_particle_batches.size()) {
+    const auto scene_request = [&](std::size_t position) -> const ImageDrawRequest & {
+        return queues.scene_draw_requests[OrderIndex(queues.scene_draw_order[position])];
+    };
+    while (scene_request_index < queues.scene_draw_requests.size() ||
+           particle_batch_index < queues.scene_particle_batches.size()) {
         const bool should_render_scene_request =
-            (particle_batch_index >= Queues().scene_particle_batches.size()) ||
-            (scene_request_index < Queues().scene_draw_requests.size() &&
-             Queues().scene_draw_requests[scene_request_index].sorting_order <=
-                 Queues().scene_particle_batches[particle_batch_index].sorting_order);
+            (particle_batch_index >= queues.scene_particle_batches.size()) ||
+            (scene_request_index < queues.scene_draw_requests.size() &&
+             scene_request(scene_request_index).sorting_order <=
+                 queues.scene_particle_batches[particle_batch_index].sorting_order);
 
         if (should_render_scene_request) {
-            render_scene_request(Queues().scene_draw_requests[scene_request_index]);
+            render_scene_request(scene_request(scene_request_index));
             ++scene_request_index;
             continue;
         }
@@ -585,7 +591,8 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
     }
     SDL_SetRenderScale(renderer, output_scale_x, output_scale_y);
 
-    for (const ImageDrawRequest &request : Queues().ui_draw_requests) {
+    for (const std::uint64_t key : queues.ui_draw_order) {
+        const ImageDrawRequest &request = queues.ui_draw_requests[OrderIndex(key)];
         float texture_w = 0.0f;
         float texture_h = 0.0f;
         SDL_Texture *texture =

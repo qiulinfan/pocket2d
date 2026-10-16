@@ -2,6 +2,7 @@
 #define SPRITE_RENDERER_COMPONENT_H
 
 #include "scene/ActorHandle.h"
+#include <filesystem>
 #include <string>
 #include <optional>
 #include <cstdint>
@@ -44,14 +45,27 @@ public:
     // cell without assigning the two indices separately.
     void SetSpriteCell(int row, int column);
 
-    // Queue one world-space draw using either Transform or Rigidbody data from
-    // the owning actor. This runs during the render phase, so editor frozen
-    // frames still show sprites.
-    void QueueDraw() const;
+    // Queue one world-space draw at the owning actor's world pose. The caller,
+    // the World's render-phase loop, has already established that this is the
+    // actor's live component and resolved the pose from Transform or
+    // Rigidbody. This runs during the render phase, so editor frozen frames
+    // still show sprites.
+    void QueueDraw(float world_x, float world_y, float rotation_degrees) const;
 
 private:
     std::optional<AnimationPose> animation_pose_;
     std::uint64_t animation_owner_ = 0;
+
+    // Spritesheet grid for `sprite`, valid while the metadata revision, the
+    // sprite name and the scene subdirectory are unchanged.
+    struct GridCache {
+        std::uint64_t revision = 0;
+        std::string sprite;
+        std::filesystem::path::string_type subdirectory;
+        int rows = 1;
+        int columns = 1;
+    };
+    mutable GridCache grid_cache_;
 };
 
 #endif

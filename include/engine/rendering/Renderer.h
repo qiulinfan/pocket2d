@@ -3,6 +3,7 @@
 
 #include "SDL3/SDL.h"
 #include "SDL3_ttf/SDL_ttf.h"
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -136,7 +137,7 @@ private:
     // caches and per-frame draw queues
     // 资源缓存和逐帧绘制队列
     static inline bool initialized = false;
-    static inline std::filesystem::path image_cache_resources_root;
+    static inline std::filesystem::path::string_type image_cache_resources_root;
     static inline std::unordered_map<std::string, CachedImageTexture> image_cache;
     static inline std::unordered_map<std::string, std::unordered_map<int, TTF_Font *>>
         font_cache;
@@ -152,6 +153,9 @@ struct RenderQueueState {
     std::vector<ImageDrawRequest> scene_draw_requests;
     std::vector<ParticleBatchRequest> scene_particle_batches;
     std::vector<ImageDrawRequest> ui_draw_requests;
+    // Draw order scratch, reused across frames; see BuildDrawOrder.
+    std::vector<std::uint64_t> scene_draw_order;
+    std::vector<std::uint64_t> ui_draw_order;
     std::vector<PixelDrawRequest> pixel_draw_requests;
     std::vector<TextDrawRequest> text_draw_requests;
 };

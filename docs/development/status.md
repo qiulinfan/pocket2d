@@ -38,6 +38,10 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   (native) and 8% (Lua loop) from thread-local World lookups; see ADR 008.
   Box2D's multithreaded solver is not connected: it needs an asynchronous task
   API that `TaskExecutor` lacks.
+- Sprite submission: per-sprite metadata and pose lookups removed from the
+  render-phase loop. 65,536 individual sprites drop from about 77 to 10–13 ms
+  per Metal frame with identical pixels; 16,384 reach the same ~8 ms floor as
+  the native Tilemap path (`tilemap-performance.md`).
 
 ## Completed and verified in this slice
 
