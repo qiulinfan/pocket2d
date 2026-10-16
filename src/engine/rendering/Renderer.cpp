@@ -641,7 +641,11 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
             const float to_y = safe_zoom * output_scale_y;
             const float left = std::round(dst.x * to_x), right = std::round((dst.x + dst.w) * to_x);
             const float top = std::round(dst.y * to_y), bottom = std::round((dst.y + dst.h) * to_y);
-            dst = {left / to_x, top / to_y, (right - left) / to_x, (bottom - top) / to_y};
+            // The renderer scales back by to_x/to_y and may truncate; a small bias
+            // keeps scale-back rounding error (e.g. at zoom 0.27) on the right pixel.
+            constexpr float kBias = 1e-3f;
+            dst = {(left + kBias) / to_x, (top + kBias) / to_y, (right - left + kBias) / to_x,
+                   (bottom - top + kBias) / to_y};
         }
 
         SDL_SetTextureColorMod(texture, static_cast<Uint8>(ClampByte(request.r)),
