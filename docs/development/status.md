@@ -61,6 +61,15 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   for `os.tmpname`. It does not enable `LUA_USE_DLOPEN`. Trusted runtime
   scripts already had `os.execute`; reload candidates still block `io`/`os`.
   74 CTest cases pass in Debug, Release and ASan/UBSan.
+- Physics API: circle/box overlap queries, circle casts, gravity, collision
+  layers and masks, capsule and convex polygon colliders, impulses and torque,
+  six joint kinds with motor/limit/spring controls, and a kinematic character
+  mover built on Box2D's plane solver. Solid tiles now form one closed chain per
+  connected outline per chunk, so bodies slide across cell seams without
+  catching; chains are one-sided, so a body embedded inside solid tiles is not
+  pushed out. The curated script contract, `.d.ts` and LuaLS files include the
+  new API. `physics_api_test` covers it; **77 CTest cases pass in Debug,
+  Release and ASan/UBSan.**
 
 ## Completed and verified in this slice
 

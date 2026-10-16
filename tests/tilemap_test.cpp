@@ -161,7 +161,7 @@ void CollisionAndLifetime(const Fixture &fixture) {
     for (int x = 0; x < 64; ++x) data.solid.cells[x] = 5;
     Actor owner; owner.uid = 10;
     Tilemap map; map.actor = &owner; map.Initialize(data); map.CommitPending();
-    Check(map.GetFixtureCount() == 2, "one solid row merges into one fixture per chunk");
+    Check(map.GetFixtureCount() == 2, "one solid row is one collision outline per chunk");
     const b2BodyId left_body = map.GetChunkBody(0, 0);
     const b2BodyId right_body = map.GetChunkBody(1, 0);
     Check(B2_IS_NON_NULL(left_body) && B2_IS_NON_NULL(right_body), "solid chunks own static bodies");
@@ -208,6 +208,7 @@ b2BodyId CreatePlayer(b2WorldId world, float x, float y) {
     definition.gravityScale = 0; definition.fixedRotation = true;
     const b2BodyId player = b2CreateBody(world, &definition);
     b2ShapeDef shape = b2DefaultShapeDef();
+    shape.enableContactEvents = true;
     const b2Circle circle{{0, 0}, 0.25f};
     b2CreateCircleShape(player, &shape, &circle);
     return player;

@@ -53,6 +53,23 @@ void PositiveMass(double value,const char *message) {
 struct Mass { double mass=0,inertia=0; };
 // Box2D 3 reports rotational inertia about the centre of mass; the engine's
 // shapes are centred on the body origin, so it equals inertia about the origin.
+// Capsules are vertical: total height includes both end caps.
+b2Capsule MakeCapsule(float height,float radius) {
+    const float half=std::max(height*0.5f-radius,0.0f);
+    return {{0.0f,-half},{0.0f,half},radius};
+}
+b2Polygon MakeHullPolygon(const std::vector<float> &points) {
+    std::vector<b2Vec2> vertices;
+    for(std::size_t i=0;i+1<points.size();i+=2) vertices.push_back({points[i],points[i+1]});
+    const b2Hull hull=b2ComputeHull(vertices.data(),static_cast<int>(vertices.size()));
+    Require(hull.count>=3,"collider_points must form a convex hull with at least three corners");
+    return b2MakePolygon(&hull,0.0f);
+}
+Mass ActualShapeMass(const b2MassData &actual,float density) {
+    Require(std::isfinite(actual.mass)&&std::isfinite(actual.rotationalInertia)&&b2IsValidVec2(actual.center),"derived fixture mass/center/inertia is not finite");
+    if(density>0) { PositiveMass(actual.mass,"float fixture mass has an unsafe reciprocal");PositiveMass(actual.rotationalInertia,"float fixture inertia has an unsafe reciprocal"); }
+    return {actual.mass,actual.rotationalInertia+static_cast<double>(actual.mass)*(actual.center.x*actual.center.x+actual.center.y*actual.center.y)};
+}
 Mass ShapeMass(float width,float height,float radius,bool circle,float density) {
     const double area=circle?static_cast<double>(B2_PI)*radius*radius:static_cast<double>(width)*height;
     const double expected_mass=static_cast<double>(density)*area;
@@ -190,10 +207,11 @@ b2BodyType ParseBodyType(const std::string &body_type) {
 // Colliders produce contact events with other colliders. Triggers are sensors
 // that detect only other triggers, as sensor visitors. Phantoms only give a
 // shapeless body mass and are invisible to events and ray casts.
-void CreateShape(Rigidbody &rigidbody, RayCast::FixtureKind kind, bool circle,
+void CreateShape(Rigidbody &rigidbody, RayCast::FixtureKind kind, const std::string &type,
                  float width, float height, float radius) {
     b2ShapeDef shape_def = b2DefaultShapeDef();
     shape_def.density = rigidbody.density;
+    shape_def.filter = rigidbody.GetCollisionFilter();
     shape_def.isSensor = kind != RayCast::FixtureKind::Collider;
     shape_def.enableSensorEvents = kind == RayCast::FixtureKind::Trigger;
     shape_def.enableContactEvents = kind == RayCast::FixtureKind::Collider;
@@ -202,9 +220,15 @@ void CreateShape(Rigidbody &rigidbody, RayCast::FixtureKind kind, bool circle,
         shape_def.material.restitution = rigidbody.bounciness;
     }
     b2ShapeId shape;
-    if (circle) {
+    if (type == "circle") {
         const b2Circle geometry{{0.0f, 0.0f}, radius};
         shape = b2CreateCircleShape(rigidbody.body, &shape_def, &geometry);
+    } else if (type == "capsule") {
+        const b2Capsule geometry = MakeCapsule(height, radius);
+        shape = b2CreateCapsuleShape(rigidbody.body, &shape_def, &geometry);
+    } else if (type == "polygon") {
+        const b2Polygon geometry = MakeHullPolygon(rigidbody.collider_points);
+        shape = b2CreatePolygonShape(rigidbody.body, &shape_def, &geometry);
     } else {
         const b2Polygon geometry = b2MakeBox(width * 0.5f, height * 0.5f);
         shape = b2CreatePolygonShape(rigidbody.body, &shape_def, &geometry);
@@ -345,7 +369,7 @@ float Rigidbody::ValidateNumericProperty(const char *name,double value) {
     if(field=="x"||field=="y") Require(std::abs(value)<=1e8,"position must remain within +/-1e8");
     else if(field=="width"||field=="height"||field=="radius"||field=="trigger_width"||field=="trigger_height"||field=="trigger_radius")
         Require(value>=0.001&&value<=1e6,"dimensions must be 0.001..1000000");
-    else if(field=="density"||field=="angular_friction") Require(value>=0&&value<=kFloatLimit,"density/damping must be nonnegative with finite arithmetic headroom");
+    else if(field=="density"||field=="angular_friction"||field=="linear_friction") Require(value>=0&&value<=kFloatLimit,"density/damping must be nonnegative with finite arithmetic headroom");
     else if(field=="friction"||field=="bounciness")
         Require(value>=0&&value*value<=kSquaredLimit,"friction/restitution must be nonnegative with finite product headroom");
     else if(field=="gravity_scale") SquaredVector(0,value*static_cast<double>(9.8f),"gravity scale exceeds finite acceleration norms");
@@ -355,19 +379,43 @@ float Rigidbody::ValidateNumericProperty(const char *name,double value) {
     Require(value==0||narrowed!=0,"numeric value underflows float range");
     return narrowed;
 }
+void Rigidbody::ValidateCollisionLayer(double layer) {
+    Require(std::isfinite(layer)&&std::floor(layer)==layer&&layer>=1&&layer<=31,"collision_layer must be an integer 1..31");
+}
+void Rigidbody::ValidateCollisionMask(double mask) {
+    Require(std::isfinite(mask)&&std::floor(mask)==mask&&mask>=0&&mask<=kAllCollisionLayers,"collision_mask must be an integer 0..2147483647");
+}
+void Rigidbody::ValidateColliderPoints(const std::vector<float> &points) {
+    Require(points.size()%2==0&&points.size()>=6&&points.size()<=2*B2_MAX_POLYGON_VERTICES,"collider_points needs 3..8 x/y pairs");
+    for(const float value:points) Require(std::isfinite(value)&&std::abs(value)<=1e6f,"collider_points must be finite within +/-1e6");
+    MakeHullPolygon(points);
+}
+b2Filter Rigidbody::GetCollisionFilter() const {
+    b2Filter filter=b2DefaultShapeDef().filter;
+    filter.categoryBits=std::uint64_t{1}<<(collision_layer-1);
+    filter.maskBits=static_cast<std::uint64_t>(static_cast<std::uint32_t>(collision_mask));
+    return filter;
+}
 void Rigidbody::ValidateConfiguration() const {
     ParseBodyType(body_type);
     if(!effective_body_type.empty()&&effective_body_type!="none") ParseBodyType(effective_body_type);
-    Require((collider_type=="box"||collider_type=="circle")&&(trigger_type=="box"||trigger_type=="circle"),"shapes must be box/circle");
+    Require((collider_type=="box"||collider_type=="circle"||collider_type=="capsule"||collider_type=="polygon")&&
+            (trigger_type=="box"||trigger_type=="circle"),"collider_type must be box/circle/capsule/polygon and trigger_type box/circle");
+    ValidateCollisionLayer(collision_layer);
+    ValidateCollisionMask(collision_mask);
+    if(has_collider&&collider_type=="polygon") ValidateColliderPoints(collider_points);
+    if(has_collider&&collider_type=="capsule") Require(height>=2*radius,"capsule height must be at least twice its radius");
     for(const auto &[name,value]:std::initializer_list<std::pair<const char *,float>>{
-        {"x",x},{"y",y},{"rotation",rotation},{"gravity_scale",gravity_scale},{"density",density},{"angular_friction",angular_friction},
+        {"x",x},{"y",y},{"rotation",rotation},{"gravity_scale",gravity_scale},{"density",density},{"angular_friction",angular_friction},{"linear_friction",linear_friction},
         {"width",width},{"height",height},{"radius",radius},{"trigger_width",trigger_width},{"trigger_height",trigger_height},
         {"trigger_radius",trigger_radius},{"friction",friction},{"bounciness",bounciness}}) ValidateNumericProperty(name,value);
     Mass total;
     const auto add=[&](Mass value){total.mass+=value.mass;total.inertia+=value.inertia;
         if(total.mass>0) PositiveMass(total.mass,"combined body mass has unsafe range/reciprocal");
         if(total.inertia>0) PositiveMass(total.inertia,"combined body inertia has unsafe range/reciprocal");};
-    if(has_collider) add(ShapeMass(width,height,radius,collider_type=="circle",density));
+    if(has_collider&&collider_type=="capsule") { const b2Capsule capsule=MakeCapsule(height,radius);add(ActualShapeMass(b2ComputeCapsuleMass(&capsule,density),density)); }
+    else if(has_collider&&collider_type=="polygon") { const b2Polygon polygon=MakeHullPolygon(collider_points);add(ActualShapeMass(b2ComputePolygonMass(&polygon,density),density)); }
+    else if(has_collider) add(ShapeMass(width,height,radius,collider_type=="circle",density));
     if(has_trigger) add(ShapeMass(trigger_width,trigger_height,trigger_radius,trigger_type=="circle",density));
     if(!has_collider&&!has_trigger) add(ShapeMass(width,height,radius,false,density));
     const auto predicted=Integration(total.mass,gravity_scale,Gravity(),0,0,Vector2());
@@ -375,7 +423,10 @@ void Rigidbody::ValidateConfiguration() const {
     geometry.friction=has_collider?friction:0;
     geometry.restitution=has_collider?bounciness:0;
     // Box2D 3 boxes have no skin radius.
-    if(has_collider) geometry.extent=collider_type=="circle"?radius:std::hypot(static_cast<double>(width),height)*0.5;
+    if(has_collider&&collider_type=="capsule") geometry.extent=std::max(height*0.5,static_cast<double>(radius));
+    else if(has_collider&&collider_type=="polygon") {
+        for(std::size_t i=0;i+1<collider_points.size();i+=2) geometry.extent=std::max(geometry.extent,std::hypot(static_cast<double>(collider_points[i]),collider_points[i+1]));
+    } else if(has_collider) geometry.extent=collider_type=="circle"?radius:std::hypot(static_cast<double>(width),height)*0.5;
     if(has_trigger) geometry.extent=std::max(geometry.extent,trigger_type=="circle"?static_cast<double>(trigger_radius):std::hypot(static_cast<double>(trigger_width),trigger_height)*0.5);
     if(!has_collider&&!has_trigger) geometry.extent=std::hypot(static_cast<double>(width),height)*0.5;
     Motion(total.mass,total.inertia,geometry,predicted,0);
@@ -451,18 +502,19 @@ void Rigidbody::OnStart() {
     body_def.isBullet = precise;
     body_def.gravityScale = gravity_scale;
     body_def.angularDamping = angular_friction;
+    body_def.linearDamping = linear_friction;
     body_def.isEnabled = enabled;
 
     body_world_ = RayCast::GetPhysicsWorld();
     body = b2CreateBody(body_world_, &body_def);
 
     if (has_collider)
-        CreateShape(*this, RayCast::FixtureKind::Collider, collider_type == "circle", width, height, radius);
+        CreateShape(*this, RayCast::FixtureKind::Collider, collider_type, width, height, radius);
     if (has_trigger)
-        CreateShape(*this, RayCast::FixtureKind::Trigger, trigger_type == "circle",
+        CreateShape(*this, RayCast::FixtureKind::Trigger, trigger_type,
                     trigger_width, trigger_height, trigger_radius);
     if (!has_collider && !has_trigger)
-        CreateShape(*this, RayCast::FixtureKind::Phantom, false, width, height, radius);
+        CreateShape(*this, RayCast::FixtureKind::Phantom, "box", width, height, radius);
     accumulated_force_.SetZero();force_step_=CurrentForceStep();
 }
 
@@ -637,4 +689,26 @@ Vector2 Rigidbody::GetRightDirection() const {
     Vector2 result(std::cos(angle), std::sin(angle));
     result.Normalize();
     return result;
+}
+
+void Rigidbody::ApplyImpulse(const Vector2 &impulse) {
+    FiniteVector(impulse);
+    if (!HasBody() || b2Body_GetType(body) != b2_dynamicBody) return;
+    const double mass = b2Body_GetMass(body);
+    const Vector2 velocity = FromBox2D(b2Body_GetLinearVelocity(body));
+    const double gain = mass > 0 ? 1.0 / mass : 0.0;
+    const Vector2 predicted(static_cast<float>(velocity.x + gain * impulse.x), static_cast<float>(velocity.y + gain * impulse.y));
+    SquaredVector(velocity.x + gain * impulse.x, velocity.y + gain * impulse.y, "impulse would exceed finite velocity norms");
+    PointSpeed(body, predicted, b2Body_GetAngularVelocity(body));
+    b2Body_ApplyLinearImpulseToCenter(body, ToBox2D(impulse), true);
+}
+
+void Rigidbody::AddTorque(float torque) {
+    Require(std::isfinite(torque) && std::abs(torque) <= kFloatLimit, "torque must be finite");
+    if (!HasBody() || b2Body_GetType(body) != b2_dynamicBody) return;
+    b2Body_ApplyTorque(body, torque, true);
+}
+
+float Rigidbody::GetMass() const {
+    return HasBody() ? b2Body_GetMass(body) : 0.0f;
 }

@@ -56,9 +56,12 @@ void TilemapAdoption() {
     map->map_resource = "old.tilemap.json"; map->Initialize(MapData(2, 1)); map->CommitPending();
     const b2WorldId world = RayCast::GetPhysicsWorld(); const b2BodyId old_body = map->GetChunkBody(0, 0);
     Check(B2_IS_NON_NULL(world) && B2_IS_NON_NULL(old_body), "old map collision missing");
-    b2BodyDef definition = b2DefaultBodyDef(); definition.type = b2_dynamicBody; definition.position = {0.5f, 0.5f};
+    // Map collision is a hollow outline, so the visitor straddles its top edge.
+    b2BodyDef definition = b2DefaultBodyDef(); definition.type = b2_dynamicBody; definition.position = {0.5f, 0.0f};
+    definition.gravityScale = 0;
     const b2BodyId visitor = b2CreateBody(world, &definition);
-    const b2ShapeDef shape_def = b2DefaultShapeDef(); const b2Polygon shape = b2MakeBox(0.1f, 0.1f);
+    b2ShapeDef shape_def = b2DefaultShapeDef(); shape_def.enableContactEvents = true;
+    const b2Polygon shape = b2MakeBox(0.1f, 0.1f);
     b2CreatePolygonShape(visitor, &shape_def, &shape);
     b2World_Step(world, 1.0f / 60, 4);
     Check(b2World_GetContactEvents(world).beginCount > 0, "test did not establish real Box2D contact");

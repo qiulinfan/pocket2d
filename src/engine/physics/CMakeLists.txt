@@ -3,6 +3,9 @@ target_sources(
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/RayCast.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Rigidbody.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PhysicsQueries.cpp"
+        "${PROJECT_SOURCE_DIR}/include/engine/physics/PhysicsQueries.h"
+        "${PROJECT_SOURCE_DIR}/include/engine/physics/PhysicsIds.h"
         "${PROJECT_SOURCE_DIR}/include/engine/physics/Collision.h"
         "${PROJECT_SOURCE_DIR}/include/engine/physics/RayCast.h"
         "${PROJECT_SOURCE_DIR}/include/engine/physics/Rigidbody.h"

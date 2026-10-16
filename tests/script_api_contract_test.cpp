@@ -1,5 +1,6 @@
 #include "core/Engine.h"
 #include "input/Input.h"
+#include "physics/PhysicsQueries.h"
 #include "physics/Rigidbody.h"
 #include "rendering/SpriteAnimation.h"
 #include "rendering/SpriteRenderer.h"
@@ -69,7 +70,8 @@ struct Fixture {
             "probe":{"type":"ContractProbe"}}},
           {"uid":2,"name":"terrain","components":{"map":{"type":"Tilemap","map_resource":"contract.tilemap.json"},
             "transform":{"type":"Transform","x":10,"y":20}}},
-          {"uid":3,"name":"child","parent_uid":1,"components":{"transform":{"type":"Transform","x":1}}}
+          {"uid":3,"name":"child","parent_uid":1,"components":{"transform":{"type":"Transform","x":1}}},
+          {"uid":4,"name":"anchor","components":{"body":{"type":"Rigidbody","body_type":"static","x":5,"has_collider":false,"has_trigger":false}}}
         ]})";
         std::ofstream(root/"project/component_types/ContractProbe.lua") << R"(
 ContractProbe={events=0,completions=0,key_held=false,key_down=false,key_up=false,
@@ -105,6 +107,7 @@ bool NativeType(const luabridge::LuaRef &value,const std::string &type) {
     if(type=="Rigidbody") return value.isInstance<Rigidbody>();
     if(type=="Tilemap") return value.isInstance<Tilemap>();
     if(type=="SpriteAnimation") return value.isInstance<SpriteAnimation>();
+    if(type=="Joint") return value.isInstance<PhysicsJoint>();
     if(type=="ItemCatalog" || type=="InventoryContainer") {
         auto *state=value.state(); value.push(state);
         const bool matches=luaL_testudata(state,-1,type=="ItemCatalog"?"Pocket2D.ItemCatalog":"Pocket2D.Inventory")!=nullptr;
@@ -210,6 +213,7 @@ void VerifyManifest(lua_State *state,const rapidjson::Value &contract,Coverage &
         const std::string kind=definition["kind"].GetString();
         if(kind!="native" && kind!="component") continue;
         const std::string name=definition["name"].GetString();
+        if(name=="Joint") continue; // joints need started bodies; checked in Calls
         const auto instance=luabridge::LuaRef(instances[name]);
         Check(!instance.isNil() && NativeType(instance,name),"missing runtime fixture for "+name);
         // nominal markers live only in the generated types, never in the list
@@ -243,6 +247,16 @@ void EmitKey(bool down) {
 }
 void Calls(Engine &engine,lua_State *state,const rapidjson::Value &contract) {
     engine.StepSimulation(); // Real native OnStart, body creation and first animation event.
+    {
+        Lua(state,R"(contract_joint=Physics.ConnectRevolute(Actor.Find("player"):GetComponent("Rigidbody"),
+          Actor.Find("anchor"):GetComponent("Rigidbody"),Vector2(0,0)))");
+        const auto joint=luabridge::getGlobal(state,"contract_joint");
+        const auto *definition=NamedType(contract,"Joint"); Check(definition!=nullptr,"missing Joint type");
+        Check(NativeType(joint,"Joint"),"Physics.ConnectRevolute must return a Joint");
+        Coverage joint_coverage; Members(joint,*definition,contract,joint_coverage);
+        Lua(state,R"(assert(contract_joint:GetKind()=="revolute");contract_joint:Destroy();
+          assert(not contract_joint:IsValid());contract_joint=nil)");
+    }
     Lua(state,R"(
       local function near(a,b) assert(math.abs(a-b)<0.001,tostring(a).." != "..tostring(b)) end
       local function rejects(f) local ok=pcall(f);assert(not ok,"invalid call unexpectedly succeeded") end

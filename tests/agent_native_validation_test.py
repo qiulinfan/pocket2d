@@ -84,7 +84,7 @@ NativeProbe={
   end
   for _,entry in ipairs({{"x",1e9},{"y",-1e9},{"gravity_scale",1e30},{"width",0},{"height",-1},{"radius",1e7},
       {"trigger_width",0},{"trigger_height",-1},{"trigger_radius",1e7},{"density",-1},{"angular_friction",-1},
-      {"friction",-1},{"bounciness",-1},{"body_type","flying"},{"collider_type","capsule"},{"trigger_type","capsule"},
+      {"friction",-1},{"bounciness",-1},{"body_type","flying"},{"collider_type","hexagon"},{"trigger_type","capsule"},
       {"precise","yes"},{"has_collider",1},{"has_trigger",0},{"enabled","true"}}) do
    local key,value=entry[1],entry[2]
    self:Reject("body domain "..key,function() b[key]=value end,snapshot,"body_rejected")

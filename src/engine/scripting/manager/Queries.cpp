@@ -320,6 +320,7 @@ std::vector<Actor::ComponentProperty> GetBuiltinComponentDefaultProperties(const
             {"density", static_cast<double>(defaults.density)},
             {"angular_friction",
              static_cast<double>(defaults.angular_friction)},
+            {"linear_friction", static_cast<double>(defaults.linear_friction)},
             {"rotation", static_cast<double>(defaults.rotation)},
             {"has_collider", defaults.has_collider},
             {"has_trigger", defaults.has_trigger},
@@ -333,6 +334,9 @@ std::vector<Actor::ComponentProperty> GetBuiltinComponentDefaultProperties(const
             {"trigger_radius", static_cast<double>(defaults.trigger_radius)},
             {"friction", static_cast<double>(defaults.friction)},
             {"bounciness", static_cast<double>(defaults.bounciness)},
+            {"collision_layer", defaults.collision_layer},
+            {"collision_mask", defaults.collision_mask},
+            {"collider_points", Actor::DoubleArray{}},
         };
         return properties;
     }

@@ -71,3 +71,27 @@ Physics raycasts return `HitResult` objects with:
 | --- | --- |
 | `Physics.Raycast(position, direction, distance)` | Returns the first hit or `nil` |
 | `Physics.RaycastAll(position, direction, distance)` | Returns all hits as a Lua array |
+| `Physics.CircleCast(origin, radius, direction, distance)` | Sweeps a circle; returns the nearest collider hit or `nil` |
+| `Physics.OverlapCircle(center, radius, include_triggers)` | Actors overlapping the circle, each once, in UID order |
+| `Physics.OverlapBox(center, width, height, include_triggers)` | Actors overlapping the axis-aligned box, each once, in UID order |
+| `Physics.GetGravity()` / `Physics.SetGravity(vec)` | Reads or changes world gravity (default `(0, 9.8)`) |
+| `Physics.MoveCharacter(body, delta)` | Moves a kinematic Rigidbody by up to `delta`, sliding along colliders its mask accepts; returns the applied movement |
+| `Physics.ConnectDistance(a, b, anchor_a, anchor_b)` | Distance joint between two world anchors |
+| `Physics.ConnectRevolute(a, b, anchor)` | Hinge at a world anchor |
+| `Physics.ConnectWeld(a, b, anchor)` | Rigid (or springy) weld |
+| `Physics.ConnectPrismatic(a, b, anchor, axis)` | Slider along a world axis |
+| `Physics.ConnectWheel(a, b, anchor, axis)` | Wheel with suspension along a world axis |
+| `Physics.ConnectMotor(a, b)` | Drives `b` toward its current offset from `a` |
+
+Joints need two different, started Rigidbodies.
+
+## `Joint`
+
+| Method | Description |
+| --- | --- |
+| `IsValid()` | `false` after `Destroy()` or once either body is destroyed |
+| `Destroy()` | Removes the joint |
+| `GetKind()` | `distance`, `revolute`, `weld`, `prismatic`, `wheel` or `motor` |
+| `SetMotor(enabled, speed, max_force)` | Revolute/wheel speed in degrees per second, distance/prismatic in meters per second; motor joints use `max_force` only; welds have no motor |
+| `SetLimits(enabled, lower, upper)` | Revolute angle limits in degrees; distance length or prismatic/wheel translation in meters |
+| `SetSpring(enabled, hertz, damping_ratio)` | Spring softness for distance, weld, prismatic, revolute and wheel joints |

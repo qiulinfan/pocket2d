@@ -202,9 +202,11 @@ PaintTile = {
 ```
 
 内部 chunk 固定为 32×32。地图只重建实际变更 layer 的相关 CPU 绘制记录，solid
-变化另外重建该 chunk 的碰撞。每个含 solid cell 的 chunk 使用一个 static body，每一行
-连续非零 cell 合并为矩形 fixture；没有每 tile 的 actor、脚本或独立碰撞事件身份。
-raycast/contact 命中的是 owning actor。绘制请求先提交 ground，再提交 solid；
+变化另外重建该 chunk 的碰撞。每个含 solid cell 的 chunk 使用一个 static body，
+chunk 内每块连通 solid 区域的外轮廓（以及其中空洞的内轮廓）合并共线边后成为一条闭合
+Box2D chain，所以物体沿相邻 cell 滑动不会在接缝处卡住。chain 是单面的：只从 solid 区域
+外侧碰撞，完全嵌入 solid 内部的物体不会被推出。`GetFixtureCount()` 返回轮廓数。
+没有每 tile 的 actor、脚本或独立碰撞事件身份；raycast/contact 命中的是 owning actor。绘制请求先提交 ground，再提交 solid；
 最终显示顺序由各层的全局 `sorting_order` 决定，同序值保持提交顺序。
 当前没有额外 y-sort 或超出 cell 的图块。
 

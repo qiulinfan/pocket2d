@@ -100,6 +100,10 @@ interface Rigidbody extends Component {
     y: number;
     rotation: number;
     gravity_scale: number;
+    collider_type: "box" | "circle" | "capsule" | "polygon";
+    collision_layer: number;
+    collision_mask: number;
+    linear_friction: number;
     AddForce(this: Rigidbody, value: Vector2): void;
     SetVelocity(this: Rigidbody, value: Vector2): void;
     SetPosition(this: Rigidbody, value: Vector2): void;
@@ -115,6 +119,28 @@ interface Rigidbody extends Component {
     GetRotation(this: Rigidbody): number;
     GetAngularVelocity(this: Rigidbody): number;
     GetGravityScale(this: Rigidbody): number;
+    ApplyImpulse(this: Rigidbody, impulse: Vector2): void;
+    AddTorque(this: Rigidbody, torque: number): void;
+    GetMass(this: Rigidbody): number;
+}
+
+/** A raycast or shape-cast hit. */
+interface HitResult {
+    actor: Actor;
+    point: Vector2;
+    normal: Vector2;
+    is_trigger: boolean;
+}
+
+/** A Box2D joint; destroyed with either body. */
+interface Joint {
+    readonly __pocketNativeJoint: unique symbol;
+    IsValid(this: Joint): boolean;
+    Destroy(this: Joint): void;
+    GetKind(this: Joint): "distance" | "revolute" | "weld" | "prismatic" | "wheel" | "motor";
+    SetMotor(this: Joint, enabled: boolean, speed: number, max_force: number): void;
+    SetLimits(this: Joint, enabled: boolean, lower: number, upper: number): void;
+    SetSpring(this: Joint, enabled: boolean, hertz: number, damping_ratio: number): void;
 }
 
 interface SpriteAnimation extends Component {
@@ -297,6 +323,23 @@ declare namespace Debug {
 declare namespace Inventory {
     function Open(this: void, resource: string): ItemCatalog;
     function RestoreGroup(this: void, entries: (InventoryRestoreEntry)[]): InventoryResult;
+}
+
+declare namespace Physics {
+    function Raycast(this: void, position: Vector2, direction: Vector2, distance: number): HitResult | undefined;
+    function RaycastAll(this: void, position: Vector2, direction: Vector2, distance: number): (HitResult)[];
+    function OverlapCircle(this: void, center: Vector2, radius: number, include_triggers: boolean): (Actor)[];
+    function OverlapBox(this: void, center: Vector2, width: number, height: number, include_triggers: boolean): (Actor)[];
+    function CircleCast(this: void, origin: Vector2, radius: number, direction: Vector2, distance: number): HitResult | undefined;
+    function GetGravity(this: void): Vector2;
+    function SetGravity(this: void, gravity: Vector2): void;
+    function MoveCharacter(this: void, body: Rigidbody, delta: Vector2): Vector2;
+    function ConnectDistance(this: void, a: Rigidbody, b: Rigidbody, anchor_a: Vector2, anchor_b: Vector2): Joint;
+    function ConnectRevolute(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint;
+    function ConnectWeld(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint;
+    function ConnectPrismatic(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2, axis: Vector2): Joint;
+    function ConnectWheel(this: void, a: Rigidbody, b: Rigidbody, anchor: Vector2, axis: Vector2): Joint;
+    function ConnectMotor(this: void, a: Rigidbody, b: Rigidbody): Joint;
 }
 
 type OnAnimationEventCallback<T extends Component> = (this: T, event: AnimationEvent) => void;

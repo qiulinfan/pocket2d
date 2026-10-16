@@ -127,6 +127,10 @@ function _SpriteRenderer:SetSpriteCell(row, column) end
 ---@field y number # mutable
 ---@field rotation number # mutable
 ---@field gravity_scale number # mutable
+---@field collider_type "box"|"circle"|"capsule"|"polygon" # mutable
+---@field collision_layer integer # mutable
+---@field collision_mask integer # mutable
+---@field linear_friction number # mutable
 local _Rigidbody = {}
 ---@param value Vector2
 function _Rigidbody:AddForce(value) end
@@ -158,6 +162,42 @@ function _Rigidbody:GetRotation() end
 function _Rigidbody:GetAngularVelocity() end
 ---@return number
 function _Rigidbody:GetGravityScale() end
+---@param impulse Vector2
+function _Rigidbody:ApplyImpulse(impulse) end
+---@param torque number
+function _Rigidbody:AddTorque(torque) end
+---@return number
+function _Rigidbody:GetMass() end
+
+---A raycast or shape-cast hit.
+---@class HitResult
+---@field actor Actor # mutable
+---@field point Vector2 # mutable
+---@field normal Vector2 # mutable
+---@field is_trigger boolean # mutable
+local _HitResult = {}
+
+---A Box2D joint; destroyed with either body.
+---Native opaque value; TypeScript nominal markers are compile-only.
+---@class Joint
+local _Joint = {}
+---@return boolean
+function _Joint:IsValid() end
+function _Joint:Destroy() end
+---@return "distance"|"revolute"|"weld"|"prismatic"|"wheel"|"motor"
+function _Joint:GetKind() end
+---@param enabled boolean
+---@param speed number
+---@param max_force number
+function _Joint:SetMotor(enabled, speed, max_force) end
+---@param enabled boolean
+---@param lower number
+---@param upper number
+function _Joint:SetLimits(enabled, lower, upper) end
+---@param enabled boolean
+---@param hertz number
+---@param damping_ratio number
+function _Joint:SetSpring(enabled, hertz, damping_ratio) end
 
 ---Native opaque value; TypeScript nominal markers are compile-only.
 ---@class SpriteAnimation: Component
@@ -376,5 +416,22 @@ Debug = {}
 ---@field Open fun(resource: string): ItemCatalog
 ---@field RestoreGroup fun(entries: (InventoryRestoreEntry)[]): InventoryResult
 Inventory = {}
+
+---@class PocketPhysicsNamespace
+---@field Raycast fun(position: Vector2, direction: Vector2, distance: number): HitResult|nil
+---@field RaycastAll fun(position: Vector2, direction: Vector2, distance: number): (HitResult)[]
+---@field OverlapCircle fun(center: Vector2, radius: number, include_triggers: boolean): (Actor)[]
+---@field OverlapBox fun(center: Vector2, width: number, height: number, include_triggers: boolean): (Actor)[]
+---@field CircleCast fun(origin: Vector2, radius: number, direction: Vector2, distance: number): HitResult|nil
+---@field GetGravity fun(): Vector2
+---@field SetGravity fun(gravity: Vector2)
+---@field MoveCharacter fun(body: Rigidbody, delta: Vector2): Vector2
+---@field ConnectDistance fun(a: Rigidbody, b: Rigidbody, anchor_a: Vector2, anchor_b: Vector2): Joint
+---@field ConnectRevolute fun(a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint
+---@field ConnectWeld fun(a: Rigidbody, b: Rigidbody, anchor: Vector2): Joint
+---@field ConnectPrismatic fun(a: Rigidbody, b: Rigidbody, anchor: Vector2, axis: Vector2): Joint
+---@field ConnectWheel fun(a: Rigidbody, b: Rigidbody, anchor: Vector2, axis: Vector2): Joint
+---@field ConnectMotor fun(a: Rigidbody, b: Rigidbody): Joint
+Physics = {}
 
 ---@alias OnAnimationEventCallback fun(self: Component, event: AnimationEvent)

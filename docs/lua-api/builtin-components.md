@@ -65,6 +65,7 @@ engine and is not directly exposed as writable Lua properties.
 - `gravity_scale`
 - `density`
 - `angular_friction`
+- `linear_friction`
 - `rotation`
 - `has_collider`
 - `has_trigger`
@@ -78,6 +79,14 @@ engine and is not directly exposed as writable Lua properties.
 - `trigger_radius`
 - `friction`
 - `bounciness`
+- `collider_points`
+- `collision_layer`
+- `collision_mask`
+
+`collider_type` 为 `box`、`circle`、`capsule`（竖直，`radius` 与总高 `height`，
+要求 `height >= 2 * radius`）或 `polygon`（`collider_points` 为 3..8 个局部 x/y 点对，
+取凸包）。`collision_layer` 是 1..31 的层号；`collision_mask` 是可碰撞层的位掩码
+（第 n 层为 `1 << (n - 1)`，默认全部）。两个物体仅在双方掩码都接受对方层时碰撞。
 
 ### Methods
 
@@ -86,6 +95,9 @@ engine and is not directly exposed as writable Lua properties.
 | `OnStart()` | Internal lifecycle hook |
 | `OnDestroy()` | Internal lifecycle hook |
 | `AddForce(vec)` | Adds force |
+| `ApplyImpulse(vec)` | Applies a linear impulse at the center of mass |
+| `AddTorque(value)` | Adds torque |
+| `GetMass()` | Returns body mass |
 | `SetVelocity(vec)` | Sets linear velocity |
 | `SetPosition(vec)` | Sets position |
 | `SetRotation(degrees)` | Sets rotation |

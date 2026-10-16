@@ -5,6 +5,7 @@
 #include "physics/PhysicsIds.h"
 #include "core/Vector2.h"
 #include <string>
+#include <vector>
 
 struct Actor;
 
@@ -30,22 +31,34 @@ public:
     float gravity_scale = 1.0f;
     float density = 1.0f;
     float angular_friction = 0.3f;
+    // Linear velocity damping, like angular_friction for rotation.
+    float linear_friction = 0.0f;
     float rotation = 0.0f;
 
     // collider and trigger settings
     // collider 和 trigger 配置
     bool has_collider = true;
     bool has_trigger = true;
+    // box (width x height), circle (radius), capsule (vertical, radius and
+    // total height) or polygon (convex hull of collider_points, local x/y pairs).
     std::string collider_type = "box";
     float width = 1.0f;
     float height = 1.0f;
     float radius = 0.5f;
+    std::vector<float> collider_points;
     std::string trigger_type = "box";
     float trigger_width = 1.0f;
     float trigger_height = 1.0f;
     float trigger_radius = 0.5f;
     float friction = 0.3f;
     float bounciness = 0.3f;
+
+    // Collision filtering for all of this body's shapes: the body is on layer
+    // collision_layer (1..31) and touches shapes whose layer bit is in
+    // collision_mask; both sides must accept each other.
+    int collision_layer = 1;
+    int collision_mask = kAllCollisionLayers;
+    static constexpr int kAllCollisionLayers = 0x7FFFFFFF;
 
     // backing Box2D body, b2_nullBodyId until OnStart
     // 底层 Box2D body
@@ -75,6 +88,16 @@ public:
     void SetGravityScale(float scale);
     void SetUpDirection(Vector2 direction);
     void SetRightDirection(Vector2 direction);
+    void ApplyImpulse(const Vector2 &impulse);
+    // Clockwise-positive torque, matching rotation.
+    void AddTorque(float torque);
+    float GetMass() const;
+    // Box2D filter for this body's shapes.
+    b2Filter GetCollisionFilter() const;
+    static void ValidateCollisionLayer(double layer);
+    static void ValidateCollisionMask(double mask);
+    // Polygon points must be 3..8 finite x/y pairs forming a convex hull.
+    static void ValidateColliderPoints(const std::vector<float> &points);
 
     Vector2 GetPosition() const;
     float GetRotation() const;

@@ -48,6 +48,12 @@ void ValidateOverrides(const Actor::ComponentSpec &spec) {
         } else if(std::holds_alternative<std::string>(found->value)) {
             const auto *text=std::get_if<std::string>(&property.value);
             Require(text && text->find('\0')==std::string::npos,property.name+" must be a string without NUL");
+        } else if(std::holds_alternative<Actor::DoubleArray>(found->value)) {
+            const auto *numbers=std::get_if<Actor::DoubleArray>(&property.value);
+            const auto *integers=std::get_if<Actor::IntArray>(&property.value);
+            Require(numbers||integers,property.name+" must be an array of numbers");
+            if(numbers)for(const double value:*numbers)
+                Require(std::isfinite(value)&&std::abs(value)<=std::numeric_limits<float>::max(),property.name+" must hold finite float values");
         } else {
             double number=0;Require(Number(property.value,number),property.name+" must be numeric");
             if(spec.type=="ParticleSystem" && property.name=="end_scale" && std::isnan(number)) continue;

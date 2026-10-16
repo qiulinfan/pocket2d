@@ -766,6 +766,41 @@
           "name": "gravity_scale",
           "type": "number",
           "access": "mutable"
+        },
+        {
+          "name": "collider_type",
+          "type": {
+            "union": [
+              {
+                "literal": "box"
+              },
+              {
+                "literal": "circle"
+              },
+              {
+                "literal": "capsule"
+              },
+              {
+                "literal": "polygon"
+              }
+            ]
+          },
+          "access": "mutable"
+        },
+        {
+          "name": "collision_layer",
+          "type": "integer",
+          "access": "mutable"
+        },
+        {
+          "name": "collision_mask",
+          "type": "integer",
+          "access": "mutable"
+        },
+        {
+          "name": "linear_friction",
+          "type": "number",
+          "access": "mutable"
         }
       ],
       "methods": [
@@ -898,9 +933,170 @@
           "call": "instance",
           "parameters": [],
           "returns": "number"
+        },
+        {
+          "name": "ApplyImpulse",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "impulse",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "name": "AddTorque",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "torque",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "name": "GetMass",
+          "call": "instance",
+          "parameters": [],
+          "returns": "number"
         }
       ],
       "extends": "Component",
+      "nominal": true
+    },
+    {
+      "name": "HitResult",
+      "kind": "record",
+      "description": "A raycast or shape-cast hit.",
+      "properties": [
+        {
+          "name": "actor",
+          "type": "Actor",
+          "access": "mutable"
+        },
+        {
+          "name": "point",
+          "type": "Vector2",
+          "access": "mutable"
+        },
+        {
+          "name": "normal",
+          "type": "Vector2",
+          "access": "mutable"
+        },
+        {
+          "name": "is_trigger",
+          "type": "boolean",
+          "access": "mutable"
+        }
+      ],
+      "methods": []
+    },
+    {
+      "name": "Joint",
+      "kind": "native",
+      "description": "A Box2D joint; destroyed with either body.",
+      "properties": [],
+      "methods": [
+        {
+          "name": "IsValid",
+          "call": "instance",
+          "parameters": [],
+          "returns": "boolean"
+        },
+        {
+          "name": "Destroy",
+          "call": "instance",
+          "parameters": [],
+          "returns": "void"
+        },
+        {
+          "name": "GetKind",
+          "call": "instance",
+          "parameters": [],
+          "returns": {
+            "union": [
+              {
+                "literal": "distance"
+              },
+              {
+                "literal": "revolute"
+              },
+              {
+                "literal": "weld"
+              },
+              {
+                "literal": "prismatic"
+              },
+              {
+                "literal": "wheel"
+              },
+              {
+                "literal": "motor"
+              }
+            ]
+          }
+        },
+        {
+          "name": "SetMotor",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            },
+            {
+              "name": "speed",
+              "type": "number"
+            },
+            {
+              "name": "max_force",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "name": "SetLimits",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            },
+            {
+              "name": "lower",
+              "type": "number"
+            },
+            {
+              "name": "upper",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "name": "SetSpring",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            },
+            {
+              "name": "hertz",
+              "type": "number"
+            },
+            {
+              "name": "damping_ratio",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        }
+      ],
       "nominal": true
     },
     {
@@ -1952,6 +2148,278 @@
             }
           ],
           "returns": "InventoryResult"
+        }
+      ]
+    },
+    {
+      "name": "Physics",
+      "functions": [
+        {
+          "name": "Raycast",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "position",
+              "type": "Vector2"
+            },
+            {
+              "name": "direction",
+              "type": "Vector2"
+            },
+            {
+              "name": "distance",
+              "type": "number"
+            }
+          ],
+          "returns": {
+            "nullable": "HitResult"
+          }
+        },
+        {
+          "name": "RaycastAll",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "position",
+              "type": "Vector2"
+            },
+            {
+              "name": "direction",
+              "type": "Vector2"
+            },
+            {
+              "name": "distance",
+              "type": "number"
+            }
+          ],
+          "returns": {
+            "array": "HitResult"
+          }
+        },
+        {
+          "name": "OverlapCircle",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "center",
+              "type": "Vector2"
+            },
+            {
+              "name": "radius",
+              "type": "number"
+            },
+            {
+              "name": "include_triggers",
+              "type": "boolean"
+            }
+          ],
+          "returns": {
+            "array": "Actor"
+          }
+        },
+        {
+          "name": "OverlapBox",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "center",
+              "type": "Vector2"
+            },
+            {
+              "name": "width",
+              "type": "number"
+            },
+            {
+              "name": "height",
+              "type": "number"
+            },
+            {
+              "name": "include_triggers",
+              "type": "boolean"
+            }
+          ],
+          "returns": {
+            "array": "Actor"
+          }
+        },
+        {
+          "name": "CircleCast",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "origin",
+              "type": "Vector2"
+            },
+            {
+              "name": "radius",
+              "type": "number"
+            },
+            {
+              "name": "direction",
+              "type": "Vector2"
+            },
+            {
+              "name": "distance",
+              "type": "number"
+            }
+          ],
+          "returns": {
+            "nullable": "HitResult"
+          }
+        },
+        {
+          "name": "GetGravity",
+          "call": "static",
+          "parameters": [],
+          "returns": "Vector2"
+        },
+        {
+          "name": "SetGravity",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "gravity",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "name": "MoveCharacter",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "body",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "delta",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "Vector2"
+        },
+        {
+          "name": "ConnectDistance",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "a",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "b",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "anchor_a",
+              "type": "Vector2"
+            },
+            {
+              "name": "anchor_b",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "Joint"
+        },
+        {
+          "name": "ConnectRevolute",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "a",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "b",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "anchor",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "Joint"
+        },
+        {
+          "name": "ConnectWeld",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "a",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "b",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "anchor",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "Joint"
+        },
+        {
+          "name": "ConnectPrismatic",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "a",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "b",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "anchor",
+              "type": "Vector2"
+            },
+            {
+              "name": "axis",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "Joint"
+        },
+        {
+          "name": "ConnectWheel",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "a",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "b",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "anchor",
+              "type": "Vector2"
+            },
+            {
+              "name": "axis",
+              "type": "Vector2"
+            }
+          ],
+          "returns": "Joint"
+        },
+        {
+          "name": "ConnectMotor",
+          "call": "static",
+          "parameters": [
+            {
+              "name": "a",
+              "type": "Rigidbody"
+            },
+            {
+              "name": "b",
+              "type": "Rigidbody"
+            }
+          ],
+          "returns": "Joint"
         }
       ]
     }

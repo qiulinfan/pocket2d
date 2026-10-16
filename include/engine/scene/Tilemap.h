@@ -63,14 +63,16 @@ public:
     const Diagnostics &GetDiagnostics() const { return diagnostics_; }
     void ResetDiagnostics() { diagnostics_ = {}; }
     b2BodyId GetChunkBody(int chunk_x, int chunk_y) const;
+    // Number of collision outlines (closed chains) in the current physics world.
     std::size_t GetFixtureCount() const;
 
 private:
     struct TileRecord { int x, y, id; };
-    struct RowRun { int x, y, length; };
     struct Chunk {
         std::array<std::vector<TileRecord>, 2> tiles;
         b2BodyId body = b2_nullBodyId;
+        // Closed collision outlines (Box2D chains) on body.
+        std::size_t outlines = 0;
         bool collision_dirty = true;
     };
     TilemapAsset::Data data_;
@@ -95,8 +97,6 @@ private:
     static void RequireInteger(double value, const char *label);
     static std::vector<TileRecord> BuildTiles(const TilemapAsset::Data &data, int layer,
                                              int chunk_x, int chunk_y);
-    static std::vector<RowRun> BuildRuns(const TilemapAsset::Data &data,
-                                        int chunk_x, int chunk_y);
     bool OwnsLiveBodies() const;
     static void DestroyChunkBody(b2BodyId &body);
     void DestroyBody(b2BodyId &body);

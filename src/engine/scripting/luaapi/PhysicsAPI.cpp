@@ -1,6 +1,8 @@
 #include "RegistrationDetail.h"
 #include "physics/Collision.h"
+#include "physics/PhysicsQueries.h"
 #include "physics/RayCast.h"
+#include "physics/Rigidbody.h"
 #include "scene/Actor.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
@@ -129,6 +131,45 @@ luabridge::LuaRef CppPhysicsRaycastAll(const Vector2 &position,
     return results;
 }
 
+luabridge::LuaRef ActorArray(const std::vector<ActorHandle> &actors) {
+    luabridge::LuaRef results = luabridge::newTable(LuaState());
+    for (std::size_t i = 0; i < actors.size(); ++i) results[static_cast<int>(i + 1)] = actors[i];
+    return results;
+}
+luabridge::LuaRef CppOverlapCircle(const Vector2 &center, float radius, bool include_triggers) {
+    return ActorArray(PhysicsQueries::OverlapCircle(center, radius, include_triggers));
+}
+luabridge::LuaRef CppOverlapBox(const Vector2 &center, float width, float height, bool include_triggers) {
+    return ActorArray(PhysicsQueries::OverlapBox(center, width, height, include_triggers));
+}
+luabridge::LuaRef CppCircleCast(const Vector2 &origin, float radius, const Vector2 &direction, float distance) {
+    const auto hit = PhysicsQueries::CircleCast(origin, radius, direction, distance);
+    if (!hit) return luabridge::LuaRef(LuaState());
+    return luabridge::LuaRef(LuaState(), *hit);
+}
+Rigidbody &Body(Rigidbody *body) {
+    if (body == nullptr) throw std::invalid_argument("Physics: a Rigidbody is required");
+    return *body;
+}
+PhysicsJoint ConnectAt(const char *kind, Rigidbody *a, Rigidbody *b, const Vector2 &anchor) {
+    return PhysicsJoint::Connect(kind, Body(a), Body(b), anchor, anchor);
+}
+PhysicsJoint ConnectDistance(Rigidbody *a, Rigidbody *b, const Vector2 &anchor_a, const Vector2 &anchor_b) {
+    return PhysicsJoint::Connect("distance", Body(a), Body(b), anchor_a, anchor_b);
+}
+PhysicsJoint ConnectRevolute(Rigidbody *a, Rigidbody *b, const Vector2 &anchor) { return ConnectAt("revolute", a, b, anchor); }
+PhysicsJoint ConnectWeld(Rigidbody *a, Rigidbody *b, const Vector2 &anchor) { return ConnectAt("weld", a, b, anchor); }
+PhysicsJoint ConnectPrismatic(Rigidbody *a, Rigidbody *b, const Vector2 &anchor, const Vector2 &axis) {
+    return PhysicsJoint::Connect("prismatic", Body(a), Body(b), anchor, axis);
+}
+PhysicsJoint ConnectWheel(Rigidbody *a, Rigidbody *b, const Vector2 &anchor, const Vector2 &axis) {
+    return PhysicsJoint::Connect("wheel", Body(a), Body(b), anchor, axis);
+}
+PhysicsJoint ConnectMotor(Rigidbody *a, Rigidbody *b) {
+    return PhysicsJoint::Connect("motor", Body(a), Body(b), Vector2(), Vector2());
+}
+Vector2 MoveCharacter(Rigidbody *body, const Vector2 &delta) { return PhysicsQueries::MoveCharacter(Body(body), delta); }
+
 void InjectPhysicsAPI() {
     luabridge::getGlobalNamespace(LuaState())
         .beginClass<RayCast::HitResult>("HitResult")
@@ -140,9 +181,31 @@ void InjectPhysicsAPI() {
         .endClass();
 
     luabridge::getGlobalNamespace(LuaState())
+        .beginClass<PhysicsJoint>("Joint")
+        .addFunction("IsValid", &PhysicsJoint::IsValid)
+        .addFunction("Destroy", &PhysicsJoint::Destroy)
+        .addFunction("GetKind", &PhysicsJoint::GetKind)
+        .addFunction("SetMotor", &PhysicsJoint::SetMotor)
+        .addFunction("SetLimits", &PhysicsJoint::SetLimits)
+        .addFunction("SetSpring", &PhysicsJoint::SetSpring)
+        .endClass();
+
+    luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Physics")
         .addFunction("Raycast", &CppPhysicsRaycast)
         .addFunction("RaycastAll", &CppPhysicsRaycastAll)
+        .addFunction("OverlapCircle", &CppOverlapCircle)
+        .addFunction("OverlapBox", &CppOverlapBox)
+        .addFunction("CircleCast", &CppCircleCast)
+        .addFunction("GetGravity", &PhysicsQueries::GetGravity)
+        .addFunction("SetGravity", &PhysicsQueries::SetGravity)
+        .addFunction("MoveCharacter", &MoveCharacter)
+        .addFunction("ConnectDistance", &ConnectDistance)
+        .addFunction("ConnectRevolute", &ConnectRevolute)
+        .addFunction("ConnectWeld", &ConnectWeld)
+        .addFunction("ConnectPrismatic", &ConnectPrismatic)
+        .addFunction("ConnectWheel", &ConnectWheel)
+        .addFunction("ConnectMotor", &ConnectMotor)
         .endNamespace();
 }
 

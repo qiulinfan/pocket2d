@@ -95,7 +95,7 @@ void CheckMode(int mode) {
     Check(probe["called"].cast<int>().value() == 1 && probe["map_rejected"].cast<bool>().value() &&
           probe["body_rejected"].cast<bool>().value(), "real callback must reject both direct lifecycle calls");
     if (mode == 0) {
-        Check(map->HasAsset() && map->GetFixtureCount() == 4 && body->HasBody(),
+        Check(map->HasAsset() && map->GetFixtureCount() == 1 && body->HasBody(),
               "rejected calls must preserve bodies and map state");
         const auto hit = RayCast::Cast({2.5f,-1},{0,1},8);
         Check(hit && hit->actor == engine.GetRuntimeActorByUID(10), "rejected calls must preserve raycast metadata");

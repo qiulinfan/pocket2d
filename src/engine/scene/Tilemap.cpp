@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <stdexcept>
 
 namespace {
@@ -18,6 +19,64 @@ const TilemapAsset::Layer &LayerAt(const TilemapAsset::Data &data, int index) {
 TilemapAsset::Layer &LayerAt(TilemapAsset::Data &data, int index) {
     return index == 0 ? data.ground : data.solid;
 }
+// Closed outlines of the solid cells in [x0,x1)x[y0,y1), cells outside counting
+// as empty. Each boundary edge has the solid cell on its left, so Box2D's
+// one-sided chains face out of the solid area and holes wind the other way.
+// Where two cells touch only diagonally the walk turns left, keeping them
+// separate loops. Collinear points are merged.
+template <class Solid>
+std::vector<std::vector<b2Vec2>> TraceOutlines(int x0, int y0, int x1, int y1, Solid solid, float cell) {
+    struct Edge { int ax, ay, bx, by; bool used = false; };
+    std::vector<Edge> edges;
+    const auto filled = [&](int x, int y) { return x >= x0 && y >= y0 && x < x1 && y < y1 && solid(x, y); };
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x) {
+            if (!filled(x, y)) continue;
+            if (!filled(x, y - 1)) edges.push_back({x, y, x + 1, y});
+            if (!filled(x + 1, y)) edges.push_back({x + 1, y, x + 1, y + 1});
+            if (!filled(x, y + 1)) edges.push_back({x + 1, y + 1, x, y + 1});
+            if (!filled(x - 1, y)) edges.push_back({x, y + 1, x, y});
+        }
+    std::map<std::pair<int, int>, std::vector<std::size_t>> starting;
+    for (std::size_t i = 0; i < edges.size(); ++i) starting[{edges[i].ax, edges[i].ay}].push_back(i);
+    std::vector<std::vector<b2Vec2>> loops;
+    for (std::size_t first = 0; first < edges.size(); ++first) {
+        if (edges[first].used) continue;
+        std::vector<std::pair<int, int>> corners;
+        std::size_t current = first;
+        while (!edges[current].used) {
+            Edge &edge = edges[current];
+            edge.used = true;
+            corners.push_back({edge.ax, edge.ay});
+            const int dx = edge.bx - edge.ax, dy = edge.by - edge.ay;
+            // Turn toward the solid side first, then straight, then away. The
+            // solid side of (dx,dy) is (-dy,dx) in these y-down cells.
+            const std::pair<int, int> preference[3] = {{-dy, dx}, {dx, dy}, {dy, -dx}};
+            std::size_t next = current;
+            for (const auto &[tx, ty] : preference) {
+                for (const std::size_t candidate : starting[{edge.bx, edge.by}]) {
+                    const Edge &other = edges[candidate];
+                    if (!other.used && other.bx - other.ax == tx && other.by - other.ay == ty) { next = candidate; break; }
+                }
+                if (next != current) break;
+            }
+            if (next == current) break;
+            current = next;
+        }
+        std::vector<b2Vec2> loop;
+        for (std::size_t i = 0; i < corners.size(); ++i) {
+            const auto &previous = corners[(i + corners.size() - 1) % corners.size()];
+            const auto &point = corners[i];
+            const auto &following = corners[(i + 1) % corners.size()];
+            const long cross = static_cast<long>(point.first - previous.first) * (following.second - point.second) -
+                               static_cast<long>(point.second - previous.second) * (following.first - point.first);
+            if (cross != 0) loop.push_back({point.first * cell, point.second * cell});
+        }
+        if (loop.size() >= 4) loops.push_back(std::move(loop));
+    }
+    return loops;
+}
+
 void FiniteFloat(double value, const char *label) {
     if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
         throw std::runtime_error(std::string("tilemap: ") + label + " must be finite and representable");
@@ -81,20 +140,6 @@ std::vector<Tilemap::TileRecord> Tilemap::BuildTiles(const TilemapAsset::Data &d
             if (id != 0) records.push_back({x, y, id});
         }
     return records;
-}
-std::vector<Tilemap::RowRun> Tilemap::BuildRuns(const TilemapAsset::Data &data, int cx, int cy) {
-    std::vector<RowRun> runs;
-    const int end_x = std::min((cx + 1) * kChunkSize, data.width);
-    for (int y = cy * kChunkSize; y < std::min((cy + 1) * kChunkSize, data.height); ++y) {
-        int x = cx * kChunkSize;
-        while (x < end_x) {
-            if (data.solid.cells[static_cast<std::size_t>(y) * data.width + x] == 0) { ++x; continue; }
-            const int start = x++;
-            while (x < end_x && data.solid.cells[static_cast<std::size_t>(y) * data.width + x] != 0) ++x;
-            runs.push_back({start, y, x - start});
-        }
-    }
-    return runs;
 }
 void Tilemap::ValidateInitialization(const TilemapAsset::Data &data, float x, float y) {
     TilemapAsset::ValidateData(data);
@@ -256,7 +301,7 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
         unsigned mask;
         bool collision;
         std::array<std::vector<TileRecord>, 2> tiles;
-        std::vector<RowRun> runs;
+        std::vector<std::vector<b2Vec2>> outlines;
         b2BodyId body = b2_nullBodyId;
     };
     std::vector<unsigned> dirty(static_cast<std::size_t>(nx) * ny, replacement_ ? 3u : 0u);
@@ -292,22 +337,16 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
                 }
         }
         if (collision)
-            for (int cy = start_y; cy < end_y; ++cy) {
-                int cx = start_x;
-                while (cx < end_x) {
-                    if (tile_at(1, cx, cy) == 0) { ++cx; continue; }
-                    const int first = cx++;
-                    while (cx < end_x && tile_at(1, cx, cy) != 0) ++cx;
-                    work.runs.push_back({first, cy, cx - first});
-                }
-            }
+            work.outlines = TraceOutlines(start_x, start_y, end_x, end_y,
+                                          [&](int cx, int cy) { return tile_at(1, cx, cy) != 0; },
+                                          candidate.cell_size);
         prepared.push_back(std::move(work));
     }
     // Create all replacement bodies before changing committed data or old
     // geometry. Disabled bodies cannot produce contacts during preparation.
     try {
         for (auto &work : prepared) {
-            if (!work.collision || work.runs.empty()) continue;
+            if (!work.collision || work.outlines.empty()) continue;
             Rigidbody::EnsurePhysicsWorld();
             physics_world_ = RayCast::GetPhysicsWorld();
             b2BodyDef definition = b2DefaultBodyDef();
@@ -315,16 +354,20 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
             definition.position = {x, y};
             definition.isEnabled = false;
             work.body = b2CreateBody(physics_world_, &definition);
-            b2ShapeDef shape_def = b2DefaultShapeDef();
-            shape_def.material.friction = 0; shape_def.material.restitution = 0;
-            shape_def.enableContactEvents = true;
-            for (const auto &run : work.runs) {
-                const b2Polygon box = b2MakeOffsetBox(
-                    run.length * candidate.cell_size * 0.5f, candidate.cell_size * 0.5f,
-                    {(run.x + run.length * 0.5f) * candidate.cell_size, (run.y + 0.5f) * candidate.cell_size},
-                    b2Rot_identity);
-                const b2ShapeId created = b2CreatePolygonShape(work.body, &shape_def, &box);
-                RayCast::RegisterShape(created, actor, RayCast::FixtureKind::Collider);
+            b2SurfaceMaterial material = b2DefaultSurfaceMaterial();
+            material.friction = 0; material.restitution = 0;
+            for (const auto &outline : work.outlines) {
+                b2ChainDef chain_def = b2DefaultChainDef();
+                chain_def.points = outline.data();
+                chain_def.count = static_cast<int>(outline.size());
+                chain_def.isLoop = true;
+                chain_def.materials = &material;
+                chain_def.materialCount = 1;
+                const b2ChainId chain = b2CreateChain(work.body, &chain_def);
+                std::vector<b2ShapeId> segments(static_cast<std::size_t>(b2Chain_GetSegmentCount(chain)));
+                b2Chain_GetSegments(chain, segments.data(), static_cast<int>(segments.size()));
+                for (const b2ShapeId segment : segments)
+                    RayCast::RegisterShape(segment, actor, RayCast::FixtureKind::Collider);
             }
         }
     } catch (...) {
@@ -370,7 +413,8 @@ void Tilemap::CommitPending(float x, float y, float rotation) {
             chunk.body = work.body;
             chunk.collision_dirty = false;
             ++diagnostics_.collision_chunk_rebuilds;
-            diagnostics_.fixtures_created += work.runs.size();
+            chunk.outlines = work.outlines.size();
+            diagnostics_.fixtures_created += work.outlines.size();
         }
     }
     origin_x_ = x; origin_y_ = y;
@@ -431,7 +475,6 @@ std::size_t Tilemap::GetFixtureCount() const {
     if (!OwnsLiveBodies()) return 0;
     std::size_t count = 0;
     for (const auto &chunk : chunks_)
-        if (B2_IS_NON_NULL(chunk.body) && b2Body_IsValid(chunk.body))
-            count += static_cast<std::size_t>(b2Body_GetShapeCount(chunk.body));
+        if (B2_IS_NON_NULL(chunk.body) && b2Body_IsValid(chunk.body)) count += chunk.outlines;
     return count;
 }

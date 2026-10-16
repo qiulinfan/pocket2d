@@ -308,3 +308,7 @@ target_link_libraries(editor_play_world_test PRIVATE GameEngine::Editor)
 add_test(NAME editor_play_world COMMAND editor_play_world_test
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
 set_tests_properties(editor_play_world PROPERTIES TIMEOUT 60)
+
+pocket_runtime_test(physics_api_test physics_api_test.cpp)
+add_test(NAME physics_api COMMAND physics_api_test)
+set_tests_properties(physics_api PROPERTIES TIMEOUT 60)
