@@ -6,6 +6,7 @@
   pocket replay PROJECT REPLAY     verify a recorded replay
   pocket render PROJECT --out PNG  render a frame headlessly
   pocket new DIRECTORY             create a minimal project
+  pocket import aseprite|ldtk ...  convert Aseprite sheets or LDtk levels into assets
 
 Diagnostics are text by default; --json prints one JSON object per line with
 severity, code, file and message. The runtime binary comes from --game, the
@@ -310,6 +311,31 @@ def command_new(options):
     return 0
 
 
+def command_import(options):
+    from .importers import ImportError_, import_aseprite, import_ldtk
+    project = project_path(options.project)
+    try:
+        if options.format == "aseprite":
+            written = import_aseprite(options.source, project, options.name, options.image)
+            schema = "animation"
+        else:
+            written = import_ldtk(options.source, project, options.name, options.ground, options.solid,
+                                  options.level, options.image)
+            schema = "tilemap"
+    except (ImportError_, OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        print("pocket import: %s" % error, file=sys.stderr)
+        return 1
+    validator = load_validator()
+    if validator is not None:
+        schema_data = json.loads((REPOSITORY / "scripting/api/schemas" / (schema + ".schema.json")).read_text())
+        problems = validator.validate(json.loads(written.read_text()), schema_data)
+        if problems:
+            print("pocket import: wrote an invalid %s: %s" % (schema, "; ".join(problems)), file=sys.stderr)
+            return 1
+    print("wrote %s" % written.relative_to(project))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="pocket", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -347,5 +373,17 @@ def main(argv=None):
     new = commands.add_parser("new", help="create a minimal project")
     new.add_argument("directory")
     new.set_defaults(handler=command_new)
+    importer = commands.add_parser("import", help="convert Aseprite sheets or LDtk levels into project assets")
+    importer.add_argument("format", choices=["aseprite", "ldtk"])
+    importer.add_argument("source", help="Aseprite sheet JSON or LDtk project")
+    importer.add_argument("--project", required=True)
+    importer.add_argument("--name", required=True, help="asset name (animations/NAME or maps/NAME)")
+    importer.add_argument("--image", help="image name under images/ (default: the source image's file name)")
+    importer.add_argument("--level", help="LDtk level identifier (default: the first level)")
+    importer.add_argument("--ground", help="LDtk tile layer drawn as ground")
+    importer.add_argument("--solid", help="LDtk tile layer drawn and collided as solid")
+    importer.set_defaults(handler=command_import)
     options = parser.parse_args(argv)
+    if options.command == "import" and options.format == "ldtk" and not options.ground:
+        parser.error("import ldtk requires --ground")
     return options.handler(options)

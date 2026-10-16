@@ -12,6 +12,8 @@ a built runtime: `--game PATH`, the `POCKET_GAME` environment variable, or
 | `pocket replay PROJECT FILE` | Verifies one replay |
 | `pocket render PROJECT --out PNG [--frames N] [--keys ...] [--width W --height H]` | Renders a frame headlessly |
 | `pocket new DIRECTORY` | Creates a minimal project with an action map, a component, a scenario with a script, and `AGENTS.md` |
+| `pocket import aseprite SHEET.json --project P --name N` | Converts an Aseprite sprite-sheet export (array or hash JSON) into `animations/N.animation.json` and copies the sheet to `images/` |
+| `pocket import ldtk WORLD.ldtk --project P --name N --ground LAYER [--solid LAYER] [--level ID]` | Converts one LDtk level into `maps/N.tilemap.json` and copies its tileset to `images/` |
 
 `--json` (check and test) prints one object per line with `severity`
 (`error`, `warning`, `info`), `code`, `file` relative to the project, and
@@ -26,3 +28,21 @@ The Lua checkers receive a temporary configuration whose `workspace.library`
 is the generated `types/` directory. Neither checker is installed in the
 development environment where this was written, so that path is untested;
 `check` reports `lua_check_skipped` when none is found.
+
+## Importers
+
+Imports are exact or refused; the written asset is validated against its
+schema.
+
+- Aseprite: each frame tag becomes a clip; `forward`, `reverse`, `pingpong`
+  and `pingpong_reverse` directions are expanded into frame lists, and a tag
+  with a finite `repeat` plays once (`loop: false`). Durations convert from
+  milliseconds to 60 Hz ticks (rounded, at least one). Without tags all frames
+  form one looping clip named `default`. Frames must form a uniform grid with
+  no borders, padding, trimming or rotation.
+- LDtk: the project must embed its levels. `--ground` and `--solid` name
+  Tiles, AutoLayer or auto-tiled IntGrid layers sharing one tileset without
+  spacing or padding; solid cells are drawn and collide. LDtk tile id `t`
+  becomes Pocket2D id `t + 1` (row-major, 1-based); stacked tiles keep the
+  topmost; flipped tiles are refused. Entities and IntGrid values without
+  tiles are not imported.

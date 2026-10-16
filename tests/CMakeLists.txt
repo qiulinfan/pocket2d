@@ -104,6 +104,9 @@ add_test(NAME agent_image COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_image_test.py"
     $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village")
 set_tests_properties(agent_image PROPERTIES TIMEOUT 120)
+add_test(NAME asset_import COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/asset_import_test.py" $<TARGET_FILE:game_engine>)
+set_tests_properties(asset_import PROPERTIES TIMEOUT 180)
 add_test(NAME pocket_cli COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/pocket_cli_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(pocket_cli PROPERTIES TIMEOUT 300)
