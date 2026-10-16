@@ -113,6 +113,9 @@ public:
                             float output_scale_x = 1.0f,
                             float output_scale_y = 1.0f);
     static void ClearCache();
+    // Drops cached textures whose image file changed or disappeared since it
+    // was loaded, so the next draw reloads them. Returns how many.
+    static int ReloadChangedImages();
     static int GetResourceWarningCount();
     static const std::string &GetLastResourceWarning();
 
@@ -121,6 +124,11 @@ private:
         SDL_Texture *texture = nullptr;
         float width = 0.0f;
         float height = 0.0f;
+        // Image file and its modification time when loaded; empty for
+        // generated textures.
+        std::filesystem::path source;
+        std::filesystem::file_time_type modified{};
+        bool missing = false; // placeholder for an image that was not found
     };
 
     static CachedImageTexture *LoadTextureResource(

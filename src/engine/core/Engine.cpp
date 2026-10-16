@@ -1,4 +1,5 @@
 #include "core/Engine.h"
+#include <string_view>
 #include "input/ActionMap.h"
 #include "shared/resources/ResourcePath.h"
 #include "core/Profile.h"
@@ -278,6 +279,8 @@ Engine::~Engine() {
 void Engine::GameLoop() {
     WorldScope world_scope(world_);
     InitializeRuntime();
+    if (const char *hot_reload = SDL_getenv("POCKET_HOT_RELOAD"); hot_reload && std::string_view(hot_reload) == "1")
+        SetAssetHotReload(true);
 
     while (IsRunning()) {
         RunSingleFrame();

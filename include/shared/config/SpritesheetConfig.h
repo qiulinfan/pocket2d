@@ -15,6 +15,9 @@ public:
     // Changes whenever cached grid specs may differ: a project root change,
     // a metadata reload or a write. Callers may cache specs per revision.
     static std::uint64_t Revision();
+    // Reloads the metadata when its file changed on disk since it was read;
+    // a reload advances Revision(). Returns whether it reloaded.
+    static bool ReloadIfChanged();
 
     // Project-local metadata path used by the editor and runtime alike.
     static std::filesystem::path MetadataPath();

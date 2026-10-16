@@ -109,6 +109,10 @@ void ValidateShape(const std::string &command, const rapidjson::Value &response)
         for (const auto &type : reload["types"].GetArray())
             if (!type.IsString() || type.GetStringLength() == 0)
                 throw WorkerFailure("worker_protocol_error", "worker reload result has an invalid type name");
+    } else if (command == "reload_assets") {
+        ValidateObservation(response);
+        if (!response.HasMember("reload_assets") || !response["reload_assets"].IsObject())
+            throw WorkerFailure("worker_protocol_error", "worker reload_assets result has an invalid shape");
     } else if (command == "run_until") {
         ValidateObservation(response);
         if (!response.HasMember("run_until") || !response["run_until"].IsObject() ||

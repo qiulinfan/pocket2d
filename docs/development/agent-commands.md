@@ -69,6 +69,14 @@ Access: `modify`.
 | --- | --- | --- | --- |
 | `types` | string[] (min items 1, max items 64) | yes |  |
 
+## `reload_assets`
+
+Reload image files and spritesheet metadata that changed on disk since they were loaded; the next draw uses them. Does not advance time. The response is an observation plus reload_assets {images, spritesheet_metadata}.
+
+Access: `modify`.
+
+No parameters.
+
 ## `reset`
 
 Start a new runtime worker and reload the project, applying the seed before any script runs. Omitting seed keeps the current one.

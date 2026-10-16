@@ -938,6 +938,20 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
             }
             if (!engine && name != "reset")
                 throw std::runtime_error("runtime unavailable after failed reset; reset required");
+            if (name == "reload_assets") {
+                const auto reloaded = engine->ReloadChangedAssets();
+                rapidjson::Document response;
+                const auto observed = Observe(*engine, seed);
+                response.Parse(observed.data(), observed.size());
+                rapidjson::Value details(rapidjson::kObjectType);
+                details.AddMember("images", reloaded.images, response.GetAllocator());
+                details.AddMember("spritesheet_metadata", reloaded.spritesheet_metadata, response.GetAllocator());
+                response.AddMember("reload_assets", details, response.GetAllocator());
+                rapidjson::StringBuffer buffer;
+                Writer writer(buffer); response.Accept(writer);
+                EmitResponse(responses, buffer.GetString(), request_id);
+                continue;
+            }
             if (name == "reload_scripts") {
                 std::vector<std::string> types;
                 try { types = ReadReloadTypes(command); }

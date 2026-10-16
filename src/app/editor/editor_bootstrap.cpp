@@ -498,6 +498,8 @@ void EditorApp::StopPlaySession() {
 bool EditorApp::BootstrapEngineForCurrentProject() {
     engine_ = std::make_unique<Engine>();
     engine_->InitializeRuntime();
+    // Edited images and spritesheet grids show up without restarting.
+    engine_->SetAssetHotReload(true);
     ApplyEditorWindowIcon(engine_->GetWindow());
     ApplyEditorWindowSettings();
     engine_->SetRenderRuntimeToTexture(true);

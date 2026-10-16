@@ -38,6 +38,8 @@ private:
     bool borrows_presenter_ = false;
     // Headless offscreen rendering: a software renderer drawing into this surface.
     SDL_Surface *offscreen_surface_ = nullptr;
+    bool asset_hot_reload_ = false;
+    std::uint32_t asset_hot_reload_frames_ = 0;
 
     // runtime actor container for the current scene
     std::list<Actor> actors;
@@ -156,6 +158,16 @@ public:
     // Run the traditional standalone runtime loop until quit.
     // 运行传统的独立运行时循环直到退出.
     void GameLoop();
+    // Asset hot reload: image files and spritesheet metadata changed on disk
+    // are reloaded at the next draw. Scripts reload through
+    // ComponentManager::ReloadScripts.
+    struct AssetReload {
+        int images = 0;
+        bool spritesheet_metadata = false;
+    };
+    AssetReload ReloadChangedAssets();
+    // When enabled, rendered frames check for changed assets every 30 frames.
+    void SetAssetHotReload(bool enabled) { asset_hot_reload_ = enabled; }
     bool IsRunning() const;
     // Ask the runtime loop to stop after the current frame.
     // 请求运行时循环在当前帧结束后停止.

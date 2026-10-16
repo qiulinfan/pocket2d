@@ -1,4 +1,5 @@
 #include "rendering/Renderer.h"
+#include "shared/config/SpritesheetConfig.h"
 #include "core/Profile.h"
 #include "core/Log.h"
 #include "core/World.h"
@@ -359,6 +360,7 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
         cached.texture = placeholder;
         cached.width = 32.0f;
         cached.height = 32.0f;
+        cached.missing = true;
         auto inserted = image_cache.emplace(image_name, cached);
         return &inserted.first->second;
     }
@@ -387,8 +389,30 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
     cached.texture = texture;
     cached.width = static_cast<float>(texture_width);
     cached.height = static_cast<float>(texture_height);
+    cached.source = image_path;
+    std::error_code time_error;
+    cached.modified = std::filesystem::last_write_time(cached.source, time_error);
     auto inserted = image_cache.emplace(image_name, cached);
     return &inserted.first->second;
+}
+
+int Renderer::ReloadChangedImages() {
+    int dropped = 0;
+    for (auto it = image_cache.begin(); it != image_cache.end();) {
+        const CachedImageTexture &cached = it->second;
+        if (cached.source.empty() && !cached.missing) { ++it; continue; }
+        if (!cached.missing) {
+            // A placeholder for a missing image is always retried.
+            std::error_code error;
+            const auto modified = std::filesystem::last_write_time(cached.source, error);
+            if (!error && modified == cached.modified) { ++it; continue; }
+        }
+        if (cached.texture != nullptr) SDL_DestroyTexture(cached.texture);
+        it = image_cache.erase(it);
+        ++dropped;
+    }
+    if (dropped > 0) image_cache_by_id.clear();
+    return dropped;
 }
 
 namespace {
@@ -784,8 +808,20 @@ const std::string &Renderer::GetLastResourceWarning() {
     return g_renderer_last_warning;
 }
 
+Engine::AssetReload Engine::ReloadChangedAssets() {
+    WorldScope world_scope(world_);
+    AssetReload result;
+    result.spritesheet_metadata = SpritesheetConfig::ReloadIfChanged();
+    result.images = Renderer::ReloadChangedImages();
+    if (result.images > 0 || result.spritesheet_metadata)
+        Log::Info("render", "hot reload: " + std::to_string(result.images) + " image(s)" +
+                                (result.spritesheet_metadata ? ", spritesheet metadata" : ""));
+    return result;
+}
+
 void Engine::render() {
     POCKET_ZONE("Engine::render");
+    if (asset_hot_reload_ && ++asset_hot_reload_frames_ % 30 == 0) ReloadChangedAssets();
     // Rendering only fills the backbuffer. Presenting is owned by the outer
     // loop so runtime-only and editor-driven execution share one path.
     // 现在: render 只填充 backbuffer, PresentFrame 负责交换前后缓冲. 

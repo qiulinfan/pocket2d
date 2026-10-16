@@ -116,6 +116,13 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   included. Rendering never changes the simulation, and at the window size
   the frame matches graphical mode with the software renderer pixel for pixel
   (`agent_image_test`).
+- `reload_assets` reloads image files and the spritesheet metadata that changed
+  on disk since they were loaded (missing images are retried); the next draw
+  uses them. It does not advance time and returns an observation plus
+  `reload_assets: {images, spritesheet_metadata}`. It is not recorded in
+  replays because it depends on files outside the request. The editor checks
+  for changed assets every 30 rendered frames, and the graphical runtime does
+  so when `POCKET_HOT_RELOAD=1`.
 - `reload_scripts` takes 1..64 distinct registered Lua component `types` and
   stages their known source files as one batch. Success returns a same-frame
   observation plus `reload.types`, `instances_updated` and empty diagnostics.

@@ -21,6 +21,8 @@ struct SpritesheetMetadataCache {
     // under it, so the root alone identifies the loaded file.
     std::filesystem::path::string_type resources_root;
     std::uint64_t revision = 0;
+    // Modification time of the metadata file when it was read (min if absent).
+    std::filesystem::file_time_type metadata_time = std::filesystem::file_time_type::min();
     std::unordered_map<std::string, SpritesheetGridSpec> grid_specs;
     // Logical image name resolved against a scene subdirectory.
     std::unordered_map<std::string, SpritesheetGridSpec> resource_specs;
@@ -115,6 +117,9 @@ void EnsureSpritesheetMetadataLoaded() {
     cache.loaded = true;
     cache.resources_root = resources_root;
     ++cache.revision;
+    std::error_code time_error;
+    cache.metadata_time = std::filesystem::last_write_time(SpritesheetConfig::MetadataPath(), time_error);
+    if (time_error) cache.metadata_time = std::filesystem::file_time_type::min();
     cache.grid_specs.clear();
     cache.resource_specs.clear();
 
@@ -163,6 +168,18 @@ bool PersistSpritesheetMetadata() {
 std::uint64_t SpritesheetConfig::Revision() {
     EnsureSpritesheetMetadataLoaded();
     return GetSpritesheetMetadataCache().revision;
+}
+
+bool SpritesheetConfig::ReloadIfChanged() {
+    EnsureSpritesheetMetadataLoaded();
+    SpritesheetMetadataCache &cache = GetSpritesheetMetadataCache();
+    std::error_code error;
+    auto time = std::filesystem::last_write_time(MetadataPath(), error);
+    if (error) time = std::filesystem::file_time_type::min();
+    if (time == cache.metadata_time) return false;
+    cache.loaded = false;
+    EnsureSpritesheetMetadataLoaded();
+    return true;
 }
 
 std::filesystem::path SpritesheetConfig::MetadataPath() {
