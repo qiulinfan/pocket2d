@@ -1,7 +1,7 @@
 # 整游戏完整度测试：Village_Rim 迁移与 PocketTerraria
 
-日期：2026-10-16。两个项目都在引擎仓库之外的 `~/Desktop/pocket2d-games/` 下（各自是本地
-Git 仓库，不推送）：`VillageRim` 迁移 Unity 版 Village_Rim 的真实世界（`pocket import unity` 导入），
+日期：2026-10-16。两个项目都在引擎仓库之外的 `~/Desktop/pocket2d-games/` 下，即私有仓库
+`qiulinfan/pocket2d-games`（每个游戏一个目录，后续的游戏也放在这里）：`VillageRim` 迁移 Unity 版 Village_Rim 的真实世界（`pocket import unity` 导入），
 `PocketTerraria` 用引擎从零做一个类泰拉瑞亚沙盒（Boss 只做克苏鲁之眼）。项目内的工具脚本默认在
 同级的 `~/Desktop/pocket2d` 找引擎，`POCKET2D_ENGINE` 可改。
 目的不是交付完整游戏，而是用真实内容找出引擎缺口。两者都有通过 agent 协议、
