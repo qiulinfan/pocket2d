@@ -375,6 +375,8 @@ function _Tilemap:GetRevision() end
 
 ---@alias SavePayload SaveObject|(SaveValue)[]
 
+---@alias AgentCommandArgs table<string, SaveValue>
+
 ---@class SaveFailure
 ---@field ok false # mutable
 ---@field code "invalid_argument"|"not_configured"|"not_found"|"invalid_data"|"unsupported_format"|"io_error" # mutable
@@ -550,3 +552,4 @@ Inventory = {}
 Physics = {}
 
 ---@alias OnAnimationEventCallback fun(self: Component, event: AnimationEvent)
+---@alias OnAgentCommandCallback fun(self: Component, name: string, args: AgentCommandArgs): any

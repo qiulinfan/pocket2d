@@ -1774,6 +1774,11 @@
       }
     },
     {
+      "name": "AgentCommandArgs",
+      "kind": "dictionary",
+      "value": "SaveValue"
+    },
+    {
       "name": "SaveFailure",
       "kind": "record",
       "properties": [
@@ -2963,6 +2968,23 @@
       "returns": "void",
       "receiver": "Component",
       "description": "Gameplay component method; preserve self, with the concrete component type as this."
+    },
+    {
+      "name": "OnAgentCommand",
+      "call": "instance",
+      "parameters": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "args",
+          "type": "AgentCommandArgs"
+        }
+      ],
+      "returns": "unknown",
+      "receiver": "Component",
+      "description": "Gameplay component method run between ticks for an agent call command; its return value is reported to the agent as bounded JSON and a raised error as agent_command_failed. Preserve self, with the concrete component type as this."
     }
   ]
 }

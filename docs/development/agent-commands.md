@@ -64,6 +64,24 @@ Access: `simulate`.
 | `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
 | `game` | boolean | no | Add game-declared observations: for every observed actor's Lua component that defines OnAgentObserve(self), its return value as bounded JSON (as event payloads) in game: [{actor_uid, key, value[, error]}], sorted by UID then key. The functions run as gameplay code within the request's budget and must not change game state, or replays and checkpoints diverge. Default false. |
 
+## `call`
+
+Run a game-declared command at idle, between ticks: every targeted Lua component that defines OnAgentCommand(self, name, args) is called with the name and args (a Lua table), in UID then key order, and the response is an observation plus call {name, results: [{actor_uid, key, value}]} with each return value as bounded JSON (as event payloads). Does not advance time. A handler error returns agent_command_failed with the error and call results; effects of handlers that already ran are kept. No handler returns no_command_handler; a handler that does not know a broadcast name should return nil. Calls are recorded for checkpoints and replays, so handlers must depend only on game state and args.
+
+Access: `simulate`.
+
+| Parameter | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | yes | The command name passed to the handlers. |
+| `args` | object | no | JSON arguments, passed as a Lua table (null members are absent). Default {}. |
+| `actor` | string | no | Call only this actor's components: a decimal UID string or a name (the lowest UID with that name). |
+| `component` | string | no | Call only components with this key. |
+| `events` | boolean \| array (max items 64) | no | Report events published through Event.Publish during this request: true for every type, or an array of type names. The response then carries events (oldest first, at most 256, each with frame, type and a bounded JSON payload) and events_dropped. |
+| `tilemaps` | object[] (max items 16) | no | Committed tile cells read after the call (as observe). Queries are validated before any handler runs; at most 16 queries and 256 cells. |
+| `select` | object | no | Narrows the actors in this response. Filters combine with AND: names, uids and component types each match any listed value; region keeps actors whose world position lies inside the inclusive box. limit keeps the lowest UIDs; actors_matched reports the count before the limit. components:false omits component properties. |
+| `image` | object | no | Attach a PNG of the current frame rendered headlessly by the software renderer from the game camera (the configured window size scaled to width x height). The response carries image {width, height, format:"png", encoding:"base64", data}. Rendering does not change the simulation. |
+| `game` | boolean | no | Add game-declared observations: for every observed actor's Lua component that defines OnAgentObserve(self), its return value as bounded JSON (as event payloads) in game: [{actor_uid, key, value[, error]}], sorted by UID then key. The functions run as gameplay code within the request's budget and must not change game state, or replays and checkpoints diverge. Default false. |
+
 ## `reload_scripts`
 
 Atomically reload the source files of registered Lua component types at idle, keeping instances and state; does not advance a tick or rerun OnStart.
@@ -94,7 +112,7 @@ Access: `simulate`.
 
 ## `checkpoint`
 
-Name the current state: returns a checkpoint id (cp-N) and the frame. A checkpoint is the seed plus the step and run_until requests since the last reset; it is unavailable after a script reload or a failed step until the next reset. At most 64 are kept, oldest evicted.
+Name the current state: returns a checkpoint id (cp-N) and the frame. A checkpoint is the seed plus the step, run_until and call requests since the last reset; it is unavailable after a script reload or a failed step until the next reset. At most 64 are kept, oldest evicted.
 
 Access: `simulate`.
 

@@ -36,6 +36,7 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
 {"cmd":"step","frames":1,"keys":[]}
 {"cmd":"step","mouse":{"x":100.5,"y":80,"buttons":[1],"wheel":-1}}
 {"cmd":"run_until","max_frames":600,"keys":["right"],"until":[{"event":"crop_harvested"},{"actor":"player","property":"x","op":">=","value":12}],"id":"r1"}
+{"cmd":"call","name":"give_item","args":{"item":"wood","count":20},"actor":"game"}
 {"cmd":"reload_scripts","types":["Village"]}
 {"cmd":"reset","seed":42}
 {"cmd":"quit"}
@@ -127,9 +128,32 @@ Version 2 keeps every version 1 command and its semantics. It adds `run_until`,
   included. Rendering never changes the simulation, and at the window size
   the frame matches graphical mode with the software renderer pixel for pixel
   (`agent_image_test`).
+- `call` runs a game-declared command between ticks: the game's debug and
+  test hooks (grant items, travel, summon) go here rather than through input.
+  Every live Lua component that defines `OnAgentCommand(self, name, args)` is
+  called in UID then key order, narrowed by optional `actor` (decimal UID or
+  name, which must exist) and `component` key. `args` is a JSON object
+  (default `{}`) passed as a Lua table: integers stay integers and `null`
+  members are absent. The handlers run as ordinary gameplay code on the owning
+  thread within the request's script budget; they may change any state, and
+  queued work such as `Actor.Instantiate` or `Scene.Load` takes effect at the
+  next tick. The response is an observation (no tick is advanced) plus `call:
+  {name, results}`, each result `{actor_uid, key, value}` with the return
+  value serialized like event payloads; `events`, `select`, `game`,
+  `tilemaps` and `image` work as for `step`. Since unnamed calls reach every
+  handler, a handler should return `nil` for names it does not handle. A
+  handler error returns `ok:false`, `code: agent_command_failed`, the first
+  error and the `call` results (that result has `value: null` and `error`);
+  handlers that already ran keep their effects and later ones still run. No
+  handler at all returns `no_command_handler` and invalid arguments
+  `invalid_argument`, both before any Lua runs. `call` has `simulate`
+  access: its effects come only from the request and game state, so
+  successful and `agent_command_failed` calls are kept in the checkpoint
+  history and replays. A handler that reads anything else (files, clocks)
+  breaks restore and replay.
 - `checkpoint` names the current state and returns `checkpoint` (`cp-N`) and
   `frame`. A checkpoint is the seed plus the successful `step` and
-  `run_until` requests since the last reset. `restore` with a checkpoint id
+  `run_until` requests and the `call` requests since the last reset. `restore` with a checkpoint id
   starts a fresh worker with that seed, replays those requests, checks that
   it reached the same frame and returns an observation plus
   `restored: {checkpoint, replayed}`. Later requests continue from there, so
@@ -191,7 +215,7 @@ worker, limits and recovery rules as JSONL:
 A client configuration such as `.mcp.json` names that command and its arguments.
 
 - Every command except `quit` is a tool (`describe`, `observe`, `step`,
-  `run_until`, `reload_scripts`, `reset`). Tool input schemas are the command
+  `run_until`, `call`, `reload_scripts`, `reset`, ...). Tool input schemas are the command
   parameter schemas; annotations mark `read` tools read-only. A call returns the
   protocol response both as `structuredContent` and as JSON text, with
   `isError` set when the response has `ok:false`. Unknown or disabled tools,
@@ -216,9 +240,9 @@ A client configuration such as `.mcp.json` names that command and its arguments.
 `pocket_replay: 1`, the protocol version, engine version, a project content
 digest (FNV-1a 64 over non-hidden files; change detection, not security) and
 the starting seed; the initial observation; then every `observe`, `step`,
-`run_until`, `reset` and `reload_scripts` request with its response. Client
-`id`s and `diagnostics` are omitted because they describe the session rather
-than gameplay. `describe` and `quit` are not recorded.
+`run_until`, `call`, `reset`, `reload_scripts`, `checkpoint` and `restore`
+request with its response. Client `id`s and `diagnostics` are omitted because
+they describe the session rather than gameplay. `describe` and `quit` are not recorded.
 
 ```sh
 ./build/sdl3-debug/game --headless --agent --project P --seed 42 --record session.jsonl

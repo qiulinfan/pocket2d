@@ -3,6 +3,7 @@
 
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
+#include "rapidjson/document.h"
 #include <string>
 
 namespace LuaJson {
@@ -11,6 +12,9 @@ namespace LuaJson {
 // Functions and unknown userdata become "<function>"/"<userdata>", deeper
 // tables "<table>", Vector2 {x,y}, actors {actor_uid}, non-finite numbers null.
 std::string Bounded(const luabridge::LuaRef &value);
+// Pushes a JSON value as one Lua value: objects and arrays become tables,
+// integers stay integers and null becomes nil (an absent table entry).
+void Push(lua_State *state, const rapidjson::Value &value);
 } // namespace LuaJson
 
 #endif

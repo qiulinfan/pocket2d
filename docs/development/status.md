@@ -86,7 +86,11 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
 - Agent protocol v2: one schema (`scripting/api/agent-protocol.json`) defines
   the commands and generates the embedded schema and command reference;
   requests may carry an echoed `id`; `run_until` stops on published events,
-  property comparisons or actor presence. `--record`/`--replay` write and
+  property comparisons or actor presence. `call` delivers a named command with
+  JSON args to Lua `OnAgentCommand` handlers between ticks and returns their
+  results; calls are kept in checkpoints and replays (`agent_call_test`), so
+  games need no input-axis hacks for debug and test commands.
+  `--record`/`--replay` write and
   verify JSON-lines replays and report the first divergent record and JSON
   pointer; a Debug recording replayed identically in Release over 1,020 frames
   of two fixtures. `--mcp` serves the commands as MCP tools for both the

@@ -25,8 +25,8 @@ constexpr const char *kVersionKey = "io.modelcontextprotocol/protocolVersion";
 constexpr std::size_t kMessageLimit = 1024 * 1024;
 constexpr const char *kInstructions =
     "Pocket2D gameplay runtime for one project. observe reads the world without advancing time; step and "
-    "run_until advance fixed 1/60 s ticks with held keys and mouse; reset restarts the runtime with a seed. "
-    "Actor uids are decimal strings. A response with requires_reset needs reset before further simulation.";
+    "run_until advance fixed 1/60 s ticks with held keys and mouse; reset restarts the runtime with a seed; "
+    "call runs a command the game declares in Lua (OnAgentCommand). Actor uids are decimal strings. A response with requires_reset needs reset before further simulation.";
 
 std::string Serialize(const Value &value) {
     rapidjson::StringBuffer buffer;
