@@ -7,6 +7,8 @@
   pocket render PROJECT --out PNG  render a frame headlessly
   pocket new DIRECTORY             create a minimal project
   pocket import aseprite|ldtk|unity ...  convert Aseprite sheets, LDtk levels or Unity 2D scenes
+  pocket package PROJECT --platform mac|windows|linux|web
+                                   package a game for players (a runtime kit from tools/build_runtime.py)
 
 Diagnostics are text by default; --json prints one JSON object per line with
 severity, code, file and message. The runtime binary comes from --game, the
@@ -368,6 +370,21 @@ def command_import(options):
     return 0
 
 
+def command_package(options):
+    from .package import PackageError, package
+    kit = Path(options.runtime) if options.runtime else REPOSITORY / "build" / "runtime" / options.platform
+    try:
+        result, archived = package(project_path(options.project), options.platform, kit, options.out,
+                                   make_archive=not options.no_archive)
+    except PackageError as error:
+        print("pocket package: %s" % error, file=sys.stderr)
+        return 1
+    print("packaged %s" % result)
+    if archived:
+        print("archive %s" % archived)
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="pocket", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -420,6 +437,13 @@ def main(argv=None):
     importer.add_argument("--point-prefix", action="append", default=[],
                           help="Unity: import GameObjects named with this prefix as SpawnMarker points (repeatable)")
     importer.set_defaults(handler=command_import)
+    packager = commands.add_parser("package", help="package a game for players (macOS app, Windows/Linux folder, web page)")
+    packager.add_argument("project")
+    packager.add_argument("--platform", required=True, choices=["mac", "windows", "linux", "web"])
+    packager.add_argument("--runtime", help="runtime kit (default: build/runtime/PLATFORM from tools/build_runtime.py)")
+    packager.add_argument("--out", default="build/packages", help="output folder (default: build/packages)")
+    packager.add_argument("--no-archive", action="store_true", help="leave the folder without a zip or tar.gz")
+    packager.set_defaults(handler=command_package)
     options = parser.parse_args(argv)
     if options.command == "import" and options.format == "ldtk" and not options.ground:
         parser.error("import ldtk requires --ground")

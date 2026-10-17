@@ -5,8 +5,14 @@ include(FetchContent)
 # FETCHCONTENT_SOURCE_DIR_<NAME> overrides support offline source checkouts.
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(SDL_SHARED ON CACHE BOOL "" FORCE)
-set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+if(EMSCRIPTEN)   # the web runtime links everything into one module
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+else()
+    set(SDL_SHARED ON CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+endif()
 set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_TESTS OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_AVIF OFF CACHE BOOL "" FORCE)
@@ -24,12 +30,32 @@ set(SDLMIXER_MP3_MPG123 OFF CACHE BOOL "" FORCE)
 set(SDLMIXER_OPUS OFF CACHE BOOL "" FORCE)
 set(SDLMIXER_VORBIS_VORBISFILE OFF CACHE BOOL "" FORCE)
 
+# Distribution runtimes (tools/build_runtime.py, for `pocket package`) carry
+# no dependency on libraries a player may lack: SDL_ttf builds its own
+# FreeType (without HarfBuzz) and SDL_image decodes with its built-in stb
+# loaders instead of system libpng and libwebp.
+option(POCKET_DISTRIBUTION "Build a self-contained runtime for packaged games" OFF)
+set(sdl3_ttf_patch "")
+if(POCKET_DISTRIBUTION OR EMSCRIPTEN)
+    set(SDLTTF_VENDORED ON CACHE BOOL "" FORCE)
+    set(SDLTTF_HARFBUZZ OFF CACHE BOOL "" FORCE)
+    set(SDLIMAGE_VENDORED OFF CACHE BOOL "" FORCE)
+    set(SDLIMAGE_BACKEND_STB ON CACHE BOOL "" FORCE)
+    set(SDLIMAGE_BACKEND_IMAGEIO OFF CACHE BOOL "" FORCE)
+    set(SDLIMAGE_PNG_LIBPNG OFF CACHE BOOL "" FORCE)
+    set(SDLIMAGE_JPG_LIBJPEG OFF CACHE BOOL "" FORCE)
+    set(SDLIMAGE_WEBP OFF CACHE BOOL "" FORCE)
+    set(SDLIMAGE_JXL OFF CACHE BOOL "" FORCE)
+    set(sdl3_ttf_patch PATCH_COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_LIST_DIR}/FetchFreetypeIntoSdlTtf.cmake")
+endif()
+
 FetchContent_Declare(sdl3
     URL https://codeload.github.com/libsdl-org/SDL/tar.gz/refs/tags/release-3.4.18)
 FetchContent_Declare(sdl3_image
     URL https://codeload.github.com/libsdl-org/SDL_image/tar.gz/refs/tags/release-3.4.8)
 FetchContent_Declare(sdl3_ttf
-    URL https://codeload.github.com/libsdl-org/SDL_ttf/tar.gz/refs/tags/release-3.2.2)
+    URL https://codeload.github.com/libsdl-org/SDL_ttf/tar.gz/refs/tags/release-3.2.2
+    ${sdl3_ttf_patch})
 FetchContent_Declare(sdl3_mixer
     URL https://codeload.github.com/libsdl-org/SDL_mixer/tar.gz/refs/tags/release-3.2.4)
 FetchContent_MakeAvailable(sdl3 sdl3_image sdl3_ttf sdl3_mixer)

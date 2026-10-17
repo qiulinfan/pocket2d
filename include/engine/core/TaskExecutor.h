@@ -62,8 +62,10 @@ private:
     RangeTask task_;
     std::exception_ptr failure_;
     std::deque<Job> jobs_; // guarded by mutex_
-    // Explicitly joined in the destructor before synchronization state dies.
-    std::vector<std::jthread> workers_;
+    // Explicitly joined in the destructor before synchronization state dies
+    // (std::thread, not jthread: some libc++ builds still gate jthread).
+    std::vector<std::thread> workers_;
+    void StopWorkers();
 };
 
 #endif

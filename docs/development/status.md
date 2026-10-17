@@ -643,8 +643,16 @@ phase15 benchmark directories. No performance gain or SOTA conclusion is claimed
    multi-command gestures, runtime-only property paths and all panels are not
    covered by the scene-command guarantee. A fatal scene-open error can still stop
    the editor before another overlay draw; graphical fatal recovery remains open.
-   Vulkan/Direct3D, distributable bundles, audio listening and human game feel remain
-   unverified. Existing unused SDL2 vendor files await packaging cleanup.
+   Vulkan/Direct3D, audio listening and human game feel remain unverified.
+   `pocket package` (2026-10-17, `packaging.md`) builds macOS, Windows, Linux and
+   web packages of PocketTerraria from runtime kits: the arm64 macOS app ran from
+   another folder with its splash, the web page ran at 60 fps in a browser with
+   input and IndexedDB saves, and the x86_64 Linux folder rendered a world in an
+   emulated Ubuntu 24.04 container. The Windows package's imports resolve to its
+   own DLLs and the Universal CRT, but it has not been run: Wine crashes under
+   this host's x86_64 emulation. Signing/notarization, an Intel macOS build and
+   arm64 Linux/Windows kits are open. Existing unused SDL2 vendor files await
+   packaging cleanup.
 5. Establish matched representative benchmarks against current established 2D
    engines before making SOTA performance or completeness claims.
 6. Whole-game completeness tests (2026-10-16): the Village_Rim world import with

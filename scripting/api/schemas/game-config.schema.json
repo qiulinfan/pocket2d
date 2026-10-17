@@ -27,6 +27,15 @@
       "type": "number",
       "minimum": 0.5,
       "maximum": 10
+    },
+    "package_exclude": {
+      "description": "Extra files `pocket package` leaves out of packaged games: patterns relative to the project, with * wildcards (hidden files, __pycache__, tools/, scenarios/, source_art/ and Markdown are always left out).",
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "package_icon": {
+      "description": "A PNG in the project used as the packaged macOS app's icon (default: the Pocket2D icon).",
+      "type": "string"
     }
   },
   "additionalProperties": true

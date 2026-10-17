@@ -5,9 +5,10 @@ The verified local toolchain is Apple Clang 21 and CMake 4.4. Unsupported C++26
 compilers should fail configuration rather than silently lowering the standard.
 
 SDL 3.4.18, SDL_image 3.4.8, SDL_ttf 3.2.2 and SDL_mixer 3.2.4 are fetched from
-pinned official release tags. FreeType, HarfBuzz and PNG development libraries
-are currently discovered on the host. This dependency provision was verified
-on macOS; Windows/Linux packaging remains a separate gate. Box2D 3.1.1 is
+pinned official release tags. Development builds discover FreeType, HarfBuzz
+and PNG development libraries on the host; `-DPOCKET_DISTRIBUTION=ON` (used for
+runtime kits, see [packaging.md](packaging.md)) builds FreeType from a pinned
+release and decodes images with SDL_image's stb loaders instead. Box2D 3.1.1 is
 fetched from its release tag and linked statically; its CMake compiles it with
 `-ffp-contract=off` for deterministic math. CMake's normal
 `FETCHCONTENT_SOURCE_DIR_SDL3`, `_SDL3_IMAGE`, `_SDL3_TTF`, `_SDL3_MIXER` and
@@ -74,8 +75,9 @@ speed thresholds into correctness tests.
 
 Dear ImGui core and SDL backends come from upstream tag `v1.93.0-docking`,
 unmodified, with its license and stock `imconfig.h`. The historical SDL2 vendor
-packages have been removed; producing distributable bundles remains packaging
-work, not proof of cross-platform readiness.
+packages have been removed. `pocket package` produces macOS, Windows, Linux
+and web builds ([packaging.md](packaging.md)); a package that starts is not
+proof of cross-platform readiness.
 
 A bounded graphical smoke can save the engine's rendered target before
 presentation and exit without leaving a window open:

@@ -1,3 +1,6 @@
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include "core/Engine.h"
 #include "rendering/SplashScreen.h"
 #include <string_view>
@@ -314,6 +317,15 @@ void Engine::GameLoop() {
     while (IsRunning()) {
         RunSingleFrame();
         PresentFrame();
+#ifdef __EMSCRIPTEN__
+        // In the browser the loop yields each frame (the build uses ASYNCIFY)
+        // and keeps to 60 frames a second itself.
+        static double next_frame = emscripten_get_now();
+        next_frame += 1000.0 / 60.0;
+        const double now = emscripten_get_now();
+        if (next_frame < now - 100.0) next_frame = now;
+        emscripten_sleep(static_cast<unsigned int>(std::max(0.0, next_frame - now)));
+#endif
     }
 
     ShutdownRuntime();

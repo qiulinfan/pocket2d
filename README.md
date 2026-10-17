@@ -127,9 +127,11 @@ Projects can live anywhere on disk. Like Unity Hub, the editor keeps a per-user 
 - `Empty` creates `game.config`, `rendering.config`, `scenes/main.scene`, `actor_templates/empty.template`, and the standard project directories: `audio/`, `component_types/`, `fonts/`, `images/`, `scenes/`, and `actor_templates/`.
 - `ballgame` copies the sample in `.engine/templates/ballgame/`.
 
-When there is no project to reopen, as on first launch, the editor creates a `ballgame` project in the new-project location and opens it. The `game` runtime runs the project given by `--project`, else the editor's current project, else the sample template.
+When there is no project to reopen, as on first launch, the editor creates a `ballgame` project in the new-project location and opens it. The `game` runtime runs the project given by `--project`, else a packaged project beside it (see below), else the editor's current project, else the sample template.
 
 A project can show a "Made with Pocket2D" splash before its first frame, as Unity games do: set `"splash_screen": true` (and optionally `"splash_seconds"`, 0.5 to 10, default 2) in `game.config`, or tick it in `Project -> Game Config`. Only the standalone `game` window shows it; the editor, `--frames` captures and headless agent runs skip it. The image is `.engine/system/splash.png`, drawn by `tools/make_splash.py` and compiled into the runtime.
+
+`pocket package PROJECT --platform mac|windows|linux|web` packages a project as a game players run without the engine: a macOS `.app`, a Windows or Linux folder, or a web page, each with a zip (a tar.gz for Linux). It needs a runtime kit for the platform, built once by `python3 tools/build_runtime.py PLATFORM` (on a macOS host for `mac`; in Docker for the others). Development files (`tools/`, `scenarios/`, `source_art/`, Markdown, hidden files and `game.config`'s `package_exclude` patterns) stay out. See [Packaging games](docs/development/packaging.md).
 
 ## Architecture Illustration
 

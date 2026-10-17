@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pocket2D</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { outline: none; }
+  #status { position: absolute; color: #ccc; font: 16px system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div id="status">Loading…</div>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<script>
+// The Pocket2D web runtime (built by Emscripten from this shell). `pocket
+// package --platform web` puts project.pack beside it: a little-endian
+// uint32 manifest length, the JSON manifest ({title, files: [{path, size}]})
+// and the files' bytes in order. They are written under / (project/ and
+// .engine/system/) before main starts; saves live in IndexedDB at /libsdl.
+var statusLine = document.getElementById('status');
+var Module = {
+  canvas: document.getElementById('canvas'),
+  setStatus: function (text) { statusLine.textContent = text || ''; },
+  printErr: function (text) { console.error(text); },
+  preRun: [function () {
+    Module.addRunDependency('pocket-project');
+    FS.mkdir('/libsdl');
+    FS.mount(IDBFS, {}, '/libsdl');
+    FS.syncfs(true, function () {
+      fetch('project.pack').then(function (response) {
+        if (!response.ok) throw new Error('project.pack: ' + response.status);
+        return response.arrayBuffer();
+      }).then(function (buffer) {
+        var length = new DataView(buffer).getUint32(0, true);
+        var manifest = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 4, length)));
+        var offset = 4 + length;
+        manifest.files.forEach(function (entry) {
+          var parts = entry.path.split('/'), dir = '';
+          for (var i = 0; i < parts.length - 1; ++i) {
+            dir += '/' + parts[i];
+            try { FS.mkdir(dir); } catch (error) { /* exists */ }
+          }
+          FS.writeFile('/' + entry.path, new Uint8Array(buffer, offset, entry.size));
+          offset += entry.size;
+        });
+        if (manifest.title) document.title = manifest.title;
+        statusLine.textContent = '';
+        Module.removeRunDependency('pocket-project');
+      }).catch(function (error) { statusLine.textContent = 'Could not load the game: ' + error.message; });
+    });
+    // Keep saves: copy the in-memory save folder to IndexedDB every few seconds.
+    setInterval(function () { FS.syncfs(false, function () {}); }, 5000);
+    // Fit the canvas to the page, keeping the game's aspect ratio (SDL sets
+    // its CSS size to the window's; mouse positions follow the shown size).
+    function fitCanvas() {
+      var canvas = Module.canvas;
+      if (!canvas.width || !canvas.height) return;
+      var ratio = canvas.width / canvas.height;
+      var width = Math.min(window.innerWidth, window.innerHeight * ratio);
+      canvas.style.width = width + 'px';
+      canvas.style.height = width / ratio + 'px';
+    }
+    window.addEventListener('resize', fitCanvas);
+    setInterval(fitCanvas, 500);
+  }]
+};
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

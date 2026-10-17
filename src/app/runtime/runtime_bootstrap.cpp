@@ -79,6 +79,19 @@ bool TryReadEditorProjectRoot(std::filesystem::path &out_project_root) {
     return false;
 }
 
+// A packaged game (`pocket package`) ships its project as "project" beside
+// the runtime: next to the executable on Windows and Linux, in the app's
+// Resources on macOS (SDL's base path), and preloaded at /project on the web.
+// The runtime then starts it directly, from that folder, where the package
+// also keeps the engine's .engine/system resources.
+std::filesystem::path PackagedProjectRoot() {
+    const char *base = SDL_GetBasePath();
+    if (base == nullptr) return {};
+    const std::filesystem::path project = std::filesystem::path(base) / "project";
+    std::error_code error;
+    return std::filesystem::is_regular_file(project / "game.config", error) ? project : std::filesystem::path();
+}
+
 void ApplyEditorSelectedProjectRootForRuntime() {
     std::filesystem::path project_root;
     if (!TryReadEditorProjectRoot(project_root)) return;
@@ -195,7 +208,11 @@ int RuntimeApp::Run(int argc, char **argv) {
                 throw std::runtime_error("project must contain game.config");
             ResourcePath::SetResourcesRootPath(project);
         } else if (automation) throw std::runtime_error("agent mode requires explicit --project PATH");
-        else ApplyEditorSelectedProjectRootForRuntime();
+        else if (const auto packaged = PackagedProjectRoot(); !packaged.empty()) {
+            std::filesystem::current_path(packaged.parent_path());
+            project = packaged;
+            ResourcePath::SetResourcesRootPath(project);
+        } else ApplyEditorSelectedProjectRootForRuntime();
         if (agent_worker) {
             ScriptBudget::Configure(limits.script_limits);
             return RunAgentSession(project, seed);

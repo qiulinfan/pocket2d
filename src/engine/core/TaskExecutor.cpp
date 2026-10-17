@@ -14,6 +14,9 @@ private:
 }
 
 std::size_t TaskExecutor::DefaultWorkerCount() {
+#ifdef __EMSCRIPTEN__
+    return 0;   // the web build has no threads: tasks run inline on the main thread
+#endif
     const auto hardware = std::thread::hardware_concurrency();
     return hardware > 1 ? std::min<std::size_t>(hardware - 1, 7) : 0;
 }
@@ -29,18 +32,22 @@ TaskExecutor::TaskExecutor(std::size_t worker_count) {
         for (std::size_t i = 0; i < worker_count; ++i)
             workers_.emplace_back([this, i] { WorkerLoop(i + 1); });
     } catch (...) {
-        { std::lock_guard lock(mutex_); stopping_ = true; }
-        work_ready_.notify_all();
-        workers_.clear();
+        StopWorkers();
         throw;
     }
 }
 
-TaskExecutor::~TaskExecutor() {
-    // Like a standard container, lifetime must outlive concurrent member calls.
+void TaskExecutor::StopWorkers() {
     { std::lock_guard lock(mutex_); stopping_ = true; }
     work_ready_.notify_all();
+    for (auto &worker : workers_)
+        if (worker.joinable()) worker.join();
     workers_.clear();
+}
+
+TaskExecutor::~TaskExecutor() {
+    // Like a standard container, lifetime must outlive concurrent member calls.
+    StopWorkers();
 }
 
 void TaskExecutor::ParallelFor(std::size_t count, std::size_t grain,
