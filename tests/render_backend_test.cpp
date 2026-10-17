@@ -244,6 +244,27 @@ void TestRuntime(Engine &engine, const std::string &backend,
     engine.RunSingleFrame(false);
     Surface second = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
     Check(Pixel(second.get(), 3, 51) == std::array<Uint8, 4>{0, 255, 0, 255}, "updated dynamic pixels re-upload");
+    // A multiply light map scales what is under it, and smooth sampling
+    // blends neighbouring cells instead of stepping between them.
+    Renderer::SetDynamicImage("dynamic:light", 2, 1, {128, 255, 64, 255, 255, 255, 255, 255},
+                              {.smooth = true, .multiply = true});
+    ImageDrawRequest under;
+    under.image_name = "red";
+    under.x = 2.0f; under.y = 60.0f; under.scale_x = 4.0f; under.scale_y = 2.0f;
+    Renderer::QueueUIImageDraw(under);
+    ImageDrawRequest light;
+    light.image_name = "dynamic:light";
+    light.x = 2.0f; light.y = 60.0f; light.scale_x = 16.0f; light.scale_y = 16.0f;
+    light.sorting_order = 1;
+    Renderer::QueueUIImageDraw(light);
+    engine.RunSingleFrame(false);
+    Surface lit = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
+    const auto near = [](Uint8 value, int expected) { return std::abs(static_cast<int>(value) - expected) <= 3; };
+    const auto dim = Pixel(lit.get(), 3, 61);
+    Check(near(dim[0], 120) && near(dim[1], 20) && near(dim[2], 8), "multiply scales the colour under it");
+    const auto middle = Pixel(lit.get(), 18, 61);
+    Check(middle[0] > 140 && middle[0] < 220, "smooth sampling blends between neighbouring pixels");
+    Check(Pixel(lit.get(), 31, 61)[0] >= 237, "a white light cell leaves the colour unchanged");
     TestFractionalTexturePath(renderer);
     TestParticleBatchPath(renderer);
 }

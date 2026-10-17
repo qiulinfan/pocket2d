@@ -319,23 +319,6 @@ void Autotile(const Fixture &fixture) {
     Check(map.GetCells("solid", 1, 1, 2, 2) == std::vector<int>{0, 5, 3, 2}, "bulk read is row-major");
     Check(map.GetCells("solid", 0, 0, 0, 0).empty(), "an empty rectangle reads nothing");
     Reject([&] { map.GetCells("solid", 4, 4, 2, 1); }, "bulk read must stay inside the map");
-    // Lighting: column x=4 is open to the sky; solid cells decay faster.
-    Tilemap::LightOptions light;
-    light.image = "dynamic:light-test";
-    light.sky = 1.0f; light.air_falloff = 0.1f; light.solid_falloff = 0.5f;
-    const auto levels = map.ComputeLight(0, -1, 5, 6, light);
-    const auto at_light = [&](int x, int y) { return levels[static_cast<std::size_t>(y + 1) * 5 + x]; };
-    Check(at_light(4, -1) == 1.0f && at_light(4, 4) == 1.0f, "sky reaches open cells and above the map");
-    Check(std::abs(at_light(2, 1) - 0.5f) < 1e-5f, "a solid cell next to sky loses solid_falloff");
-    int width = 0, height = 0;
-    Check(Renderer::GetImageSize("dynamic:light-test", width, height) && width == 5 && height == 6,
-          "the light map is a dynamic image, one pixel per cell");
-    data.ground.cells.assign(25, 0);
-    light.sources = {0.5f, 4.5f, 0.9f};
-    light.sky = 0.0f;
-    const auto lit = map.ComputeLight(0, 0, 5, 5, light);
-    Check(std::abs(lit[4 * 5 + 0] - 0.9f) < 1e-5f && std::abs(lit[4 * 5 + 1] - 0.8f) < 1e-5f,
-          "a source lights its cell and decays through air");
     // Extra layers: named, drawn at their own order, queryable, never solid.
     auto layered = fixture.Data(4, 4);
     layered.extra_layers.push_back({"walls", {-50, std::vector<int>(16, 0)}});
@@ -359,8 +342,47 @@ void Autotile(const Fixture &fixture) {
     auto bad = layered; bad.extra_layers[0].name = "Walls!";
     Reject([&] { TilemapAsset::ValidateData(bad); }, "layer names are [a-z0-9_]");
     walls.OnDestroy();
-    light.image = "light-without-prefix";
-    Reject([&] { map.ComputeLight(0, 0, 2, 2, light); }, "dynamic images need the prefix");
+    map.OnDestroy();
+}
+void Lighting(const Fixture &fixture) {
+    // Open sky over three columns of solid cells four deep.
+    auto data = fixture.Data(3, 5);
+    data.ground.cells.assign(15, 0);
+    for (std::size_t cell = 3; cell < 15; ++cell) data.solid.cells[cell] = 1;
+    TilemapAsset::SaveResource("light.tilemap.json", data);
+    Tilemap map;
+    map.Initialize(TilemapAsset::LoadResource("light.tilemap.json"), 0, 0);
+    Tilemap::LightOptions light;
+    light.image = "dynamic:light-test";
+    light.air_decay = 0.9f; light.solid_decay = 0.5f;
+    const auto levels = map.ComputeLight(0, -1, 3, 6, light);
+    const auto at = [&](const std::vector<float> &rgb, int x, int y, int channel) {
+        return rgb[(static_cast<std::size_t>(y + 1) * 3 + x) * 3 + channel];
+    };
+    Check(at(levels, 1, -1, 0) == 1.0f && at(levels, 1, 0, 2) == 1.0f, "sky reaches open cells and above the map");
+    Check(std::abs(at(levels, 1, 1, 0) - 0.9f) < 1e-5f, "the top solid cell keeps the light leaving the air above it");
+    Check(std::abs(at(levels, 1, 2, 1) - 0.45f) < 1e-5f && std::abs(at(levels, 1, 3, 1) - 0.225f) < 1e-5f,
+          "light halves through each solid cell: a gradual fade, not a cutoff");
+    int width = 0, height = 0;
+    Check(Renderer::GetImageSize("dynamic:light-test", width, height) && width == 3 && height == 6,
+          "the light map is a dynamic image, one pixel per cell");
+    light.sky = 0.0f;
+    light.sources = {1.5f, 3.5f, 1.0f, 0.5f, 0.2f};
+    const auto lit = map.ComputeLight(0, -1, 3, 6, light);
+    Check(at(lit, 1, 3, 0) == 1.0f && at(lit, 1, 3, 1) == 0.5f && std::abs(at(lit, 1, 3, 2) - 0.2f) < 1e-6f,
+          "a coloured source lights its cell in its own colour");
+    Check(std::abs(at(lit, 1, 2, 0) - 0.5f) < 1e-5f && std::abs(at(lit, 1, 2, 1) - 0.25f) < 1e-5f &&
+              std::abs(at(lit, 1, 2, 2) - 0.1f) < 1e-5f,
+          "coloured light keeps its hue as it decays");
+    auto bad = light;
+    bad.solid_decay = 1.5f;
+    Reject([&] { map.ComputeLight(0, 0, 2, 2, bad); }, "decay above 1 rejects");
+    bad = light;
+    bad.sources = {1.0f, 1.0f, 1.0f};
+    Reject([&] { map.ComputeLight(0, 0, 2, 2, bad); }, "sources come in x, y, r, g, b groups");
+    bad = light;
+    bad.image = "light-without-prefix";
+    Reject([&] { map.ComputeLight(0, 0, 2, 2, bad); }, "dynamic images need the prefix");
     map.OnDestroy();
 }
 } // namespace
@@ -368,7 +390,7 @@ int main() {
     try {
         Fixture fixture;
         Schema(fixture); CoordinatesAndChunks(fixture); CollisionAndLifetime(fixture);
-        RealPassageAndCallback(fixture); EnabledCommitSnapshot(fixture); Autotile(fixture);
+        RealPassageAndCallback(fixture); EnabledCommitSnapshot(fixture); Autotile(fixture); Lighting(fixture);
         std::cout << "PASS tilemap schema, isolated state, coordinates, dirty chunks, culling, real collision/callback lifecycle, autotile\n";
         return 0;
     } catch (const std::exception &error) {

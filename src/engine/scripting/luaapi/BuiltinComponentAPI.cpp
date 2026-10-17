@@ -6,6 +6,7 @@
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include <cmath>
+#include <set>
 #include <stdexcept>
 
 namespace {
@@ -93,13 +94,29 @@ luabridge::LuaRef GetTileCells(Tilemap *map, const std::string &layer, double x,
     return table;
 }
 
-// map:ComputeLight(x, y, width, height, {image=, sky=, air_falloff=, solid_falloff=,
-//                   open_ground={names}, sources={x, y, level, ...}, r=, g=, b=, max_alpha=})
+// map:ComputeLight(x, y, width, height, {image=, sky=, air_decay=, solid_decay=, ambient=,
+//                   open_ground={names}, sources={x, y, r, g, b, ...}, smooth=})
 void ComputeTileLight(Tilemap *map, double x, double y, double width, double height, luabridge::LuaRef table) {
     if (!table.isTable()) throw std::invalid_argument("Tilemap:ComputeLight options must be a table");
     for (const double value : {x, y, width, height})
         if (!std::isfinite(value) || std::floor(value) != value || std::abs(value) > 1e6)
             throw std::invalid_argument("Tilemap:ComputeLight rectangle must be integers");
+    // A misspelt or retired option would otherwise fall back to its default unnoticed.
+    static const std::set<std::string, std::less<>> kOptions = {
+        "image", "sky", "air_decay", "solid_decay", "ambient", "open_ground", "sources", "smooth"};
+    lua_State *state = LuaState();
+    table.push(state);
+    lua_pushnil(state);
+    while (lua_next(state, -2) != 0) {
+        lua_pop(state, 1);
+        const bool known = lua_type(state, -1) == LUA_TSTRING && kOptions.contains(lua_tostring(state, -1));
+        if (!known) {
+            const std::string key = luaL_tolstring(state, -1, nullptr);
+            lua_pop(state, 3);
+            throw std::invalid_argument("Tilemap:ComputeLight has no option '" + key + "'");
+        }
+    }
+    lua_pop(state, 1);
     Tilemap::LightOptions options;
     const auto number = [&](const char *key, auto &field) {
         const luabridge::LuaRef value = table[key];
@@ -110,9 +127,13 @@ void ComputeTileLight(Tilemap *map, double x, double y, double width, double hei
     const luabridge::LuaRef image = table["image"];
     if (!image.isString()) throw std::invalid_argument("Tilemap:ComputeLight needs an image name");
     options.image = image.cast<std::string>().value();
-    number("sky", options.sky); number("air_falloff", options.air_falloff);
-    number("solid_falloff", options.solid_falloff); number("max_alpha", options.max_alpha);
-    number("r", options.r); number("g", options.g); number("b", options.b);
+    number("sky", options.sky); number("ambient", options.ambient);
+    number("air_decay", options.air_decay); number("solid_decay", options.solid_decay);
+    const luabridge::LuaRef smooth = table["smooth"];
+    if (!smooth.isNil()) {
+        if (!smooth.isBool()) throw std::invalid_argument("Tilemap:ComputeLight smooth must be a boolean");
+        options.smooth = smooth.cast<bool>().value();
+    }
     const luabridge::LuaRef open = table["open_ground"];
     if (open.isTable())
         for (int i = 1; i <= open.length(); ++i) options.open_ground.push_back(open[i].cast<std::string>().value());

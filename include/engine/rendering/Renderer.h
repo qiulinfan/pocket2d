@@ -117,7 +117,16 @@ public:
     // Images generated at runtime (light maps, minimaps), drawn by name like
     // files. Names must start with "dynamic:"; pixels are RGBA8, row-major.
     static constexpr std::string_view kDynamicImagePrefix = "dynamic:";
+    // smooth samples linearly between pixels instead of the pixel-art nearest
+    // sampling; multiply scales what is already drawn by the pixel colours
+    // (a light map) instead of alpha blending over it.
+    struct DynamicImageStyle {
+        bool smooth = false;
+        bool multiply = false;
+    };
     static void SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba);
+    static void SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba,
+                                DynamicImageStyle style);
     static void QueueSceneImageDraw(const ImageDrawRequest &request);
     static void QueueSceneParticleBatch(const ParticleBatchRequest &request);
     static void QueueUIImageDraw(const ImageDrawRequest &request);

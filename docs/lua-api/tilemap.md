@@ -122,23 +122,27 @@ Tilemap 的 atlas grid 以地图 JSON 为准，不读取普通 SpriteRenderer �
 ## 格子光照
 
 `map:ComputeLight(x, y, width, height, options)` 在原生代码中计算一个格子矩形
-（可超出地图）的光照，并把暗度写入一张动态图片，每格一个像素：
+（可超出地图）的彩色光照，并把每格的光色写入一张动态图片，每格一个像素：
 
 ```lua
 map:ComputeLight(x0, y0, w, h, {
-  image = "dynamic:light",       -- 必须以 dynamic: 开头
-  sky = 1.0,                      -- 天光强度（昼夜由游戏调节）
-  air_falloff = 0.08, solid_falloff = 0.24,
-  open_ground = {"trunk"},        -- 这些地形的 ground 格仍透天光
-  sources = {tx, ty, 1.2, ...},   -- 光源：格子坐标与强度的三元组
-  r = 0, g = 0, b = 0, max_alpha = 248,
+  image = "dynamic:light",          -- 必须以 dynamic: 开头
+  sky = 1.0,                         -- 白色天光强度（昼夜由游戏调节）
+  air_decay = 0.91, solid_decay = 0.56,  -- 光离开一格时乘上该格的系数
+  ambient = 0.02,                    -- 最暗处的亮度下限
+  open_ground = {"trunk"},           -- 这些地形的 ground 格仍透天光
+  sources = {tx, ty, 1.2, 0.9, 0.6, ...},  -- 光源：格子坐标与 r、g、b 强度，每 5 个一组
+  smooth = true,                     -- 在格子中心之间线性插值（默认）
 })
 Image.DrawEx("dynamic:light", x0, y0, 0, 100 * cell_size, 100 * cell_size, 0, 0, 255, 255, 255, 255, 40)
 ```
 
 没有 solid 格、且没有 ground 格（或 ground 属于 `open_ground` 地形）的格子接收天光；
-地图上方视为天空。光照按格衰减（空气 `air_falloff`，实心 `solid_falloff`），
-用两轮正反扫描近似。像素 alpha 为 `(1 - 光照) * 255`，上限 `max_alpha`。
+地图上方视为天空。光离开一格时每个通道乘以该格的衰减（空气 `air_decay`，实心
+`solid_decay`），所以紧贴天空的第一层实心格几乎全亮，往下逐格渐暗而不是突然变黑；
+用两轮正反扫描近似。每个像素是该格的光色（不低于 `ambient`，超过 1 截断），
+绘制时乘到已画内容上（暖色光源会给地块染色）。`smooth = false` 时每格是一块纯色。
+未知选项会报错。
 
 ## 获取组件与属性
 

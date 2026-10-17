@@ -60,6 +60,7 @@ std::string ResolveSystemFontPath() {
 struct DynamicImage {
     int width = 0, height = 0;
     std::vector<std::uint8_t> pixels;
+    Renderer::DynamicImageStyle style;
     std::uint64_t revision = 0;
 };
 struct DynamicImages {
@@ -378,9 +379,9 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
             cached.texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
                                                image.width, image.height);
             if (cached.texture == nullptr) { image_cache.erase(image_name); return nullptr; }
-            SDL_SetTextureBlendMode(cached.texture, SDL_BLENDMODE_BLEND);
-            SDL_SetTextureScaleMode(cached.texture, SDL_SCALEMODE_NEAREST);
         }
+        SDL_SetTextureBlendMode(cached.texture, image.style.multiply ? SDL_BLENDMODE_MOD : SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(cached.texture, image.style.smooth ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
         SDL_UpdateTexture(cached.texture, nullptr, image.pixels.data(), image.width * 4);
         cached.width = static_cast<float>(image.width);
         cached.height = static_cast<float>(image.height);
@@ -534,6 +535,11 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(const ImageDrawReque
 }
 
 void Renderer::SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba) {
+    SetDynamicImage(name, width, height, std::move(rgba), DynamicImageStyle{});
+}
+
+void Renderer::SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba,
+                               DynamicImageStyle style) {
     if (!IsDynamicName(name)) throw std::invalid_argument("dynamic image names must start with \"dynamic:\"");
     if (width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
         rgba.size() != static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4)
@@ -544,6 +550,7 @@ void Renderer::SetDynamicImage(const std::string &name, int width, int height, s
     image.width = width;
     image.height = height;
     image.pixels = std::move(rgba);
+    image.style = style;
     image.revision = dynamics.next_revision++;
 }
 

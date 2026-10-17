@@ -278,7 +278,7 @@ function _Tilemap:GetCells(layer, x, y, width, height) end
 ---Layer names in index order: ground, solid, then extra layers.
 ---@return (string)[]
 function _Tilemap:GetLayerNames() end
----Native tile lighting into a dynamic image (one pixel per cell); options: image, sky, air_falloff, solid_falloff, open_ground, sources, r, g, b, max_alpha.
+---Native coloured tile lighting into a dynamic image (one pixel per cell) that multiplies what is drawn under it; options: image, sky, air_decay, solid_decay, ambient, open_ground, sources (x, y, r, g, b groups), smooth.
 ---@param x integer
 ---@param y integer
 ---@param width integer

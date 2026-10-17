@@ -204,7 +204,7 @@ interface Tilemap extends Component {
     GetCells(this: Tilemap, layer: TileLayer, x: number, y: number, width: number, height: number): (number)[];
     /** Layer names in index order: ground, solid, then extra layers. */
     GetLayerNames(this: Tilemap): (string)[];
-    /** Native tile lighting into a dynamic image (one pixel per cell); options: image, sky, air_falloff, solid_falloff, open_ground, sources, r, g, b, max_alpha. */
+    /** Native coloured tile lighting into a dynamic image (one pixel per cell) that multiplies what is drawn under it; options: image, sky, air_decay, solid_decay, ambient, open_ground, sources (x, y, r, g, b groups), smooth. */
     ComputeLight(this: Tilemap, x: number, y: number, width: number, height: number, options: unknown): void;
     /** Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map. */
     GetTerrain(this: Tilemap, layer: TileLayer, x: number, y: number): string | undefined;

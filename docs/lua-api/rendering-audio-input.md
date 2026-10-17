@@ -12,7 +12,9 @@
 | `Image.GetSize(image_name)` | The image's pixel size as a `Vector2` (works headless; raises if the image cannot load) |
 
 Images named `dynamic:...` are generated at runtime by native code (for example
-`Tilemap:ComputeLight` light maps) and drawn by name like image files.
+`Tilemap:ComputeLight` light maps) and drawn by name like image files. A light map
+multiplies what is drawn under it and is sampled smoothly; other images blend normally
+with pixel-art sampling.
 
 ### World-space drawing
 

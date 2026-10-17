@@ -282,9 +282,14 @@ std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, 
     if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
     if (width <= 0 || height <= 0 || width > 1024 || height > 1024)
         throw std::runtime_error("tilemap: light rectangle must be 1..1024 cells per side");
-    for (const float value : {options.sky, options.air_falloff, options.solid_falloff})
-        if (!std::isfinite(value) || value < 0.0f) throw std::runtime_error("tilemap: light levels must be finite and nonnegative");
-    if (options.sources.size() % 3 != 0) throw std::runtime_error("tilemap: light sources are x, y, level triples");
+    if (!std::isfinite(options.sky) || options.sky < 0.0f)
+        throw std::runtime_error("tilemap: sky light must be finite and nonnegative");
+    for (const float value : {options.air_decay, options.solid_decay, options.ambient})
+        if (!(value >= 0.0f && value <= 1.0f))
+            throw std::runtime_error("tilemap: light decay and ambient must lie in [0, 1]");
+    if (options.sources.size() % 5 != 0) throw std::runtime_error("tilemap: light sources are x, y, r, g, b groups");
+    for (const float value : options.sources)
+        if (!std::isfinite(value)) throw std::runtime_error("tilemap: light sources must be finite");
     const auto terrain_of = TilemapAsset::TerrainIndex(data_);
     std::vector<bool> open_ground(terrain_of.size(), false);
     for (const auto &name : options.open_ground) {
@@ -299,16 +304,18 @@ std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, 
     }
     const auto &solid = data_.solid.cells;
     const auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < data_.width && y < data_.height; };
-    std::vector<float> light(static_cast<std::size_t>(width) * height, 0.0f);
-    std::vector<float> falloff(light.size(), options.air_falloff);
+    const std::size_t cells = static_cast<std::size_t>(width) * height;
+    std::vector<float> light(cells * 3, 0.0f);  // r, g, b per cell
+    std::vector<float> decay(cells, options.air_decay);
+    const auto set_sky = [&](std::size_t i) { light[i * 3] = light[i * 3 + 1] = light[i * 3 + 2] = options.sky; };
     for (int ly = 0; ly < height; ++ly)
         for (int lx = 0; lx < width; ++lx) {
             const int x = x0 + lx, y = y0 + ly;
             const auto i = static_cast<std::size_t>(ly) * width + lx;
-            if (y < 0) { light[i] = options.sky; continue; }
+            if (y < 0) { set_sky(i); continue; }
             if (!inside(x, y)) continue;
             const auto cell = static_cast<std::size_t>(y) * data_.width + x;
-            if (solid[cell] != 0) { falloff[i] = options.solid_falloff; continue; }
+            if (solid[cell] != 0) { decay[i] = options.solid_decay; continue; }
             // Sky enters when every non-solid layer is empty or open here.
             bool open = true;
             for (int layer = 0; layer < TilemapAsset::LayerCount(data_) && open; ++layer) {
@@ -316,45 +323,47 @@ std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, 
                 const int tile = TilemapAsset::LayerAtIndex(data_, layer).cells[cell];
                 open = tile == 0 || (static_cast<std::size_t>(tile) < open_ground.size() && open_ground[tile]);
             }
-            if (open) light[i] = options.sky;
+            if (open) set_sky(i);
         }
-    for (std::size_t s = 0; s + 2 < options.sources.size(); s += 3) {
+    for (std::size_t s = 0; s + 4 < options.sources.size(); s += 5) {
         const int lx = static_cast<int>(std::floor(options.sources[s])) - x0;
         const int ly = static_cast<int>(std::floor(options.sources[s + 1])) - y0;
-        if (lx >= 0 && ly >= 0 && lx < width && ly < height) {
-            auto &value = light[static_cast<std::size_t>(ly) * width + lx];
-            value = std::max(value, options.sources[s + 2]);
-        }
+        if (lx < 0 || ly < 0 || lx >= width || ly >= height) continue;
+        const std::size_t i = static_cast<std::size_t>(ly) * width + lx;
+        for (int c = 0; c < 3; ++c)
+            light[i * 3 + c] = std::max(light[i * 3 + c], std::max(options.sources[s + 2 + c], 0.0f));
     }
-    // Two forward/backward sweeps approximate the distance-decayed flood.
+    // Light leaving a cell is scaled by that cell's decay, so the first solid
+    // cell under open sky is lit almost fully, as Terraria's surface blocks are.
+    // Two forward/backward sweeps approximate the flood from every lit cell.
+    const auto spread = [&](std::size_t to, std::size_t from) {
+        for (int c = 0; c < 3; ++c)
+            light[to * 3 + c] = std::max(light[to * 3 + c], light[from * 3 + c] * decay[from]);
+    };
     for (int pass = 0; pass < 2; ++pass) {
         for (int ly = 0; ly < height; ++ly)
             for (int lx = 0; lx < width; ++lx) {
                 const auto i = static_cast<std::size_t>(ly) * width + lx;
-                float v = light[i];
-                if (lx > 0) v = std::max(v, light[i - 1] - falloff[i]);
-                if (ly > 0) v = std::max(v, light[i - width] - falloff[i]);
-                light[i] = v;
+                if (lx > 0) spread(i, i - 1);
+                if (ly > 0) spread(i, i - width);
             }
         for (int ly = height - 1; ly >= 0; --ly)
             for (int lx = width - 1; lx >= 0; --lx) {
                 const auto i = static_cast<std::size_t>(ly) * width + lx;
-                float v = light[i];
-                if (lx + 1 < width) v = std::max(v, light[i + 1] - falloff[i]);
-                if (ly + 1 < height) v = std::max(v, light[i + width] - falloff[i]);
-                light[i] = v;
+                if (lx + 1 < width) spread(i, i + 1);
+                if (ly + 1 < height) spread(i, i + width);
             }
     }
-    std::vector<std::uint8_t> pixels(light.size() * 4);
-    const int max_alpha = std::clamp(options.max_alpha, 0, 255);
-    for (std::size_t i = 0; i < light.size(); ++i) {
-        const float dark = std::clamp(1.0f - light[i], 0.0f, 1.0f);
-        pixels[i * 4 + 0] = static_cast<std::uint8_t>(std::clamp(options.r, 0, 255));
-        pixels[i * 4 + 1] = static_cast<std::uint8_t>(std::clamp(options.g, 0, 255));
-        pixels[i * 4 + 2] = static_cast<std::uint8_t>(std::clamp(options.b, 0, 255));
-        pixels[i * 4 + 3] = static_cast<std::uint8_t>(std::min(static_cast<int>(dark * 255.0f + 0.5f), max_alpha));
+    std::vector<std::uint8_t> pixels(cells * 4);
+    for (std::size_t i = 0; i < cells; ++i) {
+        for (int c = 0; c < 3; ++c) {
+            const float level = std::clamp(std::max(light[i * 3 + c], options.ambient), 0.0f, 1.0f);
+            pixels[i * 4 + c] = static_cast<std::uint8_t>(level * 255.0f + 0.5f);
+        }
+        pixels[i * 4 + 3] = 255;
     }
-    Renderer::SetDynamicImage(options.image, width, height, std::move(pixels));
+    Renderer::SetDynamicImage(options.image, width, height, std::move(pixels),
+                              {.smooth = options.smooth, .multiply = true});
     return light;
 }
 bool Tilemap::IsSolidAt(double world_x, double world_y) const {
