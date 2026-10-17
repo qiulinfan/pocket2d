@@ -497,7 +497,6 @@ game_editor_linux
 .engine/project/
 resources/.pocketengine/
 **/.pocketengine/
-/Projects/
 /.engine/templates/**/*.meta
 /.engine/templates/**/*.mp3
 /.engine/templates/**/*.MP3
