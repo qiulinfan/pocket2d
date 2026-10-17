@@ -1,5 +1,6 @@
 #include "editor/panels/ProjectPanel.h"
 #include "editor/core/EditorDragDrop.h"
+#include "editor/core/EditorTheme.h"
 #include "imgui.h"
 #include "shared/config/SpritesheetConfig.h"
 #include "shared/resources/ResourcePath.h"
@@ -56,6 +57,8 @@ enum class EntryKind {
     Scene,
     GenericFile
 };
+
+ImVec4 Alpha(const ImVec4 &color, float alpha) { return ImVec4(color.x, color.y, color.z, alpha); }
 
 struct EntryVisualStyle {
     const char *icon_asset = "";
@@ -477,13 +480,13 @@ void DrawDisclosureGlyph(ImDrawList *draw_list, const ImVec2 &min_point,
                          bool hovered) {
     if (draw_list == nullptr) return;
 
-    const ImU32 fill_color =
-        hovered ? IM_COL32(80, 94, 112, 240) : IM_COL32(54, 64, 78, 230);
+    const EditorPalette &theme = EditorTheme::Current();
+    const ImU32 fill_color = ImGui::GetColorU32(hovered ? theme.accent : theme.button);
     draw_list->AddRectFilled(min_point, max_point, fill_color, 4.0f);
 
     const ImVec2 center((min_point.x + max_point.x) * 0.5f,
                         (min_point.y + max_point.y) * 0.5f);
-    const ImU32 glyph_color = IM_COL32(220, 228, 238, 255);
+    const ImU32 glyph_color = ImGui::GetColorU32(hovered ? theme.badge_text : theme.text);
     if (expanded) {
         draw_list->AddTriangleFilled(
             ImVec2(center.x - 4.5f, center.y - 2.5f),
@@ -573,7 +576,7 @@ void RenderSpritesheetPopup(SDL_Renderer *renderer) {
 
         ImDrawList *draw_list = ImGui::GetWindowDrawList();
         draw_list->AddRectFilled(preview_min, preview_max,
-                                 IM_COL32(24, 27, 33, 255), 8.0f);
+                                 ImGui::GetColorU32(EditorTheme::Current().frame), 8.0f);
         const TextureDrawRect draw_rect = BuildTextureFitRect(
             texture, ImVec2(preview_min.x + 12.0f, preview_min.y + 12.0f),
             ImVec2(preview_max.x - 12.0f, preview_max.y - 12.0f));
@@ -827,12 +830,13 @@ TileRenderResult RenderEntryTile(const ProjectEntry &entry,
     ImDrawList *draw_list = ImGui::GetWindowDrawList();
     const ImVec2 tile_max(tile_min.x + tile_size.x, tile_min.y + tile_size.y);
 
-    const ImVec4 tile_bg = selected  ? ImVec4(0.25f, 0.34f, 0.45f, 1.0f)
-                                     : hovered ? ImVec4(0.20f, 0.25f, 0.31f, 1.0f)
-                                               : ImVec4(0.14f, 0.17f, 0.21f, 1.0f);
-    const ImVec4 tile_border = selected ? ImVec4(0.57f, 0.76f, 0.96f, 1.0f)
-                                        : hovered ? ImVec4(0.41f, 0.53f, 0.69f, 1.0f)
-                                                  : ImVec4(0.23f, 0.28f, 0.34f, 1.0f);
+    const EditorPalette &theme = EditorTheme::Current();
+    const ImVec4 tile_bg = selected  ? theme.selection
+                                     : hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered)
+                                               : theme.tile;
+    const ImVec4 tile_border = selected ? theme.accent
+                                        : hovered ? theme.text_dim
+                                                  : theme.border;
     draw_list->AddRectFilled(tile_min, tile_max, ImGui::GetColorU32(tile_bg), 8.0f);
     draw_list->AddRect(tile_min, tile_max, ImGui::GetColorU32(tile_border), 8.0f);
 
@@ -851,7 +855,7 @@ TileRenderResult RenderEntryTile(const ProjectEntry &entry,
     if (image_texture != nullptr) {
         const ImVec2 image_min(icon_min.x + 6.0f, icon_min.y + 6.0f);
         const ImVec2 image_max(icon_max.x - 6.0f, icon_max.y - 6.0f);
-        draw_list->AddRectFilled(image_min, image_max, IM_COL32(20, 23, 29, 230),
+        draw_list->AddRectFilled(image_min, image_max, ImGui::GetColorU32(theme.frame),
                                  4.0f);
         DrawTextureFitCentered(draw_list, image_texture, image_min, image_max);
     } else if (icon_texture != nullptr) {
@@ -879,7 +883,7 @@ TileRenderResult RenderEntryTile(const ProjectEntry &entry,
     const std::string visible_name = TruncateTextToWidth(file_name, tile_width - 12.0f);
     const ImVec2 name_size = ImGui::CalcTextSize(visible_name.c_str());
     const ImVec2 name_pos((tile_min.x + tile_max.x - name_size.x) * 0.5f, tile_max.y - 24.0f);
-    draw_list->AddText(name_pos, ImGui::GetColorU32(ImVec4(0.92f, 0.94f, 0.97f, 1.0f)), visible_name.c_str());
+    draw_list->AddText(name_pos, ImGui::GetColorU32(theme.text), visible_name.c_str());
 
     if (spritesheet_expandable) {
         const ImVec2 toggle_min(tile_max.x - 28.0f, tile_min.y + 8.0f);
@@ -902,9 +906,9 @@ TileRenderResult RenderEntryTile(const ProjectEntry &entry,
         const ImVec2 badge_max(badge_min.x + badge_text_size.x + 10.0f,
                                badge_min.y + badge_text_size.y + 6.0f);
         draw_list->AddRectFilled(badge_min, badge_max,
-                                 IM_COL32(22, 26, 31, 220), 4.0f);
+                                 ImGui::GetColorU32(Alpha(theme.header, 0.9f)), 4.0f);
         draw_list->AddText(ImVec2(badge_min.x + 5.0f, badge_min.y + 3.0f),
-                           IM_COL32(216, 226, 236, 255), badge_text.c_str());
+                           ImGui::GetColorU32(theme.text), badge_text.c_str());
     }
 
     ImGui::PopID();
@@ -922,14 +926,15 @@ void RenderSpritesheetSpriteTile(SDL_Texture *texture, int rows, int columns,
     const ImVec2 tile_max(tile_min.x + tile_width, tile_min.y + tile_height);
     ImDrawList *draw_list = ImGui::GetWindowDrawList();
 
+    const EditorPalette &theme = EditorTheme::Current();
     draw_list->AddRectFilled(
         tile_min, tile_max,
-        hovered ? IM_COL32(34, 41, 50, 255) : IM_COL32(26, 31, 38, 255), 7.0f);
-    draw_list->AddRect(tile_min, tile_max, IM_COL32(58, 68, 82, 255), 7.0f);
+        ImGui::GetColorU32(hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : theme.tile), 7.0f);
+    draw_list->AddRect(tile_min, tile_max, ImGui::GetColorU32(theme.border), 7.0f);
 
     const ImVec2 preview_min(tile_min.x + 8.0f, tile_min.y + 8.0f);
     const ImVec2 preview_max(tile_max.x - 8.0f, tile_min.y + tile_height - 28.0f);
-    draw_list->AddRectFilled(preview_min, preview_max, IM_COL32(19, 23, 29, 255),
+    draw_list->AddRectFilled(preview_min, preview_max, ImGui::GetColorU32(theme.frame),
                              4.0f);
 
     const ImVec2 uv_min(
@@ -960,7 +965,7 @@ void RenderSpritesheetSpriteTile(SDL_Texture *texture, int rows, int columns,
     draw_list->AddText(
         ImVec2((tile_min.x + tile_max.x - label_size.x) * 0.5f,
                tile_max.y - label_size.y - 8.0f),
-        IM_COL32(210, 220, 230, 255), label.c_str());
+        ImGui::GetColorU32(theme.text), label.c_str());
 }
 
 ImVec2 ComputeSpritesheetSpritePreviewSize(SDL_Texture *texture, int rows,

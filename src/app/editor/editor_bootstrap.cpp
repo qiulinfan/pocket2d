@@ -510,7 +510,7 @@ bool EditorApp::BootstrapEngineForCurrentProject() {
     runtime_view_visible_last_frame_ = true;
     scene_session_.LoadInitialScene(*engine_);
 
-    if (!overlay_.Initialize(engine_->GetWindow(), engine_->GetRenderer())) {
+    if (!overlay_.Initialize(engine_->GetWindow(), engine_->GetRenderer(), editor_config_.font)) {
         return false;
     }
     overlay_.NotifyProjectChanged();

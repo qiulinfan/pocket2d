@@ -27,6 +27,11 @@ struct EditorConfigData {
     bool window_maximized = false;
     std::string window_title = "Pocket2D Editor";
     float ui_scale = 1.0f;
+    // Editor colour theme: "midnight", "dark" or "light" (EditorTheme::Names()).
+    std::string theme = "midnight";
+    // Editor font: "platform" (SF Pro on macOS, Segoe UI on Windows, else
+    // Inter) or "inter" (the bundled .engine/system/fonts/system.ttf).
+    std::string font = "platform";
     int reference_width = 1600;
     int reference_height = 960;
     int scene_view_width = 1600;

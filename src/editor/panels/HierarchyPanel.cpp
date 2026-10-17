@@ -1,4 +1,5 @@
 #include "editor/panels/HierarchyPanel.h"
+#include "editor/core/EditorTheme.h"
 #include "editor/core/EditorDragDrop.h"
 #include "editor/documents/SceneDocument.h"
 #include "engine/core/Engine.h"
@@ -88,12 +89,10 @@ void DrawRuntimeActorSourceBadge(ImDrawList *draw_list, const Actor &runtime_act
 
     const bool scene_backed = runtime_actor.IsSceneBacked();
     const char *badge_text = scene_backed ? "[Scene]" : "[Runtime]";
-    const ImU32 badge_text_color =
-        scene_backed ? IM_COL32(170, 220, 255, 255)
-                     : IM_COL32(255, 210, 150, 255);
+    const EditorPalette &theme = EditorTheme::Current();
+    const ImU32 badge_text_color = ImGui::GetColorU32(theme.badge_text);
     const ImU32 badge_fill_color =
-        scene_backed ? IM_COL32(34, 74, 110, 235)
-                     : IM_COL32(110, 76, 28, 235);
+        ImGui::GetColorU32(scene_backed ? theme.badge_scene : theme.badge_runtime);
 
     const ImVec2 badge_text_size = ImGui::CalcTextSize(badge_text);
     const ImVec2 badge_padding(8.0f, 2.0f);

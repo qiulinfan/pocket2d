@@ -8,6 +8,7 @@
 #include "scene/Tilemap.h"
 #include "scripting/ComponentManager.h"
 #include "editor/core/EditorConfig.h"
+#include "editor/core/EditorTheme.h"
 #include "editor/core/ProjectTemplates.h"
 #include "editor/documents/SceneDocument.h"
 #include "editor/panels/HierarchyPanel.h"
@@ -32,6 +33,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <optional>
@@ -365,55 +367,33 @@ bool IsBlankCommand(const std::string &command) {
     });
 }
 
-// a unity like gray theme for the editor, AI-generated.
-void ApplyUnityLikeGrayTheme(ImGuiStyle &style, float ui_scale) {
-    // Start from Dear ImGui dark theme
-    ImGui::StyleColorsDark(&style);
-
-    style.ScaleAllSizes(ui_scale);
-    style.WindowRounding = 5.0f;
-    style.FrameRounding = 4.0f;
-    style.GrabRounding = 3.0f;
-    style.TabRounding = 3.0f;
-    style.ScrollbarRounding = 6.0f;
-
-    ImVec4 *colors = style.Colors;
-    colors[ImGuiCol_Text] = ImVec4(0.86f, 0.88f, 0.90f, 1.0f);
-    colors[ImGuiCol_TextDisabled] = ImVec4(0.58f, 0.60f, 0.63f, 1.0f);
-    colors[ImGuiCol_WindowBg] = ImVec4(0.18f, 0.19f, 0.21f, 1.0f);
-    colors[ImGuiCol_ChildBg] = ImVec4(0.20f, 0.21f, 0.23f, 1.0f);
-    colors[ImGuiCol_PopupBg] = ImVec4(0.20f, 0.21f, 0.23f, 0.98f);
-    colors[ImGuiCol_Border] = ImVec4(0.29f, 0.30f, 0.33f, 1.0f);
-    colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-    colors[ImGuiCol_FrameBg] = ImVec4(0.25f, 0.26f, 0.28f, 1.0f);
-    colors[ImGuiCol_FrameBgHovered] = ImVec4(0.31f, 0.33f, 0.35f, 1.0f);
-    colors[ImGuiCol_FrameBgActive] = ImVec4(0.35f, 0.37f, 0.40f, 1.0f);
-    colors[ImGuiCol_TitleBg] = ImVec4(0.16f, 0.17f, 0.19f, 1.0f);
-    colors[ImGuiCol_TitleBgActive] = ImVec4(0.22f, 0.23f, 0.25f, 1.0f);
-    colors[ImGuiCol_MenuBarBg] = ImVec4(0.16f, 0.17f, 0.19f, 1.0f);
-    colors[ImGuiCol_ScrollbarBg] = ImVec4(0.15f, 0.16f, 0.18f, 1.0f);
-    colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.31f, 0.33f, 0.35f, 1.0f);
-    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.38f, 0.40f, 0.43f, 1.0f);
-    colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.43f, 0.45f, 0.48f, 1.0f);
-    colors[ImGuiCol_CheckMark] = ImVec4(0.62f, 0.70f, 0.84f, 1.0f);
-    colors[ImGuiCol_SliderGrab] = ImVec4(0.55f, 0.61f, 0.70f, 1.0f);
-    colors[ImGuiCol_SliderGrabActive] = ImVec4(0.65f, 0.72f, 0.82f, 1.0f);
-    colors[ImGuiCol_Button] = ImVec4(0.29f, 0.30f, 0.33f, 1.0f);
-    colors[ImGuiCol_ButtonHovered] = ImVec4(0.35f, 0.37f, 0.40f, 1.0f);
-    colors[ImGuiCol_ButtonActive] = ImVec4(0.41f, 0.43f, 0.46f, 1.0f);
-    colors[ImGuiCol_Header] = ImVec4(0.29f, 0.31f, 0.33f, 1.0f);
-    colors[ImGuiCol_HeaderHovered] = ImVec4(0.35f, 0.37f, 0.40f, 1.0f);
-    colors[ImGuiCol_HeaderActive] = ImVec4(0.40f, 0.42f, 0.45f, 1.0f);
-    colors[ImGuiCol_Separator] = ImVec4(0.31f, 0.32f, 0.35f, 1.0f);
-    colors[ImGuiCol_Tab] = ImVec4(0.23f, 0.24f, 0.26f, 1.0f);
-    colors[ImGuiCol_TabHovered] = ImVec4(0.33f, 0.35f, 0.38f, 1.0f);
-    colors[ImGuiCol_TabActive] = ImVec4(0.30f, 0.32f, 0.35f, 1.0f);
-    colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.21f, 0.22f, 0.24f, 1.0f);
+// The operating system's UI font, when it has one as a single font file.
+std::string PlatformUiFontPath() {
+#if defined(__APPLE__)
+    const std::filesystem::path path = "/System/Library/Fonts/SFNS.ttf";  // SF Pro
+#elif defined(_WIN32)
+    const char *windows = std::getenv("WINDIR");
+    const std::filesystem::path path =
+        std::filesystem::path(windows != nullptr ? windows : "C:\\Windows") / "Fonts" / "segoeui.ttf";
+#else
+    const std::filesystem::path path;
+#endif
+    std::error_code error;
+    return !path.empty() && std::filesystem::is_regular_file(path, error) ? path.string() : std::string();
 }
 
-// system font: source is inter.ttf
-void LoadEditorDefaultFont(ImGuiIO &io) {
+// "platform": the OS UI font, else the bundled Inter (.engine/system/fonts/system.ttf).
+void LoadEditorDefaultFont(ImGuiIO &io, std::string_view preference) {
     io.Fonts->Clear();
+    if (preference != "inter") {
+        const std::string platform_path = PlatformUiFontPath();
+        if (!platform_path.empty()) {
+            if (ImFont *font = io.Fonts->AddFontFromFileTTF(platform_path.c_str(), kEditorFontPixelSize)) {
+                io.FontDefault = font;
+                return;
+            }
+        }
+    }
     std::string font_path = ResourcePath::ResolveResourcePath(
         ResourcePath::EngineSystemFontsRoot(), "system", {".ttf"});
     if (font_path.empty()) {
@@ -569,7 +549,7 @@ void EditorOverlay::ShowNotice(const std::string &text,
 }
 
 // Create the ImGui context and bind it to the shared SDL window and renderer3
-bool EditorOverlay::Initialize(SDL_Window *window, SDL_Renderer *renderer) {
+bool EditorOverlay::Initialize(SDL_Window *window, SDL_Renderer *renderer, std::string_view font) {
     if (initialized_) return true;
     if (window == nullptr || renderer == nullptr) return false;
 
@@ -587,9 +567,9 @@ bool EditorOverlay::Initialize(SDL_Window *window, SDL_Renderer *renderer) {
     std::filesystem::create_directories(ResourcePath::UserConfigRoot(), ini_error);
     imgui_ini_path_ = (ResourcePath::UserConfigRoot() / "imgui.ini").string();
     io.IniFilename = imgui_ini_path_.c_str();
-    LoadEditorDefaultFont(io);
+    LoadEditorDefaultFont(io, font);
     ImGuiStyle &style = ImGui::GetStyle();
-    ApplyUnityLikeGrayTheme(style, 1.0f);
+    EditorTheme::Apply(style, "midnight", 1.0f);
 
     if (!ImGui_ImplSDL3_InitForSDLRenderer(window, renderer)) {
         ImGui::DestroyContext();
@@ -611,12 +591,13 @@ void EditorOverlay::ApplyConfig(const EditorConfigData &config, int window_width
     if (!initialized_) return;
 
     const float effective_ui_scale = ComputeEffectiveUiScale(config, window_width, window_height);
-    if (std::fabs(effective_ui_scale - applied_ui_scale_) < 0.001f) {
+    if (std::fabs(effective_ui_scale - applied_ui_scale_) < 0.001f && config.theme == applied_theme_) {
         return;
     }
 
     ImGuiStyle &style = ImGui::GetStyle();
-    ApplyUnityLikeGrayTheme(style, effective_ui_scale);
+    EditorTheme::Apply(style, config.theme, effective_ui_scale);
+    applied_theme_ = config.theme;
 
     style.SeparatorSize = std::max(style.SeparatorSize, 1.0f);
     style.SeparatorTextBorderSize = std::max(style.SeparatorTextBorderSize, 1.0f);
@@ -738,6 +719,7 @@ void EditorOverlay::NotifyProjectChanged() {
     viewport_runtime_image_valid_ = false;
     viewport_transport_bar_valid_ = false;
     applied_ui_scale_ = 0.0f;
+    applied_theme_.clear();
     show_open_project_window_ = false;
     open_project_error_.clear();
     show_script_reload_window_ = false;
@@ -1133,6 +1115,30 @@ void EditorOverlay::RenderEditorSettingsWindow(Engine &engine,
     bool config_changed = false;
     bool reapply_window_settings = false;
 
+    if (ImGui::BeginCombo("Theme", EditorTheme::DisplayName(editor_config.theme))) {
+        for (const std::string &name : EditorTheme::Names()) {
+            const bool selected = name == editor_config.theme;
+            if (ImGui::Selectable(EditorTheme::DisplayName(name), selected)) {
+                editor_config.theme = name;
+                config_changed = true;
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    const auto font_label = [](std::string_view name) { return name == "inter" ? "Inter (bundled)" : "System UI font"; };
+    if (ImGui::BeginCombo("Font", font_label(editor_config.font))) {
+        for (const char *name : {"platform", "inter"}) {
+            if (ImGui::Selectable(font_label(name), editor_config.font == name)) {
+                editor_config.font = name;
+                config_changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(after restart)");
+
     int window_width = editor_config.window_width;
     int window_height = editor_config.window_height;
     int reference_width = editor_config.reference_width;
@@ -1256,6 +1262,7 @@ void EditorOverlay::RenderProjectConfigWindows() {
             config_changed |= InputTextString(
                 "Initial Scene Path", project_config_cache_.initial_scene_name,
                 "e.g. ballgame/hw8_platformer_ballgame");
+
 
             if (config_changed) {
                 persist_project_config();

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
 
@@ -54,7 +55,8 @@ public:
 
     // Create the ImGui context and bind it to the shared SDL window/renderer.
     // 在共享的 SDL 窗口/渲染器上创建 ImGui 上下文并绑定.
-    bool Initialize(SDL_Window *window, SDL_Renderer *renderer);
+    // `font` is editor.config's "font": "platform" (the OS UI font) or "inter".
+    bool Initialize(SDL_Window *window, SDL_Renderer *renderer, std::string_view font = "platform");
     // Apply cached editor settings to the live ImGui style and font scale.
     void ApplyConfig(const EditorConfigData &config, int window_width,
                      int window_height);
@@ -151,6 +153,7 @@ private:
     int select_default_tabs_in_ = 0;  // frames left to select the Project tab
     std::string imgui_ini_path_;
     float applied_ui_scale_ = 1.0f;
+    std::string applied_theme_;
     bool project_config_loaded_ = false;
     GameConfigData project_config_cache_;
     int selected_actor_index_ = -1;

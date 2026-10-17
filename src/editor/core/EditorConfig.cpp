@@ -1,4 +1,5 @@
 #include "editor/core/EditorConfig.h"
+#include "editor/core/EditorTheme.h"
 #include "core/Log.h"
 #include "shared/resources/ResourcePath.h"
 #include "rapidjson/document.h"
@@ -363,6 +364,13 @@ EditorConfigData EditorConfig::Read() {
         if (value > 0.0f) config.ui_scale = value;
     }
 
+    if (editor_config.HasMember("theme") && editor_config["theme"].IsString()) {
+        config.theme = EditorTheme::Normalize(editor_config["theme"].GetString());
+    }
+    if (editor_config.HasMember("font") && editor_config["font"].IsString()) {
+        config.font = std::string_view(editor_config["font"].GetString()) == "inter" ? "inter" : "platform";
+    }
+
     if (editor_config.HasMember("reference_width") &&
         editor_config["reference_width"].IsInt()) {
         const int value = editor_config["reference_width"].GetInt();
@@ -425,6 +433,10 @@ void EditorConfig::Write(const EditorConfigData &config) {
     writer.Bool(config.window_maximized);
     writer.Key("ui_scale");
     writer.Double(config.ui_scale);
+    writer.Key("theme");
+    writer.String(config.theme.c_str());
+    writer.Key("font");
+    writer.String(config.font.c_str());
     writer.Key("reference_width");
     writer.Int(config.reference_width);
     writer.Key("reference_height");
