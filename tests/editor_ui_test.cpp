@@ -13,6 +13,7 @@
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
 #include <SDL3/SDL.h>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -102,8 +103,11 @@ void RegisterTests(ImGuiTestEngine *engine) {
 void Run(const std::filesystem::path &project) {
     // Templates resolve from the repository root, as when the editor runs there.
     std::filesystem::current_path(project.parent_path().parent_path().parent_path());
+    // A fresh folder per run (SDL's tick counter is still 0 before SDL starts,
+    // so it cannot name one): a failed run's leftovers never block the next.
     const std::filesystem::path new_project_location =
-        std::filesystem::temp_directory_path() / ("pocket2d-editor-ui-" + std::to_string(SDL_GetTicksNS()));
+        std::filesystem::temp_directory_path() /
+        ("pocket2d-editor-ui-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(new_project_location);
     ResourcePath::SetResourcesRootPath(project);
     Engine edit;
