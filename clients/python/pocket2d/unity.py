@@ -634,8 +634,8 @@ def import_unity(assets, scene, project, scene_name="world", skip_texture_folder
     textures = {}
     actors = []
     used_names = defaultdict(int)
-    stats = {"tilemaps": 0, "tiles": 0, "sprite_actors": 0, "sprites": 0, "colliders": 0, "entities": 0,
-             "points": 0, "skipped": 0, "triggers_skipped": 0}
+    stats = {"tilemaps": 0, "hidden_tilemaps": 0, "tiles": 0, "sprite_actors": 0, "sprites": 0, "colliders": 0,
+             "entities": 0, "points": 0, "skipped": 0, "triggers_skipped": 0}
     layers = sorting_layers(assets)
     next_uid = 1000
     for key, (cls, fields) in sorted(world.objects.items(), key=lambda item: str(item[0])):
@@ -650,10 +650,14 @@ def import_unity(assets, scene, project, scene_name="world", skip_texture_folder
                           and (f.get("m_GameObject") or {}).get("fileID") == go_key[-1]), None)
         renderer = next((f for c, f in comps if c == TILEMAP_RENDERER), {})
         tiles = fields.get("m_Tiles") or []
-        if (transform is None or not world.active(transform) or int(renderer.get("m_Enabled", 1)) == 0
-                or int(fields.get("m_Enabled", 1)) == 0 or not tiles):
+        if transform is None or not tiles:
             stats["skipped"] += 1
             continue
+        # An inactive tilemap or one with its renderer off is content gameplay
+        # reveals later (a melting spring, an altar's element ground): it is
+        # imported as a disabled Tilemap.
+        hidden = (not world.active(transform) or int(renderer.get("m_Enabled", 1)) == 0
+                  or int(fields.get("m_Enabled", 1)) == 0)
         collider = any(c == TILEMAP_COLLIDER and int(f.get("m_Enabled", 1)) for c, f in comps)
         order = sort_key(layers, renderer)
         origin_x, origin_y = world.world_position(transform)
@@ -702,12 +706,14 @@ def import_unity(assets, scene, project, scene_name="world", skip_texture_folder
                 world_x = origin_x + cell[0] + 0.5
                 world_y = -(origin_y + cell[1] + 0.5)
                 next_uid += 1
+                prop = {"type": "SpriteRenderer", "sprite": image_name, "pivot_x": pivot[0],
+                        "pivot_y": 1.0 - pivot[1], "scale_x": PIXELS_PER_UNIT / unit,
+                        "scale_y": PIXELS_PER_UNIT / unit, "sorting_order": order, "auto_sorting_order": True}
+                if hidden:
+                    prop["enabled"] = False     # hidden with its tilemap
                 actors.append({"uid": next_uid, "name": "%s_prop" % name, "components": {
                     "transform": {"type": "Transform", "x": round(world_x, 4), "y": round(world_y, 4)},
-                    "sprite": {"type": "SpriteRenderer", "sprite": image_name, "pivot_x": pivot[0],
-                               "pivot_y": 1.0 - pivot[1], "scale_x": PIXELS_PER_UNIT / unit,
-                               "scale_y": PIXELS_PER_UNIT / unit, "sorting_order": order,
-                               "auto_sorting_order": True}}})
+                    "sprite": prop}})
                 stats["sprite_actors"] += 1
                 continue
             if atlas_key not in atlas_index:
@@ -751,9 +757,13 @@ def import_unity(assets, scene, project, scene_name="world", skip_texture_folder
         (project / "maps").mkdir(parents=True, exist_ok=True)
         (project / "maps" / (map_name + ".tilemap.json")).write_text(json.dumps(tilemap, separators=(",", ":")))
         next_uid += 1
+        component = {"type": "Tilemap", "map_resource": map_name + ".tilemap.json"}
+        if hidden:
+            component["enabled"] = False
+            stats["hidden_tilemaps"] += 1
         actors.append({"uid": next_uid, "name": map_name, "components": {
             "transform": {"type": "Transform", "x": round(origin_x + xmin, 4), "y": round(-(origin_y + ymax + 1), 4)},
-            "map": {"type": "Tilemap", "map_resource": map_name + ".tilemap.json"}}})
+            "map": component}})
         stats["tilemaps"] += 1
         stats["tiles"] += len(cells)
     index = scene_index(world)

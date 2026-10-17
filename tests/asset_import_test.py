@@ -90,6 +90,14 @@ def unity_scene():
             "      e11: 1\n  m_TileColorArray:\n  - m_RefCount: 2\n    m_Data: {r: 1, g: 1, b: 1, a: 1}\n"
             "--- !u!483693784 &23\nTilemapRenderer:\n  m_GameObject: {fileID: 20}\n  m_Enabled: 1\n  m_SortingOrder: 2\n"
             "--- !u!19719996 &24\nTilemapCollider2D:\n  m_GameObject: {fileID: 20}\n  m_Enabled: 1\n" +
+            game_object % (70, "Spring") + transform % (71, 70, 2, 6, 11) +
+            "--- !u!1839735485 &72\nTilemap:\n  m_GameObject: {fileID: 70}\n  m_Enabled: 1\n  m_Tiles:\n" +
+            tile % (0, 1, 1) +
+            "  m_TileAssetArray:\n" + reference % (11400000, g["wall"], 2) + reference % (11400000, g["floor"], 2) +
+            "  m_TileSpriteArray:\n" + reference % (101, g["tiles"], 3) + reference % (102, g["tiles"], 3) +
+            "  m_TileMatrixArray:\n  - m_RefCount: 1\n    m_Data:\n      e00: 1\n      e01: 0\n      e10: 0\n"
+            "      e11: 1\n  m_TileColorArray:\n  - m_RefCount: 1\n    m_Data: {r: 1, g: 1, b: 1, a: 1}\n"
+            "--- !u!483693784 &73\nTilemapRenderer:\n  m_GameObject: {fileID: 70}\n  m_Enabled: 0\n  m_SortingOrder: 2\n" +
             game_object % (30, "Rock") + transform % (31, 30, 5, -1, 0) +
             "--- !u!212 &32\nSpriteRenderer:\n  m_GameObject: {fileID: 30}\n  m_Enabled: 1\n  m_SortingOrder: 0\n"
             "  m_Sprite: {fileID: 21300000, guid: %s, type: 3}\n  m_Color: {r: 1, g: 1, b: 1, a: 1}\n" % g["rock"] +
@@ -134,6 +142,8 @@ def run_unity(game, root):
     walls = json.loads((project / "maps/Walls_1.tilemap.json").read_text())
     check((walls["width"], walls["height"]) == (2, 1) and walls["layers"]["solid"]["cells"] == [1, 0] and
           walls["layers"]["ground"]["cells"] == [0, 2], "Tile asset colliders pick solid vs ground: %r" % walls["layers"])
+    check(actors["Spring_1"]["map"].get("enabled") is False and "enabled" not in actors["Walls_1"]["map"],
+          "a tilemap with its renderer off is imported disabled: %r" % actors["Spring_1"]["map"])
     check(actors["Walls_1"]["transform"]["x"] == 2 and actors["Walls_1"]["transform"]["y"] == -4,
           "tilemap origin flips y: %r" % actors["Walls_1"]["transform"])
     rock = actors["Rock"]["sprite"]
