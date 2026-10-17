@@ -13,6 +13,10 @@
 struct SDL_Renderer;
 struct SDL_Texture;
 
+// How an image combines with what is drawn under it. Add sums its colour
+// (scaled by alpha) onto the destination, for glows and flashes.
+enum class ImageBlend : std::uint8_t { Normal, Add };
+
 struct ImageDrawRequest {
     // basic image name and world-space transform
     // 基本图片名和世界坐标变换
@@ -35,6 +39,7 @@ struct ImageDrawRequest {
     int b = 255;
     int a = 255;
     int sorting_order = 0;
+    ImageBlend blend = ImageBlend::Normal;
     // Secondary draw key within one sorting_order (ascending; world y for
     // auto-sorted sprites, so lower sprites draw in front). Ties keep
     // submission order.

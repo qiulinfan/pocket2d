@@ -200,13 +200,11 @@ Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段�
 | 小地图/全屏地图要在 Lua 里逐格取色绘制（PT） | `Tilemap:ComputeMap`：按地形名配色，每 `step` 格一个像素写入 `dynamic:` 图片 |
 | 没有战争迷雾，探索状态无法存档（PT） | `RevealMap`/`IsRevealed`，`ComputeMap` 的 `fog` 颜色，`SaveRevealed`/`LoadRevealed` 以游程文本存取 |
 | 生成数据无法按需加载：脚本取不到项目目录，全部角色数据放进 `component_types` 启动即加载约 100 MB Lua 堆，超出 agent 的 64 MiB 预算（BVN） | `Application.GetProjectDirectory()`：可信脚本用 `io`/`load` 按需读取项目内数据文件 |
+| 没有加色混合，原作以 Flash ADD 叠加的命中/防御/必杀特效只能把亮度写入 alpha 近似，亮场景上发灰（BVN） | `Image.DrawEx`/`Image.DrawUIScaled` 可选 `blend` 参数 `"add"`，所有渲染后端一致，保持排序 |
 
 （VR = Village_Rim，PT = PocketTerraria，BVN = BleachVsNaruto，5DPLAY《死神vs火影》的移植。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
 ## 仍存在的缺口与暂不修改的原因
-
-- **没有加色/滤色等混合模式（BVN）**：原作命中特效以 ADD 混合叠加。BVN 在转换时把这类特效
-  的亮度写入 alpha，用普通混合近似；需要时再给 `Image.DrawEx` 加混合模式。
 
 - **导入近似**：Unity Sprite 形状碰撞按整格；有缩放/旋转的 tilemap、九宫格精灵和 trigger 只记录在
   `import_report.json`。

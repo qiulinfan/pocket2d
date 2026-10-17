@@ -131,6 +131,15 @@ bool CompareParticleBatchRequests(const ParticleBatchRequest &a,
     return a.sorting_order < b.sorting_order;
 }
 
+// Applies a request's blend to its texture and returns the texture's own mode
+// (normal or a light map's multiply) to restore after the draw.
+SDL_BlendMode BeginRequestBlend(SDL_Texture *texture, ImageBlend blend) {
+    SDL_BlendMode own = SDL_BLENDMODE_BLEND;
+    SDL_GetTextureBlendMode(texture, &own);
+    if (blend == ImageBlend::Add) SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_ADD);
+    return own;
+}
+
 bool ShouldDiscardSceneRequest(const ImageDrawRequest &request) {
     if (request.a <= 0) return true;
     if (request.scale_x == 0.0f) return true;
@@ -863,6 +872,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                                static_cast<Uint8>(ClampByte(request.g)),
                                static_cast<Uint8>(ClampByte(request.b)));
         SDL_SetTextureAlphaMod(texture, static_cast<Uint8>(ClampByte(request.a)));
+        const SDL_BlendMode texture_blend = BeginRequestBlend(texture, request.blend);
 
         SDLRenderHelper::SDL_RenderTextureRotated(
             Actor::kInvalidUID, "", renderer, texture, source_rect_ptr, &dst,
@@ -871,6 +881,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
 
         SDL_SetTextureColorMod(texture, 255, 255, 255);
         SDL_SetTextureAlphaMod(texture, 255);
+        SDL_SetTextureBlendMode(texture, texture_blend);
     };
 
     SDL_SetRenderScale(renderer, safe_zoom * output_scale_x,
@@ -932,6 +943,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
                                static_cast<Uint8>(ClampByte(request.g)),
                                static_cast<Uint8>(ClampByte(request.b)));
         SDL_SetTextureAlphaMod(texture, static_cast<Uint8>(ClampByte(request.a)));
+        const SDL_BlendMode texture_blend = BeginRequestBlend(texture, request.blend);
 
         SDLRenderHelper::SDL_RenderTextureRotated(Actor::kInvalidUID, "", renderer,
                                           texture, source_rect_ptr,
@@ -939,6 +951,7 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
 
         SDL_SetTextureColorMod(texture, 255, 255, 255);
         SDL_SetTextureAlphaMod(texture, 255);
+        SDL_SetTextureBlendMode(texture, texture_blend);
     }
 
     Queues().scene_draw_requests.clear();

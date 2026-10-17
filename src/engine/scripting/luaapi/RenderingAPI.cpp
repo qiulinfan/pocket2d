@@ -34,6 +34,14 @@ std::uint64_t InterpolationKey(const DrawKey &key) {
     return Renderer::InterpolationKey(std::get<std::string_view>(*key));
 }
 
+// The optional blend argument of Image.DrawEx/DrawUIScaled: nil or "normal"
+// alpha blends, "add" adds the image's light to what is under it.
+ImageBlend ParseBlend(const std::optional<std::string_view> &blend, const char *function) {
+    if (!blend || *blend == "normal") return ImageBlend::Normal;
+    if (*blend == "add") return ImageBlend::Add;
+    throw std::invalid_argument(std::string(function) + " blend must be nil, \"normal\" or \"add\"");
+}
+
 void CppImageDrawUI(const std::string &image_name, float x, float y) {
     ImageDrawRequest request;
     request.image_name = image_name;
@@ -73,7 +81,8 @@ void CppImageDrawUIEx(const std::string &image_name, float x, float y, float r,
 
 // UI image scaled from its top-left corner (negative scales mirror).
 void CppImageDrawUIScaled(const std::string &image_name, float x, float y, float scale_x, float scale_y,
-                          float r, float g, float b, float a, float sorting_order) {
+                          float r, float g, float b, float a, float sorting_order,
+                          std::optional<std::string_view> blend) {
     if (!std::isfinite(scale_x) || !std::isfinite(scale_y))
         throw std::invalid_argument("Image.DrawUIScaled scale must be finite");
     ImageDrawRequest request;
@@ -89,6 +98,7 @@ void CppImageDrawUIScaled(const std::string &image_name, float x, float y, float
     request.b = ClampByteInt(DowncastToInt(b));
     request.a = ClampByteInt(DowncastToInt(a));
     request.sorting_order = DowncastToInt(sorting_order);
+    request.blend = ParseBlend(blend, "Image.DrawUIScaled");
     Renderer::QueueUIImageDraw(request);
 }
 
@@ -121,7 +131,8 @@ void CppImageDraw(const std::string &image_name, float x, float y, DrawKey key) 
 void CppImageDrawEx(const std::string &image_name, float x, float y,
                     float rotation_degrees, float scale_x, float scale_y,
                     float pivot_x, float pivot_y, float r, float g, float b,
-                    float a, float sorting_order, DrawKey key) {
+                    float a, float sorting_order, DrawKey key,
+                    std::optional<std::string_view> blend) {
     ImageDrawRequest request;
     request.image_name = image_name;
     request.x = x;
@@ -137,6 +148,7 @@ void CppImageDrawEx(const std::string &image_name, float x, float y,
     request.a = ClampByteInt(DowncastToInt(a));
     request.sorting_order = DowncastToInt(sorting_order);
     request.interpolation_key = InterpolationKey(key);
+    request.blend = ParseBlend(blend, "Image.DrawEx");
     Renderer::QueueSceneImageDraw(request);
 }
 
