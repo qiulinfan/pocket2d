@@ -8,6 +8,8 @@
 #include "SDL3_image/SDL_image.h"
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <filesystem>
@@ -43,6 +45,7 @@ struct DirectoryListingCache {
 struct ProjectPanelState {
     std::filesystem::path selected_directory;
     std::filesystem::path selected_entry;
+    float tile_size = 80.0f;  // icon tile width, set by the size slider
 };
 
 // File type classification drives icon choice plus double-click behavior.
@@ -61,9 +64,7 @@ enum class EntryKind {
 ImVec4 Alpha(const ImVec4 &color, float alpha) { return ImVec4(color.x, color.y, color.z, alpha); }
 
 struct EntryVisualStyle {
-    const char *icon_asset = "";
-    const char *icon_code = "";
-    const char *type_label = "";
+    const char *badge = "";  // type badge on file icons
     ImVec4 color = ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
 };
 
@@ -170,25 +171,87 @@ EntryKind ClassifyEntry(const ProjectEntry &entry) {
 // map a logical entry kind to its tile visuals
 EntryVisualStyle GetEntryVisualStyle(EntryKind kind) {
     switch (kind) {
-    case EntryKind::Directory:
-        return {"", "DIR", "Directory", ImVec4(0.95f, 0.81f, 0.37f, 1.0f)};
-    case EntryKind::Audio:
-        return {"audio", "AUD", "Audio", ImVec4(0.45f, 0.88f, 0.58f, 1.0f)};
-    case EntryKind::Lua:
-        return {"component", "LUA", "Lua", ImVec4(0.44f, 0.76f, 0.98f, 1.0f)};
-    case EntryKind::Config:
-        return {"config", "CFG", "Config", ImVec4(0.70f, 0.74f, 0.79f, 1.0f)};
-    case EntryKind::Template:
-        return {"template", "TPL", "Template", ImVec4(0.87f, 0.69f, 0.98f, 1.0f)};
-    case EntryKind::Image:
-        return {"image", "IMG", "Image", ImVec4(0.99f, 0.68f, 0.35f, 1.0f)};
-    case EntryKind::Font:
-        return {"", "TTF", "Font", ImVec4(0.95f, 0.82f, 0.54f, 1.0f)};
-    case EntryKind::Scene:
-        return {"scene", "SCN", "Scene", ImVec4(0.50f, 0.90f, 0.86f, 1.0f)};
-    default:
-        return {"", "FILE", "File", ImVec4(0.85f, 0.85f, 0.85f, 1.0f)};
+    case EntryKind::Directory: return {"", ImVec4(0.93f, 0.74f, 0.33f, 1.0f)};
+    case EntryKind::Audio: return {"AUDIO", ImVec4(0.38f, 0.80f, 0.52f, 1.0f)};
+    case EntryKind::Lua: return {"LUA", ImVec4(0.40f, 0.62f, 0.98f, 1.0f)};
+    case EntryKind::Config: return {"CFG", ImVec4(0.62f, 0.66f, 0.74f, 1.0f)};
+    case EntryKind::Template: return {"TPL", ImVec4(0.74f, 0.55f, 0.96f, 1.0f)};
+    case EntryKind::Image: return {"IMG", ImVec4(0.98f, 0.60f, 0.30f, 1.0f)};
+    case EntryKind::Font: return {"FONT", ImVec4(0.92f, 0.47f, 0.55f, 1.0f)};
+    case EntryKind::Scene: return {"SCENE", ImVec4(0.30f, 0.80f, 0.78f, 1.0f)};
+    default: return {"FILE", ImVec4(0.62f, 0.66f, 0.74f, 1.0f)};
     }
+}
+
+// Vector icons for the Project browser, drawn to fit a square.
+ImU32 Shade(const ImVec4 &color, float factor, float alpha = 1.0f) {
+    return ImGui::GetColorU32(ImVec4(color.x * factor, color.y * factor, color.z * factor, alpha));
+}
+
+// A flat folder: a back panel with its tab and a lighter front.
+void DrawFolderIcon(ImDrawList *draw_list, const ImVec2 &min, const ImVec2 &max, const ImVec4 &color) {
+    const float side = std::min(max.x - min.x, max.y - min.y);
+    const float w = side * 0.86f, h = side * 0.68f;
+    const ImVec2 o((min.x + max.x - w) * 0.5f, (min.y + max.y - h) * 0.5f);
+    const float r = side * 0.07f;
+    draw_list->AddRectFilled(o, ImVec2(o.x + w * 0.42f, o.y + h * 0.3f), Shade(color, 0.78f), r);
+    draw_list->AddRectFilled(ImVec2(o.x, o.y + h * 0.12f), ImVec2(o.x + w, o.y + h), Shade(color, 0.78f), r);
+    draw_list->AddRectFilled(ImVec2(o.x, o.y + h * 0.26f), ImVec2(o.x + w, o.y + h), Shade(color, 1.0f), r);
+}
+
+// A page with a folded corner, a few text lines and a coloured type badge.
+void DrawFileIcon(ImDrawList *draw_list, const ImVec2 &min, const ImVec2 &max, const ImVec4 &color,
+                  const char *badge) {
+    const EditorPalette &theme = EditorTheme::Current();
+    const float side = std::min(max.x - min.x, max.y - min.y);
+    const float h = side * 0.9f, w = h * 0.76f;
+    const float l = (min.x + max.x - w) * 0.5f, t = (min.y + max.y - h) * 0.5f;
+    const float r = l + w, b = t + h, fold = w * 0.3f, radius = side * 0.06f;
+    const ImVec4 page = theme.light ? ImVec4(0.98f, 0.98f, 0.99f, 1.0f) : ImVec4(0.84f, 0.86f, 0.91f, 1.0f);
+
+    draw_list->PathClear();
+    draw_list->PathArcToFast(ImVec2(l + radius, t + radius), radius, 6, 9);
+    draw_list->PathLineTo(ImVec2(r - fold, t));
+    draw_list->PathLineTo(ImVec2(r, t + fold));
+    draw_list->PathArcToFast(ImVec2(r - radius, b - radius), radius, 0, 3);
+    draw_list->PathArcToFast(ImVec2(l + radius, b - radius), radius, 3, 6);
+    draw_list->PathFillConvex(Shade(page, 1.0f));
+    draw_list->AddTriangleFilled(ImVec2(r - fold, t), ImVec2(r - fold, t + fold), ImVec2(r, t + fold),
+                                 Shade(page, 0.72f));
+    if (theme.light) {
+        draw_list->PathClear();
+        draw_list->PathArcToFast(ImVec2(l + radius, t + radius), radius, 6, 9);
+        draw_list->PathLineTo(ImVec2(r - fold, t));
+        draw_list->PathLineTo(ImVec2(r, t + fold));
+        draw_list->PathArcToFast(ImVec2(r - radius, b - radius), radius, 0, 3);
+        draw_list->PathArcToFast(ImVec2(l + radius, b - radius), radius, 3, 6);
+        draw_list->PathStroke(ImGui::GetColorU32(theme.border), ImDrawFlags_Closed, 1.0f);
+    }
+    const float line = std::max(1.0f, side * 0.035f);
+    for (int i = 0; i < 3; ++i) {
+        const float y = t + h * (0.24f + 0.12f * static_cast<float>(i));
+        const float end = i == 0 ? r - fold - w * 0.08f : r - w * (i == 2 ? 0.34f : 0.16f);
+        draw_list->AddRectFilled(ImVec2(l + w * 0.16f, y), ImVec2(end, y + line), Shade(page, 0.7f), line);
+    }
+
+    ImFont *font = ImGui::GetFont();
+    const float font_size = std::max(8.0f, std::min(ImGui::GetFontSize() * 0.68f, side * 0.17f));
+    const ImVec2 text = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, badge);
+    const ImVec2 badge_min(l + w * 0.12f, b - h * 0.16f - text.y - 4.0f);
+    const ImVec2 badge_max(std::min(r + w * 0.1f, badge_min.x + text.x + 8.0f), badge_min.y + text.y + 4.0f);
+    draw_list->AddRectFilled(badge_min, badge_max, Shade(color, 1.0f), 4.0f);
+    draw_list->AddText(font, font_size, ImVec2(badge_min.x + 4.0f, badge_min.y + 2.0f),
+                       IM_COL32(255, 255, 255, 255), badge);
+}
+
+// A small folder before a tree row's name (rows are labelled with FolderRowLabel).
+void DrawTreeFolder() {
+    const ImVec2 row_min = ImGui::GetItemRectMin(), row_max = ImGui::GetItemRectMax();
+    const float size = ImGui::GetFontSize();
+    const float x = row_min.x + ImGui::GetTreeNodeToLabelSpacing();
+    const float y = (row_min.y + row_max.y - size) * 0.5f;
+    DrawFolderIcon(ImGui::GetWindowDrawList(), ImVec2(x, y), ImVec2(x + size, y + size),
+                   GetEntryVisualStyle(EntryKind::Directory).color);
 }
 
 // Bridge Project-panel entry kinds into the external-editor configuration enum
@@ -215,15 +278,6 @@ EditorExternalFileType ToExternalFileType(EntryKind kind) {
     }
 }
 
-struct IconTextureCache {
-    SDL_Renderer *renderer = nullptr;
-    std::unordered_map<std::string, SDL_Texture *> textures;
-};
-
-IconTextureCache &GetIconTextureCache() {
-    static IconTextureCache cache;
-    return cache;
-}
 
 ImageTextureCache &GetImageTextureCache() {
     static ImageTextureCache cache;
@@ -267,14 +321,6 @@ void DestroyTextureCache(ImageTextureCache &cache) {
     cache.textures.clear();
 }
 
-void DestroyIconTextureCache(IconTextureCache &cache) {
-    for (const auto &entry : cache.textures) {
-        if (entry.second != nullptr) {
-            SDL_DestroyTexture(entry.second);
-        }
-    }
-    cache.textures.clear();
-}
 
 const DirectoryListing &GetCachedDirectoryListing(
     const std::filesystem::path &directory_path, bool force_refresh = false) {
@@ -309,13 +355,6 @@ void ResetProjectPanelForRoot(const std::filesystem::path &resources_root) {
     GetExpandedSpritesheetState().clear();
 }
 
-void ResetIconTextureCacheIfRendererChanged(SDL_Renderer *renderer) {
-    IconTextureCache &cache = GetIconTextureCache();
-    if (cache.renderer == renderer) return;
-
-    DestroyIconTextureCache(cache);
-    cache.renderer = renderer;
-}
 
 void ResetImageTextureCacheIfRendererChanged(SDL_Renderer *renderer) {
     ImageTextureCache &cache = GetImageTextureCache();
@@ -325,43 +364,6 @@ void ResetImageTextureCacheIfRendererChanged(SDL_Renderer *renderer) {
     cache.renderer = renderer;
 }
 
-std::string ResolveIconPath(const std::string &icon_asset) {
-    if (icon_asset.empty()) return "";
-    // Editor-only icons live under .engine so player-facing resources stay clean.
-    std::string path = ResourcePath::ResolveResourcePath(
-        ResourcePath::EngineSystemImagesRoot(), icon_asset, {".png"});
-    if (path.empty()) {
-        // Backward compatibility while older projects still keep icons in
-        // resources/images/system.
-        path = ResourcePath::ResolveResourcePath(
-            ResourcePath::ResourceSubdirectory("images/system"), icon_asset,
-            {".png"});
-    }
-    return path;
-}
-
-// Lazily load one icon texture and cache it for future tiles
-SDL_Texture *GetIconTexture(SDL_Renderer *renderer, const std::string &icon_asset) {
-    if (renderer == nullptr || icon_asset.empty()) return nullptr;
-
-    ResetIconTextureCacheIfRendererChanged(renderer);
-    IconTextureCache &cache = GetIconTextureCache();
-
-    const auto found = cache.textures.find(icon_asset);
-    if (found != cache.textures.end()) {
-        return found->second;
-    }
-
-    const std::string icon_path = ResolveIconPath(icon_asset);
-    if (icon_path.empty()) {
-        cache.textures.emplace(icon_asset, nullptr);
-        return nullptr;
-    }
-
-    SDL_Texture *texture = IMG_LoadTexture(renderer, icon_path.c_str());
-    cache.textures.emplace(icon_asset, texture);
-    return texture;
-}
 
 SDL_Texture *GetImageTexture(SDL_Renderer *renderer, const std::filesystem::path &image_path) {
     if (renderer == nullptr || image_path.empty()) return nullptr;
@@ -600,8 +602,11 @@ bool IsSceneFile(const ProjectEntry &entry) {
     return ClassifyEntry(entry) == EntryKind::Scene;
 }
 
-std::string BuildTreeLabel(const ProjectEntry &entry) {
-    return "[DIR] " + entry.path.filename().string();
+// Tree rows leave room before the name for a folder glyph (DrawTreeFolder).
+std::string FolderRowLabel(const std::string &name) {
+    const float room = ImGui::GetFontSize() * 1.25f;
+    const int spaces = static_cast<int>(std::ceil(room / std::max(1.0f, ImGui::CalcTextSize(" ").x)));
+    return std::string(static_cast<std::size_t>(spaces), ' ') + name;
 }
 
 std::string BuildDirectoryCaption(const std::filesystem::path &resources_root,
@@ -791,8 +796,9 @@ void RenderDirectoryTree(const std::filesystem::path &resources_root,
         }
 
         const std::string node_id = relative_path.string();
-        const std::string label = BuildTreeLabel(entry);
+        const std::string label = FolderRowLabel(entry.path.filename().string());
         const bool is_open = ImGui::TreeNodeEx(node_id.c_str(), node_flags, "%s", label.c_str());
+        DrawTreeFolder();
         if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
             selected_directory = entry.path;
         }
@@ -830,64 +836,40 @@ TileRenderResult RenderEntryTile(const ProjectEntry &entry,
     ImDrawList *draw_list = ImGui::GetWindowDrawList();
     const ImVec2 tile_max(tile_min.x + tile_size.x, tile_min.y + tile_size.y);
 
+    // No frame at rest: a soft rounded highlight on hover and selection.
     const EditorPalette &theme = EditorTheme::Current();
-    const ImVec4 tile_bg = selected  ? theme.selection
-                                     : hovered ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered)
-                                               : theme.tile;
-    const ImVec4 tile_border = selected ? theme.accent
-                                        : hovered ? theme.text_dim
-                                                  : theme.border;
-    draw_list->AddRectFilled(tile_min, tile_max, ImGui::GetColorU32(tile_bg), 8.0f);
-    draw_list->AddRect(tile_min, tile_max, ImGui::GetColorU32(tile_border), 8.0f);
+    if (selected || hovered) {
+        const ImVec4 highlight = selected ? theme.selection : Alpha(ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered), 0.7f);
+        draw_list->AddRectFilled(tile_min, tile_max, ImGui::GetColorU32(highlight), 8.0f);
+    }
 
-    // Top icon block: prefer a loaded PNG icon, otherwise fall back to text.
-    const ImVec2 icon_min(tile_min.x + 10.0f, tile_min.y + 10.0f);
-    const ImVec2 icon_max(tile_max.x - 10.0f, tile_min.y + tile_height * 0.60f);
-    draw_list->AddRectFilled(icon_min, icon_max, ImGui::GetColorU32(style.color), 6.0f);
+    const float pad = std::max(4.0f, tile_width * 0.08f);
+    const float name_height = ImGui::GetTextLineHeight();
+    const ImVec2 icon_min(tile_min.x + pad, tile_min.y + pad);
+    const ImVec2 icon_max(tile_max.x - pad, tile_max.y - name_height - pad * 1.2f);
     const bool spritesheet_expandable =
         entry_kind == EntryKind::Image && IsNonTrivialSpritesheet(spritesheet_spec);
-    SDL_Texture *image_texture = nullptr;
-    if (entry_kind == EntryKind::Image) {
-        image_texture = GetImageTexture(renderer, entry.path);
-    }
-    SDL_Texture *icon_texture = GetIconTexture(renderer, style.icon_asset);
-
+    SDL_Texture *image_texture = entry_kind == EntryKind::Image ? GetImageTexture(renderer, entry.path) : nullptr;
     if (image_texture != nullptr) {
-        const ImVec2 image_min(icon_min.x + 6.0f, icon_min.y + 6.0f);
-        const ImVec2 image_max(icon_max.x - 6.0f, icon_max.y - 6.0f);
-        draw_list->AddRectFilled(image_min, image_max, ImGui::GetColorU32(theme.frame),
-                                 4.0f);
-        DrawTextureFitCentered(draw_list, image_texture, image_min, image_max);
-    } else if (icon_texture != nullptr) {
-        const ImVec2 image_min(icon_min.x + 8.0f, icon_min.y + 6.0f);
-        const ImVec2 image_max(icon_max.x - 8.0f, icon_max.y - 22.0f);
-        DrawTextureFitCentered(draw_list, icon_texture, image_min, image_max);
-
-        const ImVec2 type_size = ImGui::CalcTextSize(style.type_label);
-        const ImVec2 type_pos((icon_min.x + icon_max.x - type_size.x) * 0.5f, icon_max.y - type_size.y - 4.0f);
-        draw_list->AddText(
-            type_pos,
-            ImGui::GetColorU32(ImVec4(0.12f, 0.12f, 0.13f, 1.0f)),
-            style.type_label);
+        draw_list->AddRectFilled(icon_min, icon_max, ImGui::GetColorU32(theme.frame), 6.0f);
+        DrawTextureFitCentered(draw_list, image_texture, ImVec2(icon_min.x + 3.0f, icon_min.y + 3.0f),
+                               ImVec2(icon_max.x - 3.0f, icon_max.y - 3.0f));
+    } else if (entry_kind == EntryKind::Directory) {
+        DrawFolderIcon(draw_list, icon_min, icon_max, style.color);
     } else {
-        const ImVec2 icon_size = ImGui::CalcTextSize(style.icon_code);
-        const ImVec2 icon_pos((icon_min.x + icon_max.x - icon_size.x) * 0.5f,
-                              (icon_min.y + icon_max.y - icon_size.y) * 0.5f);
-        draw_list->AddText(
-            icon_pos,
-            ImGui::GetColorU32(ImVec4(0.12f, 0.12f, 0.13f, 1.0f)),
-            style.icon_code);
+        DrawFileIcon(draw_list, icon_min, icon_max, style.color, style.badge);
     }
 
     const std::string file_name = entry.path.filename().string();
-    const std::string visible_name = TruncateTextToWidth(file_name, tile_width - 12.0f);
+    const std::string visible_name = TruncateTextToWidth(file_name, tile_width - 6.0f);
     const ImVec2 name_size = ImGui::CalcTextSize(visible_name.c_str());
-    const ImVec2 name_pos((tile_min.x + tile_max.x - name_size.x) * 0.5f, tile_max.y - 24.0f);
+    const ImVec2 name_pos((tile_min.x + tile_max.x - name_size.x) * 0.5f, tile_max.y - name_height - pad * 0.5f);
     draw_list->AddText(name_pos, ImGui::GetColorU32(theme.text), visible_name.c_str());
+    if (hovered && visible_name != file_name) ImGui::SetTooltip("%s", file_name.c_str());
 
     if (spritesheet_expandable) {
-        const ImVec2 toggle_min(tile_max.x - 28.0f, tile_min.y + 8.0f);
-        const ImVec2 toggle_max(tile_max.x - 10.0f, tile_min.y + 26.0f);
+        const ImVec2 toggle_min(icon_max.x - 18.0f, icon_min.y + 2.0f);
+        const ImVec2 toggle_max(icon_max.x - 2.0f, icon_min.y + 18.0f);
         const bool toggle_hovered =
             ImGui::IsMouseHoveringRect(toggle_min, toggle_max);
         if (toggle_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -901,8 +883,8 @@ TileRenderResult RenderEntryTile(const ProjectEntry &entry,
             std::to_string(spritesheet_spec.rows) + "x" +
             std::to_string(spritesheet_spec.columns);
         const ImVec2 badge_text_size = ImGui::CalcTextSize(badge_text.c_str());
-        const ImVec2 badge_min(icon_min.x + 6.0f,
-                               icon_max.y - badge_text_size.y - 10.0f);
+        const ImVec2 badge_min(icon_min.x + 3.0f,
+                               icon_max.y - badge_text_size.y - 9.0f);
         const ImVec2 badge_max(badge_min.x + badge_text_size.x + 10.0f,
                                badge_min.y + badge_text_size.y + 6.0f);
         draw_list->AddRectFilled(badge_min, badge_max,
@@ -1059,9 +1041,9 @@ void RenderDirectoryGrid(const std::filesystem::path &resources_root,
         return;
     }
 
-    constexpr float kTileWidth = 116.0f;
-    constexpr float kTileHeight = 118.0f;
-    constexpr float kTileSpacing = 12.0f;
+    const float kTileWidth = GetProjectPanelState().tile_size;
+    const float kTileHeight = kTileWidth + ImGui::GetTextLineHeight() + 4.0f;
+    constexpr float kTileSpacing = 6.0f;
 
     const float available_width = ImGui::GetContentRegionAvail().x;
     const int columns = std::max( 1, static_cast<int>((available_width + kTileSpacing) / (kTileWidth + kTileSpacing)));
@@ -1147,7 +1129,6 @@ ProjectPanelResult RenderProjectPanel( const std::filesystem::path &resources_ro
     // lives on disk, and open requests are returned to the host as a result.
     ProjectPanelResult result;
     ResetProjectPanelForRoot(resources_root);
-    ResetIconTextureCacheIfRendererChanged(renderer);
     ResetImageTextureCacheIfRendererChanged(renderer);
 
     const bool window_visible = ImGui::Begin("Project");
@@ -1161,6 +1142,12 @@ ProjectPanelResult RenderProjectPanel( const std::filesystem::path &resources_ro
         InvalidateDirectoryListings();
         DestroyTextureCache(GetImageTextureCache());
     }
+    // Icon size, like the slider at the bottom of Unity's Project window.
+    const float slider_width = 120.0f;
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionMax().x - slider_width));
+    ImGui::SetNextItemWidth(slider_width);
+    ImGui::SliderFloat("##project_icon_size", &GetProjectPanelState().tile_size, 56.0f, 128.0f, "");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Icon size");
     ImGui::Separator();
 
     const DirectoryListing &root_listing =
@@ -1202,7 +1189,8 @@ ProjectPanelResult RenderProjectPanel( const std::filesystem::path &resources_ro
         if (state.selected_directory == normalized_root) {
             root_flags |= ImGuiTreeNodeFlags_Selected;
         }
-        const bool root_open = ImGui::TreeNodeEx("project_root", root_flags, "[DIR] Project");
+        const bool root_open = ImGui::TreeNodeEx("project_root", root_flags, "%s", FolderRowLabel("Project").c_str());
+        DrawTreeFolder();
         if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
             state.selected_directory = normalized_root;
         }
@@ -1248,7 +1236,6 @@ void InvalidateProjectPanelCache() {
 
     GetExpandedSpritesheetState().clear();
     GetSpritesheetPopupState() = SpritesheetPopupState{};
-    DestroyIconTextureCache(GetIconTextureCache());
     DestroyTextureCache(GetImageTextureCache());
 }
 

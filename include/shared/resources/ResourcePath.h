@@ -104,10 +104,6 @@ inline std::filesystem::path ProjectSpritesheetMetadataPath() {
     return ProjectHiddenRoot() / "spritesheets.json";
 }
 
-inline std::filesystem::path EngineSystemImagesRoot() {
-    return EngineRootPath() / "system" / "images";
-}
-
 inline std::filesystem::path EngineSystemIconPath() {
     return EngineRootPath() / "system" / "icon.png";
 }
