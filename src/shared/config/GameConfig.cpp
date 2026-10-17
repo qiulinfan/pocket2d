@@ -239,6 +239,11 @@ GameConfigData GameConfig::Read() {
             throw std::runtime_error(game_config_path.string() + ": vsync must be true or false");
         config.vsync = game_config["vsync"].GetBool();
     }
+    if (game_config.HasMember("frame_interpolation")) {
+        if (!game_config["frame_interpolation"].IsBool())
+            throw std::runtime_error(game_config_path.string() + ": frame_interpolation must be true or false");
+        config.frame_interpolation = game_config["frame_interpolation"].GetBool();
+    }
 
     if (std::filesystem::exists(rendering_config_path)) {
         rapidjson::Document rendering_config;
@@ -319,6 +324,11 @@ bool GameConfig::Write(const GameConfigData &config) {
     if (config.vsync || game_config.HasMember("vsync")) {
         if (game_config.HasMember("vsync")) game_config["vsync"].SetBool(config.vsync);
         else game_config.AddMember("vsync", config.vsync, game_config.GetAllocator());
+    }
+    if (!config.frame_interpolation || game_config.HasMember("frame_interpolation")) {
+        if (game_config.HasMember("frame_interpolation"))
+            game_config["frame_interpolation"].SetBool(config.frame_interpolation);
+        else game_config.AddMember("frame_interpolation", config.frame_interpolation, game_config.GetAllocator());
     }
 
     UpsertIntMember(rendering_config, "x_resolution",

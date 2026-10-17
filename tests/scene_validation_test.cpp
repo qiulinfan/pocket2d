@@ -180,6 +180,11 @@ void TestConfiguration(const ProjectFixture &project) {
     Rejects([] { GameConfig::Read(); }, "vsync");
     Write(game, R"({"max_fps":144,"vsync":true})");
     Check(GameConfig::Read().max_fps == 144 && GameConfig::Read().vsync, "frame limits must be read");
+    Check(GameConfig::Read().frame_interpolation, "frames are interpolated unless a project opts out");
+    Write(game, R"({"frame_interpolation":0})");
+    Rejects([] { GameConfig::Read(); }, "frame_interpolation");
+    Write(game, R"({"frame_interpolation":false})");
+    Check(!GameConfig::Read().frame_interpolation, "a project's frame_interpolation setting must be read");
     Write(game, R"({"initial_scene":"valid","game_title":"test"})");
     const std::pair<const char *, const char *> cases[] = {
         {R"({"x_resolution":"wide"})", "x_resolution"},

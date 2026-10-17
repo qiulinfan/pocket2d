@@ -42,6 +42,10 @@
       "description": "Wait for the display's refresh before showing each frame (no tearing, at most the display's rate). Default false.",
       "type": "boolean"
     },
+    "frame_interpolation": {
+      "description": "Frames drawn between two gameplay ticks move the camera, actor sprites and Lua draws given a key part of the way from the previous tick to the latest, so motion is smooth above 60 frames a second; the picture runs one tick (1/60 s) behind. false shows the latest tick as it is. Default true.",
+      "type": "boolean"
+    },
     "package_exclude": {
       "description": "Extra files `pocket package` leaves out of packaged games: patterns relative to the project, with * wildcards (hidden files, __pycache__, tools/, scenarios/, source_art/ and Markdown are always left out).",
       "type": "array",

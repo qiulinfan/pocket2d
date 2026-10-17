@@ -13,6 +13,7 @@
 #include "SDL3_image/SDL_image.h"
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <mutex>
 #include <deque>
 #include <filesystem>
@@ -641,18 +642,45 @@ void Renderer::DiscardFrameRequests() {
     Queues().text_draw_requests.clear();
 }
 
-void Renderer::HoldFrameRequests() {
+void Renderer::HoldFrameRequests(bool match_previous) {
     RenderQueueState &q = Queues();
+    q.previous_scene_draw_requests.swap(q.held_scene_draw_requests);
     q.held_scene_draw_requests.swap(q.scene_draw_requests);
     q.held_scene_particle_batches.swap(q.scene_particle_batches);
     q.held_ui_draw_requests.swap(q.ui_draw_requests);
     q.held_pixel_draw_requests.swap(q.pixel_draw_requests);
     q.held_text_draw_requests.swap(q.text_draw_requests);
     DiscardFrameRequests();
+
+    q.held_scene_matches.clear();
+    if (!match_previous) {
+        q.previous_scene_draw_requests.clear();
+        return;
+    }
+    // Pair keyed requests across the two ticks: sorted by (key, submission
+    // index), equal keys pair up in submission order.
+    const auto keyed = [](const std::vector<ImageDrawRequest> &requests) {
+        std::vector<std::pair<std::uint64_t, std::uint32_t>> keys;
+        for (std::uint32_t i = 0; i < requests.size(); ++i)
+            if (requests[i].interpolation_key != 0) keys.emplace_back(requests[i].interpolation_key, i);
+        std::sort(keys.begin(), keys.end());
+        return keys;
+    };
+    const auto previous = keyed(q.previous_scene_draw_requests);
+    if (previous.empty()) return;
+    const auto held = keyed(q.held_scene_draw_requests);
+    if (held.empty()) return;
+    q.held_scene_matches.assign(q.held_scene_draw_requests.size(), RenderQueueState::kNoMatch);
+    for (std::size_t a = 0, b = 0; a < previous.size() && b < held.size();) {
+        if (previous[a].first < held[b].first) ++a;
+        else if (held[b].first < previous[a].first) ++b;
+        else q.held_scene_matches[held[b++].second] = previous[a++].second;
+    }
 }
 
-void Renderer::RequeueHeldFrameRequests() {
+void Renderer::RequeueHeldFrameRequests(float alpha, float snap_distance) {
     RenderQueueState &q = Queues();
+    const std::size_t first = q.scene_draw_requests.size();
     q.scene_draw_requests.insert(q.scene_draw_requests.end(), q.held_scene_draw_requests.begin(),
                                  q.held_scene_draw_requests.end());
     q.scene_particle_batches.insert(q.scene_particle_batches.end(), q.held_scene_particle_batches.begin(),
@@ -663,6 +691,55 @@ void Renderer::RequeueHeldFrameRequests() {
                                  q.held_pixel_draw_requests.end());
     q.text_draw_requests.insert(q.text_draw_requests.end(), q.held_text_draw_requests.begin(),
                                 q.held_text_draw_requests.end());
+    if (!(alpha < 1.0f) || q.held_scene_matches.empty()) return;
+    alpha = std::max(alpha, 0.0f);
+    for (std::size_t i = 0; i < q.held_scene_matches.size(); ++i) {
+        const std::uint32_t match = q.held_scene_matches[i];
+        if (match == RenderQueueState::kNoMatch) continue;
+        const ImageDrawRequest &from = q.previous_scene_draw_requests[match];
+        ImageDrawRequest &to = q.scene_draw_requests[first + i];
+        const float dx = to.x - from.x, dy = to.y - from.y;
+        if (snap_distance > 0.0f && (std::abs(dx) > snap_distance || std::abs(dy) > snap_distance)) continue;
+        to.x = from.x + dx * alpha;
+        to.y = from.y + dy * alpha;
+        // A flip (mirrored image, whose angle changes with its facing) or a
+        // turn of more than 90 degrees in one tick (a swing starting over)
+        // is a cut too; otherwise turn the short way round and resize.
+        if ((to.scale_x < 0.0f) != (from.scale_x < 0.0f) || (to.scale_y < 0.0f) != (from.scale_y < 0.0f))
+            continue;
+        const float turn = std::remainder(to.rotation_degrees - from.rotation_degrees, 360.0f);
+        if (std::abs(turn) > 90.0f) continue;
+        to.rotation_degrees = from.rotation_degrees + turn * alpha;
+        to.scale_x = from.scale_x + (to.scale_x - from.scale_x) * alpha;
+        to.scale_y = from.scale_y + (to.scale_y - from.scale_y) * alpha;
+    }
+}
+
+namespace {
+// splitmix64's finalizer spreads a tagged value over 64 bits; 0 means "no
+// key", so it becomes 1.
+std::uint64_t MixKey(std::uint64_t value) {
+    value += 0x9e3779b97f4a7c15ULL;
+    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    value ^= value >> 31;
+    return value == 0 ? 1 : value;
+}
+}  // namespace
+
+std::uint64_t Renderer::InterpolationKey(double number) {
+    if (number == 0.0) number = 0.0;  // -0 and 0 are one key
+    return MixKey(std::bit_cast<std::uint64_t>(number) ^ 0x4e554dULL);
+}
+
+std::uint64_t Renderer::InterpolationKey(std::string_view text) {
+    std::uint64_t hash = 0xcbf29ce484222325ULL;  // FNV-1a
+    for (const char c : text) hash = (hash ^ static_cast<unsigned char>(c)) * 0x100000001b3ULL;
+    return MixKey(hash ^ 0x535452ULL);
+}
+
+std::uint64_t Renderer::ActorInterpolationKey(std::uint64_t actor_uid) {
+    return MixKey(actor_uid ^ (0x41435452ULL << 32));
 }
 
 // Render one frame by flushing queued scene images, particles, text, and pixels.
@@ -984,7 +1061,9 @@ Engine::AssetReload Engine::ReloadChangedAssets() {
     return result;
 }
 
-void Engine::render() {
+void Engine::render() { render(camera_position, runtime_zoom_factor, true); }
+
+void Engine::render(glm::vec2 camera, float zoom, bool queue_builtin_renderers) {
     POCKET_ZONE("Engine::render");
     if (asset_hot_reload_ && ++asset_hot_reload_frames_ % 30 == 0) ReloadChangedAssets();
     // Rendering only fills the backbuffer. Presenting is owned by the outer
@@ -1002,11 +1081,12 @@ void Engine::render() {
 
     // Built-in render components contribute draw requests during the render
     // phase so frozen editor frames still show authored scene content.
+    // GameLoop queues them with each tick instead, to interpolate them.
     ComponentManager::ResolveTransformHierarchy();
-    ComponentManager::QueueBuiltinRenderers();
+    if (queue_builtin_renderers) ComponentManager::QueueBuiltinRenderers();
     ParticleManager::QueueRenderBatches();
 
-    const float zoom_factor = std::clamp(runtime_zoom_factor, kMinZoomFactor, kMaxZoomFactor);
+    const float zoom_factor = std::clamp(zoom, kMinZoomFactor, kMaxZoomFactor);
     const int render_width = std::max(1, config_.window_width);
     const int render_height = std::max(1, config_.window_height);
     int output_width = runtime_render_target_width_;
@@ -1024,11 +1104,11 @@ void Engine::render() {
         static_cast<float>(render_height);
     const float half_world_width = render_width / (200.0f * zoom_factor);
     const float half_world_height = render_height / (200.0f * zoom_factor);
-    ComponentManager::QueueTilemaps(camera_position.x - half_world_width,
-                                    camera_position.y - half_world_height,
-                                    camera_position.x + half_world_width,
-                                    camera_position.y + half_world_height);
-    Renderer::RenderFrame(renderer, camera_position.x, camera_position.y,
+    ComponentManager::QueueTilemaps(camera.x - half_world_width,
+                                    camera.y - half_world_height,
+                                    camera.x + half_world_width,
+                                    camera.y + half_world_height);
+    Renderer::RenderFrame(renderer, camera.x, camera.y,
                           zoom_factor, render_width, render_height,
                           output_scale_x, output_scale_y);
     RecordRuntimeRenderFrame();

@@ -31,6 +31,10 @@ struct GameConfigData {
     // vsync waits for the display's refresh instead.
     int max_fps = 0;
     bool vsync = false;
+    // Frames drawn between two ticks move the camera and keyed draws part of
+    // the way to the latest tick (one tick behind it); false shows the latest
+    // tick as it is.
+    bool frame_interpolation = true;
 };
 
 class GameConfig {

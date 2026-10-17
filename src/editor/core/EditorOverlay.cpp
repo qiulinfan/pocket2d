@@ -1322,6 +1322,7 @@ void EditorOverlay::RenderProjectConfigWindows() {
             config_changed |= ImGui::SliderInt("Max FPS", &project_config_cache_.max_fps, 0, 1000,
                                                project_config_cache_.max_fps == 0 ? "No limit" : "%d");
             config_changed |= ImGui::Checkbox("VSync", &project_config_cache_.vsync);
+            config_changed |= ImGui::Checkbox("Interpolate frames", &project_config_cache_.frame_interpolation);
             ImGui::TextDisabled("Gameplay always ticks 60 times a second; these only limit drawing.");
 
             if (config_changed) {

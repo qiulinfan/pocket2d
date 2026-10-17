@@ -46,6 +46,13 @@ struct ImageDrawRequest {
     int spritesheet_columns = 1;
     int sprite_row = 1;
     int sprite_column = 1;
+
+    // Nonzero when the same thing is drawn at a new position each gameplay
+    // tick (an actor's sprite, a Lua draw given a key). Frames drawn between
+    // two ticks place it between the two positions; see
+    // Renderer::RequeueHeldFrameRequests. Draws sharing a key pair up in
+    // submission order.
+    std::uint64_t interpolation_key = 0;
 };
 
 // (sorting_order, sort_y) packed into one sortable integer, plus the request
@@ -104,8 +111,21 @@ public:
     // The standalone runtime renders more often than it simulates: after a
     // tick it holds the requests gameplay queued (replacing the last tick's),
     // and before each render it queues a copy of them again.
-    static void HoldFrameRequests();
-    static void RequeueHeldFrameRequests();
+    // HoldFrameRequests also pairs keyed scene draws with the previous tick's
+    // (match_previous false forgets that tick, as after a scene load).
+    // RequeueHeldFrameRequests then draws each pair at alpha (0: previous
+    // tick, 1: latest) of the way between them: position, rotation and scale.
+    // Moving more than snap_distance world units in one tick is a teleport,
+    // which shows the latest tick; so is a flip, and a turn of more than 90
+    // degrees keeps the latest angle and scale. Unpaired draws stay where the
+    // latest tick put them.
+    static void HoldFrameRequests(bool match_previous = false);
+    static void RequeueHeldFrameRequests(float alpha = 1.0f, float snap_distance = 0.0f);
+    // Interpolation keys: Lua's optional draw key (a number or a string) and
+    // an actor's built-in sprites, in separate key spaces.
+    static std::uint64_t InterpolationKey(double number);
+    static std::uint64_t InterpolationKey(std::string_view text);
+    static std::uint64_t ActorInterpolationKey(std::uint64_t actor_uid);
 
     // resource loading and draw queue entry points
     // 资源加载和绘制队列入口
@@ -224,6 +244,11 @@ struct RenderQueueState {
     std::vector<ImageDrawRequest> held_ui_draw_requests;
     std::vector<PixelDrawRequest> held_pixel_draw_requests;
     std::vector<TextDrawRequest> held_text_draw_requests;
+    // The tick before the held one, and for each held scene request the index
+    // of its keyed counterpart there (kNoMatch when it has none).
+    static constexpr std::uint32_t kNoMatch = UINT32_MAX;
+    std::vector<ImageDrawRequest> previous_scene_draw_requests;
+    std::vector<std::uint32_t> held_scene_matches;
 };
 
 #endif

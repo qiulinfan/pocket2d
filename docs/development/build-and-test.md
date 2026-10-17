@@ -34,8 +34,9 @@ error; it does not silently substitute another backend. Available backends are
 platform-dependent. `POCKET_RENDER_VSYNC=1` enables synchronization (and
 overrides `game.config`'s `vsync`). Gameplay always ticks at 60 Hz: the
 standalone `game` draws as many frames as it can between ticks unless
-`game.config` sets `max_fps` or `vsync`, while the editor's play mode and
-`--frames` runs draw one frame per tick at 60 Hz.
+`game.config` sets `max_fps` or `vsync`, and interpolates them unless it sets
+`frame_interpolation` to false ([Frame interpolation](frame-interpolation.md)),
+while the editor's play mode and `--frames` runs draw one frame per tick at 60 Hz.
 
 ```sh
 ./build/modern-debug/tests/render_backend_test software

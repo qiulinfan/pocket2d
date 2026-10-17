@@ -68,6 +68,7 @@ void SpriteRenderer::QueueDraw(float world_x, float world_y, float rotation_degr
     request.a = a;
     request.sorting_order = sorting_order;
     request.sort_y = auto_sorting_order ? world_y : 0.0f;
+    request.interpolation_key = Renderer::ActorInterpolationKey(actor->uid);
     if (animation_pose_) {
         request.spritesheet_rows = animation_pose_->rows;
         request.spritesheet_columns = animation_pose_->columns;

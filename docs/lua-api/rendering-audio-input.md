@@ -20,9 +20,18 @@ with pixel-art sampling.
 
 | Function | Description |
 | --- | --- |
-| `Image.Draw(image_name, x, y)` | Draws a world image with default pivot/tint |
-| `Image.DrawEx(image_name, x, y, rotation_degrees, scale_x, scale_y, pivot_x, pivot_y, r, g, b, a, sorting_order)` | Full world-space image draw |
+| `Image.Draw(image_name, x, y[, key])` | Draws a world image with default pivot/tint |
+| `Image.DrawEx(image_name, x, y, rotation_degrees, scale_x, scale_y, pivot_x, pivot_y, r, g, b, a, sorting_order[, key])` | Full world-space image draw |
 | `Image.DrawPixel(x, y, r, g, b, a)` | Queues a pixel draw |
+
+`key`, a number or a string, names something drawn at a new place each tick (a
+player, an enemy, a projectile, a sky drawn at the camera). The standalone
+runtime draws frames between gameplay ticks; it moves a keyed draw part of the
+way from where the previous tick drew the same key, so its motion is smooth at
+any frame rate. Draws sharing a key pair up in the order they are drawn, so all
+layers of one character can share its key. Unkeyed draws, right for anything
+fixed to the world, show the latest tick. See
+`docs/development/frame-interpolation.md`.
 
 ## `Text`
 

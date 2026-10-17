@@ -98,6 +98,9 @@ private:
     void advanceGameplay();
     void finishGameplayFrame();
     void render();
+    // Draws the queued frame from this camera; GameLoop passes an
+    // interpolated one and queues built-in renderers with each tick instead.
+    void render(glm::vec2 camera, float zoom, bool queue_builtin_renderers);
     void initialize();
     void processPendingSceneLoad();
     void failSceneCommit(const std::string &message);

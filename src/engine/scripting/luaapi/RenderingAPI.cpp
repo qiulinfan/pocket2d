@@ -2,11 +2,15 @@
 #include "rendering/Renderer.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
+#include "LuaBridge/Variant.h"
 #include "core/Vector2.h"
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <variant>
 
 namespace {
 
@@ -18,6 +22,16 @@ int DowncastToInt(float value) {
 
 int ClampByteInt(int value) {
     return std::clamp(value, 0, 255);
+}
+
+// The optional last argument of Image.Draw/DrawEx: a number or string naming
+// what is drawn, so frames between gameplay ticks can move it smoothly.
+using DrawKey = std::optional<std::variant<double, std::string_view>>;
+
+std::uint64_t InterpolationKey(const DrawKey &key) {
+    if (!key) return 0;
+    if (const double *number = std::get_if<double>(&*key)) return Renderer::InterpolationKey(*number);
+    return Renderer::InterpolationKey(std::get<std::string_view>(*key));
 }
 
 void CppImageDrawUI(const std::string &image_name, float x, float y) {
@@ -85,7 +99,7 @@ Vector2 CppImageGetSize(const std::string &image_name) {
     return {static_cast<float>(width), static_cast<float>(height)};
 }
 
-void CppImageDraw(const std::string &image_name, float x, float y) {
+void CppImageDraw(const std::string &image_name, float x, float y, DrawKey key) {
     ImageDrawRequest request;
     request.image_name = image_name;
     request.x = x;
@@ -100,13 +114,14 @@ void CppImageDraw(const std::string &image_name, float x, float y) {
     request.b = 255;
     request.a = 255;
     request.sorting_order = 0;
+    request.interpolation_key = InterpolationKey(key);
     Renderer::QueueSceneImageDraw(request);
 }
 
 void CppImageDrawEx(const std::string &image_name, float x, float y,
                     float rotation_degrees, float scale_x, float scale_y,
                     float pivot_x, float pivot_y, float r, float g, float b,
-                    float a, float sorting_order) {
+                    float a, float sorting_order, DrawKey key) {
     ImageDrawRequest request;
     request.image_name = image_name;
     request.x = x;
@@ -121,6 +136,7 @@ void CppImageDrawEx(const std::string &image_name, float x, float y,
     request.b = ClampByteInt(DowncastToInt(b));
     request.a = ClampByteInt(DowncastToInt(a));
     request.sorting_order = DowncastToInt(sorting_order);
+    request.interpolation_key = InterpolationKey(key);
     Renderer::QueueSceneImageDraw(request);
 }
 

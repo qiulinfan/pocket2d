@@ -318,14 +318,21 @@ void Engine::GameLoop() {
 
     // Gameplay ticks 60 times a second of real time, whatever the frame rate
     // (a fixed step keeps physics and replays deterministic). Frames are drawn
-    // as often as possible between ticks, redrawing the last tick's requests,
-    // unless game.config caps them (max_fps) or waits for the display (vsync).
+    // as often as possible between ticks unless game.config caps them
+    // (max_fps) or waits for the display (vsync). A frame between two ticks
+    // shows the camera and keyed draws (actor sprites, Lua draws given a key)
+    // part of the way from the previous tick to the latest, by how far real
+    // time is towards the next tick; game.config's frame_interpolation: false
+    // shows the latest tick instead. Either way only presentation changes.
     // Input that arrives between ticks waits for the next tick.
     if (config_.vsync && ReadEnvironmentString("POCKET_RENDER_VSYNC").empty() && !SDL_SetRenderVSync(renderer, 1))
         Log::Warning("render", std::string("vsync unavailable: ") + SDL_GetError());
     constexpr Uint64 kTickNs = 1000000000ULL / 60;
     constexpr Uint64 kMaxTicksPerFrame = 5;   // after a stall, drop the backlog instead of racing
     const Uint64 frame_budget_ns = config_.max_fps > 0 ? 1000000000ULL / config_.max_fps : 0;
+    const bool interpolate = config_.frame_interpolation;
+    glm::vec2 previous_camera = camera_position;
+    float previous_zoom = runtime_zoom_factor;
     Uint64 previous = SDL_GetTicksNS();
     Uint64 lag = kTickNs;   // tick at once, so the first frame has something to draw
     while (IsRunning()) {
@@ -338,16 +345,42 @@ void Engine::GameLoop() {
         while (SDLEventHelper::SDL_PollEvent(&event)) ProcessSDLEvent(event, quit_requested);
         int ticks = 0;
         for (; lag >= kTickNs && IsRunning(); lag -= kTickNs, ++ticks) {
+            previous_camera = camera_position;
+            previous_zoom = runtime_zoom_factor;
+            const std::uint64_t scene_revision = scene_load_attempt_revision_;
             advanceGameplay();
             if (scene_reset_required_) break;
             finishGameplayFrame();
-            Renderer::HoldFrameRequests();
+            // A new scene starts afresh instead of moving from the old one.
+            const bool same_scene = scene_revision == scene_load_attempt_revision_;
+            if (!same_scene) {
+                previous_camera = camera_position;
+                previous_zoom = runtime_zoom_factor;
+            }
+            if (interpolate) {
+                // Actor sprites are held with the tick, so they pair up with
+                // the previous tick's by actor.
+                ComponentManager::ResolveTransformHierarchy();
+                ComponentManager::QueueBuiltinRenderers();
+            }
+            Renderer::HoldFrameRequests(interpolate && same_scene);
         }
         if (quit_requested) is_game_running = false;
         if (!IsRunning()) break;
         if (!scene_reset_required_) {
-            Renderer::RequeueHeldFrameRequests();
-            render();
+            const float alpha = interpolate ? static_cast<float>(lag) / static_cast<float>(kTickNs) : 1.0f;
+            glm::vec2 camera = camera_position;
+            float zoom = runtime_zoom_factor;
+            // Moving more than a screen in one tick is a cut, not motion.
+            const float screen = static_cast<float>(std::max(config_.window_width, config_.window_height)) /
+                                 (100.0f * std::clamp(zoom, kMinZoomFactor, kMaxZoomFactor));
+            if (alpha < 1.0f) {
+                const glm::vec2 moved = camera - previous_camera;
+                if (std::max(std::abs(moved.x), std::abs(moved.y)) <= screen) camera = previous_camera + moved * alpha;
+                zoom = previous_zoom + (zoom - previous_zoom) * alpha;
+            }
+            Renderer::RequeueHeldFrameRequests(alpha, screen);
+            render(camera, zoom, !interpolate);
         }
         const Uint64 work_end = SDL_GetTicksNS();
         frame_rate_overlay_.RecordFrame(work_end - frame_start, ticks, work_end);
