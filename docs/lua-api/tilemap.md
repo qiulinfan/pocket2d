@@ -70,7 +70,7 @@ component。每个运行实例有自己的 cell 数据；引用同一资源的�
 }
 ```
 
-- `version` 仅支持整数 `1`；`width`、`height` 是 1..512 的整数；
+- `version` 仅支持整数 `1`；`width`、`height` 是 1..4096 的整数，格子总数不超过 4,194,304；
   `cell_size` 必须有限且大于零。
 - 必须有 `ground`、`solid` 两层（只有 `solid` 产生碰撞），另可有至多 6 个额外装饰层，
   名称为 `[a-z0-9_]{1,32}`，各有自己的 `sorting_order`；每层恰好有 `width * height` 个整数。

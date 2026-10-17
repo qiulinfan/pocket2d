@@ -39,6 +39,10 @@ struct NamedLayer {
     Layer layer;
 };
 constexpr int kMaxExtraLayers = 6;
+// World-sized maps (a Terraria small world is 4200x1200): sides and the cell
+// count are bounded so a layer stays a few MiB.
+constexpr int kMaxSide = 4096;
+constexpr int kMaxCells = 1 << 22;
 struct Data {
     int version = 1;
     int width = 0;

@@ -71,7 +71,8 @@ void Schema(const Fixture &fixture) {
     };
     reject_json([](auto &j) { j["version"].SetInt(2); });
     reject_json([](auto &j) { j.AddMember("width", 4, j.GetAllocator()); });
-    reject_json([](auto &j) { j["width"].SetInt(513); });
+    reject_json([](auto &j) { j["width"].SetInt(4097); });
+    reject_json([](auto &j) { j["width"].SetInt(4096); j["height"].SetInt(1025); });
     reject_json([](auto &j) { j["height"].SetInt(0); });
     reject_json([](auto &j) { j["width"].SetDouble(4.5); });
     reject_json([](auto &j) { j["cell_size"].SetDouble(0); });

@@ -24,6 +24,39 @@ The game has a Unity-like editor layout and runtime integration with:
 - play-mode live editing and automatic scene-backed actor UID persistence
 - `Sprite Editor` for creating and editing sprite assets.
 
+## Games built with Pocket2D
+
+Two complete games test how much of a real game the engine supports. Each is
+played end to end by scripted playtests through the agent protocol, and every
+engine gap they exposed was fixed in the engine
+([game completeness tests](docs/development/game-completeness-tests.md)).
+
+**Village Rim** is a migration of the Unity 6 game Village_Rim onto Pocket2D.
+`pocket import unity` brings in its world: 65 tilemaps and 54,000 tiles,
+sprites, colliders and spawn points. Its gameplay is rewritten in Lua:
+- the opening cutscene, played frame by frame from the Unity Timeline;
+- the quest line with NPC dialogue and side quests;
+- two worlds joined by portals, and an island route through world B's locked
+  rooms with keys, chests and doors;
+- elemental altars, invasions, devil trees, tree planting and field farming;
+- world B's enemies, four bosses, the Ice Golem and the final High Priest;
+- the active shield's parry and reflection, and saves and checkpoints;
+- the credits and the spring thaw.
+
+Its playtests walk the whole route from the opening to the ending with real
+input (22 checks, identical on repeat runs) and exercise each system (32 checks).
+
+![Village Rim on Pocket2D](docs/showcase/village-rim.png)
+
+**PocketTerraria** is a Terraria-like sandbox written from scratch on the
+engine. It has a seeded world with caves and ores, mining, building and tree
+felling, light that spreads through tiles, day and night, crafting, slimes, and
+the two-phase Eye of Cthulhu. It is being extended toward Terraria's full
+progression.
+
+Both games live in a separate private repository, since their art is not
+redistributable.
+
 ## Build
 ### Linux Release
 Install:

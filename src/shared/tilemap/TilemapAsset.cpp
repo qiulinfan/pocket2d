@@ -201,8 +201,9 @@ const Layer &GetLayer(const Data &data, const std::string &layer) {
 }
 void ValidateData(const Data &data) {
     Require(data.version == 1, "unsupported version (expected 1)");
-    Require(data.width >= 1 && data.width <= 512 && data.height >= 1 && data.height <= 512,
-            "width and height must be integers in [1,512]");
+    Require(data.width >= 1 && data.width <= kMaxSide && data.height >= 1 && data.height <= kMaxSide,
+            "width and height must be integers in [1,4096]");
+    Require(static_cast<long long>(data.width) * data.height <= kMaxCells, "width*height must be at most 4194304");
     Require(std::isfinite(data.cell_size) && data.cell_size > 0, "cell_size must be finite and positive");
     RequireRelative(data.atlas.image, "atlas.image");
     Require(data.atlas.columns > 0 && data.atlas.rows > 0 &&
@@ -269,8 +270,9 @@ Data LoadFile(const std::filesystem::path &path, const std::filesystem::path &im
     Require(data.version == 1, "unsupported version (expected 1)");
     data.width = Integer(json, "width", "map");
     data.height = Integer(json, "height", "map");
-    Require(data.width >= 1 && data.width <= 512 && data.height >= 1 && data.height <= 512,
-            "width and height must be in [1,512]");
+    Require(data.width >= 1 && data.width <= kMaxSide && data.height >= 1 && data.height <= kMaxSide,
+            "width and height must be in [1,4096]");
+    Require(static_cast<long long>(data.width) * data.height <= kMaxCells, "width*height must be at most 4194304");
     Require(json["cell_size"].IsNumber(), "cell_size must be a number");
     data.cell_size = static_cast<float>(json["cell_size"].GetDouble());
     const auto &atlas = json["atlas"];

@@ -20,12 +20,12 @@
     "width": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 512
+      "maximum": 4096
     },
     "height": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 512
+      "maximum": 4096
     },
     "cell_size": {
       "description": "World units per cell; finite and positive.",
@@ -161,7 +161,7 @@
         "cells": {
           "description": "Row-major tile IDs, exactly width*height entries. 0 is empty; n in 1..columns*rows is atlas cell n.",
           "type": "array",
-          "maxItems": 262144,
+          "maxItems": 4194304,
           "items": {
             "type": "integer",
             "minimum": 0,
