@@ -4,6 +4,8 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SpriteRenderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SpriteAnimation.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FrameRateOverlay.cpp"
+        "${PROJECT_SOURCE_DIR}/include/engine/rendering/FrameRateOverlay.h"
         "${PROJECT_SOURCE_DIR}/include/engine/rendering/Renderer.h"
         "${PROJECT_SOURCE_DIR}/include/engine/rendering/SpriteRenderer.h"
 )

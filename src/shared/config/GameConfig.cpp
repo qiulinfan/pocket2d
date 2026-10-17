@@ -223,6 +223,11 @@ GameConfigData GameConfig::Read() {
             throw std::runtime_error(game_config_path.string() + ": splash_seconds must be a number in [0.5, 10]");
         config.splash_seconds = value.GetFloat();
     }
+    if (game_config.HasMember("show_fps")) {
+        if (!game_config["show_fps"].IsBool())
+            throw std::runtime_error(game_config_path.string() + ": show_fps must be true or false");
+        config.show_fps = game_config["show_fps"].GetBool();
+    }
 
     if (std::filesystem::exists(rendering_config_path)) {
         rapidjson::Document rendering_config;
@@ -293,6 +298,10 @@ bool GameConfig::Write(const GameConfigData &config) {
         if (game_config.HasMember("splash_screen")) game_config["splash_screen"].SetBool(config.splash_screen);
         else game_config.AddMember("splash_screen", config.splash_screen, game_config.GetAllocator());
         UpsertFloatMember(game_config, "splash_seconds", std::clamp(config.splash_seconds, 0.5f, 10.0f));
+    }
+    if (config.show_fps || game_config.HasMember("show_fps")) {
+        if (game_config.HasMember("show_fps")) game_config["show_fps"].SetBool(config.show_fps);
+        else game_config.AddMember("show_fps", config.show_fps, game_config.GetAllocator());
     }
 
     UpsertIntMember(rendering_config, "x_resolution",

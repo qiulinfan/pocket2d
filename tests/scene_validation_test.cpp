@@ -167,6 +167,10 @@ void TestConfiguration(const ProjectFixture &project) {
     Write(game, R"({"splash_screen":true,"splash_seconds":3})");
     Check(GameConfig::Read().splash_screen && GameConfig::Read().splash_seconds == 3.0f,
           "a project's splash screen settings must be read");
+    Write(game, R"({"show_fps":1})");
+    Rejects([] { GameConfig::Read(); }, "show_fps");
+    Write(game, R"({"show_fps":true})");
+    Check(GameConfig::Read().show_fps, "a project's show_fps setting must be read");
     Write(game, R"({"initial_scene":"valid","game_title":"test"})");
     const std::pair<const char *, const char *> cases[] = {
         {R"({"x_resolution":"wide"})", "x_resolution"},

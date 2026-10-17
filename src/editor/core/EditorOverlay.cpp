@@ -1317,6 +1317,8 @@ void EditorOverlay::RenderProjectConfigWindows() {
                                                  0.5f, 10.0f, "%.1f s");
             ImGui::EndDisabled();
             ImGui::TextDisabled("Shown by the standalone game before its first frame.");
+            config_changed |= ImGui::Checkbox("Show frame rate", &project_config_cache_.show_fps);
+            ImGui::TextDisabled("The standalone game's FPS and frame time; F3 toggles it while playing.");
 
             if (config_changed) {
                 persist_project_config();

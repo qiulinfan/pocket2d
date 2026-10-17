@@ -23,6 +23,9 @@ struct GameConfigData {
     // standalone runtime (game.config "splash_screen", "splash_seconds").
     bool splash_screen = false;
     float splash_seconds = 2.0f;
+    // Whether the standalone runtime starts with its frame-rate readout shown
+    // (game.config "show_fps"; F3 toggles it while playing).
+    bool show_fps = false;
 };
 
 class GameConfig {

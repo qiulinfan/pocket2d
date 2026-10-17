@@ -28,6 +28,10 @@
       "minimum": 0.5,
       "maximum": 10
     },
+    "show_fps": {
+      "description": "Start the standalone runtime with its frame-rate readout (frames per second and frame time) shown; F3 toggles it while playing. Default false.",
+      "type": "boolean"
+    },
     "package_exclude": {
       "description": "Extra files `pocket package` leaves out of packaged games: patterns relative to the project, with * wildcards (hidden files, __pycache__, tools/, scenarios/, source_art/ and Markdown are always left out).",
       "type": "array",

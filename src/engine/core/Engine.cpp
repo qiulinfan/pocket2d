@@ -311,11 +311,16 @@ void Engine::GameLoop() {
     WorldScope world_scope(world_);
     InitializeRuntime();
     if (config_.splash_screen && !SplashScreen::Show(renderer, config_.splash_seconds)) is_game_running = false;
+    frame_rate_overlay_.visible = config_.show_fps;
     if (const char *hot_reload = SDL_getenv("POCKET_HOT_RELOAD"); hot_reload && std::string_view(hot_reload) == "1")
         SetAssetHotReload(true);
 
     while (IsRunning()) {
+        const Uint64 frame_start = SDL_GetTicksNS();
         RunSingleFrame();
+        const Uint64 frame_end = SDL_GetTicksNS();
+        frame_rate_overlay_.RecordFrame(frame_end - frame_start, frame_end);
+        frame_rate_overlay_.Draw(renderer);
         PresentFrame();
 #ifdef __EMSCRIPTEN__
         // In the browser the loop yields each frame (the build uses ASYNCIFY)
@@ -572,6 +577,8 @@ void Engine::ProcessSDLEvent(const SDL_Event &event,
                              bool &quit_requested_this_frame) {
     WorldScope world_scope(world_);
     ::Input::ProcessEvent(event);
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F3 && !event.key.repeat)
+        frame_rate_overlay_.visible = !frame_rate_overlay_.visible;
     if (event.type == SDL_EVENT_QUIT) {
         quit_requested_this_frame = true;
     }

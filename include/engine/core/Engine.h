@@ -3,6 +3,7 @@
 
 #include "core/Vector2.h"
 #include "core/World.h"
+#include "rendering/FrameRateOverlay.h"
 #include "scene/Actor.h"
 #include "shared/physics/PhysicsHierarchyState.h"
 #include "shared/config/GameConfig.h"
@@ -91,6 +92,7 @@ private:
     int performance_gameplay_frames_ = 0;
     float displayed_runtime_render_fps_ = 0.0f;
     float displayed_gameplay_fps_ = 0.0f;
+    FrameRateOverlay frame_rate_overlay_;
 
     void update();
     void advanceGameplay();
