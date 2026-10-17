@@ -71,6 +71,7 @@ void InjectInputAPI() {
         .beginNamespace("Input")
         .addFunction("GetKey", &CppInputGetKey)
         .addFunction("GetKeyDown", &CppInputGetKeyDown)
+        .addFunction("GetAnyKeyDown", &Input::GetAnyKeyDown)
         .addFunction("GetKeyUp", &CppInputGetKeyUp)
         .addFunction("GetAction", &CppInputGetAction)
         .addFunction("GetActionDown", &CppInputGetActionDown)

@@ -50,6 +50,8 @@ public:
     static glm::vec2 GetMousePosition();
     static bool GetMouseButton(int button_num);
     static bool GetMouseButtonDown(int button_num);
+    // Any key or mouse button pressed this frame (Unity's Input.anyKeyDown).
+    static bool GetAnyKeyDown();
     static bool GetMouseButtonUp(int button_num);
     static float GetMouseScrollDelta();
 

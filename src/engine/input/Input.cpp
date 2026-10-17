@@ -486,6 +486,14 @@ bool Input::GetMouseButtonDown(int button_num) {
 }
 
 
+bool Input::GetAnyKeyDown() {
+    for (const auto &[key, state] : State().keyboard_states_)
+        if (state == INPUT_STATE_JUST_BECAME_DOWN) return true;
+    for (const bool down : State().mouse_button_down_)
+        if (down) return true;
+    return false;
+}
+
 bool Input::GetMouseButtonUp(int button_num) {
     if (!IsSupportedMouseButton(button_num)) return false;
     return State().mouse_button_up_[button_num];

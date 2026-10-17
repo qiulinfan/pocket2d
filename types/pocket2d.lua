@@ -439,6 +439,7 @@ Vector2 = {}
 ---@class PocketInputNamespace
 ---@field GetKey fun(key: string): boolean
 ---@field GetKeyDown fun(key: string): boolean
+---@field GetAnyKeyDown fun(): boolean
 ---@field GetKeyUp fun(key: string): boolean
 ---@field GetAction fun(name: string): boolean
 ---@field GetActionDown fun(name: string): boolean

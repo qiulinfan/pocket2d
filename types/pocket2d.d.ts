@@ -322,6 +322,7 @@ declare namespace Vector2 {
 declare namespace Input {
     function GetKey(this: void, key: string): boolean;
     function GetKeyDown(this: void, key: string): boolean;
+    function GetAnyKeyDown(this: void): boolean;
     function GetKeyUp(this: void, key: string): boolean;
     function GetAction(this: void, name: string): boolean;
     function GetActionDown(this: void, name: string): boolean;

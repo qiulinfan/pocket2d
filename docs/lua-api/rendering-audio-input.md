@@ -65,6 +65,7 @@ compete with normal SFX channels.
 | `Input.GetKey(keycode)` | Key held |
 | `Input.GetKeyDown(keycode)` | Key pressed this frame |
 | `Input.GetKeyUp(keycode)` | Key released this frame |
+| `Input.GetAnyKeyDown()` | Any key or mouse button pressed this frame |
 
 ### Actions
 

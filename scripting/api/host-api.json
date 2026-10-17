@@ -2207,6 +2207,12 @@
           "returns": "boolean"
         },
         {
+          "name": "GetAnyKeyDown",
+          "call": "static",
+          "parameters": [],
+          "returns": "boolean"
+        },
+        {
           "name": "GetKeyUp",
           "call": "static",
           "parameters": [
