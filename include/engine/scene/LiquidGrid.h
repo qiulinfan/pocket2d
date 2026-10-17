@@ -31,9 +31,10 @@ public:
     void Wake(int x, int y);
     std::size_t ActiveCount() const { return active_.size(); }
 
-    // One step over at most `budget` active cells (the rest wait for the next
-    // step). `solid` says whether a cell blocks liquid. Returns the cells where
-    // water met lava: the caller turns them into a block; they are emptied.
+    // One step over at most `budget` active cells, the longest waiting first
+    // (the rest wait for the next step). `solid` says whether a cell blocks
+    // liquid. Returns the cells where water met lava: the caller turns them
+    // into a block; they are emptied.
     std::vector<std::pair<int, int>> Step(const std::function<bool(int, int)> &solid, std::size_t budget);
 
     // Run lengths of cells in row-major order, "count:code" pairs joined by

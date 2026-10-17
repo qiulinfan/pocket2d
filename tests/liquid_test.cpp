@@ -94,12 +94,34 @@ void SettledLiquidIsIdle() {
     Check(Total(grid, LiquidGrid::kWater) == 4 * 18 * 255, "an idle basin keeps its water");
 }
 
+void SettledLavaIsIdle() {
+    const auto solid = [](int x, int y) { return x == 0 || x == 19 || y == 9; };
+    LiquidGrid grid(20, 10);
+    for (int x = 1; x <= 18; ++x) grid.Set(x, 8, LiquidGrid::kLava, 255);
+    for (int x = 3; x <= 6; ++x) grid.Set(x, 2, LiquidGrid::kHoney, 255);
+    // A thin slope that integer levelling cannot even out must still go idle.
+    LiquidGrid slope(7, 3);
+    const auto shelf = [](int x, int y) { return x == 0 || x == 6 || y == 2; };
+    const std::uint8_t film[5] = {6, 7, 9, 7, 6};
+    for (int x = 1; x <= 5; ++x) slope.Set(x, 1, LiquidGrid::kLava, film[x - 1]);
+    Check(Settle(slope, shelf) < 5000, "a thin slope settles");
+    const int steps = Settle(grid, solid);
+    Check(steps < 5000, "slow liquids settle and go idle too (" + std::to_string(grid.ActiveCount()) + " active)");
+}
+
 void BudgetDefersWork() {
     const auto solid = [](int, int y) { return y == 9; };
     LiquidGrid grid(40, 10);
     for (int x = 0; x < 40; ++x) grid.Set(x, 0, LiquidGrid::kWater, 255);
     grid.Step(solid, 10);
     Check(grid.ActiveCount() >= 30, "cells over the budget wait for the next step");
+    // A cell that became active last still gets its turn while the budget is full.
+    LiquidGrid busy(40, 20);
+    const auto floor = [](int, int y) { return y == 19; };
+    for (int x = 0; x < 40; ++x) busy.Set(x, 18, LiquidGrid::kLava, 200);   // deep, slow and active
+    busy.Set(20, 0, LiquidGrid::kWater, 255);
+    for (int n = 0; n < 60; ++n) busy.Step(floor, 50);
+    Check(busy.Get(20, 0).second < 255, "liquid queued last still flows under a full budget");
 }
 
 void SavesAndLoads() {
@@ -145,6 +167,7 @@ int main() {
         FillsFromTheBottom();
         LavaIsSlowerAndHardens();
         SettledLiquidIsIdle();
+        SettledLavaIsIdle();
         BudgetDefersWork();
         SavesAndLoads();
         Deterministic();

@@ -44,19 +44,20 @@ void LiquidGrid::Wake(int x, int y) { QueueAround(x, y); }
 
 std::vector<std::pair<int, int>> LiquidGrid::Step(const std::function<bool(int, int)> &solid, std::size_t budget) {
     ++steps_;
+    // Cells are taken in the order they became active, so with more than the
+    // budget every cell still gets its turn; the rest stay first in line.
     std::vector<std::uint32_t> work;
     work.swap(active_);
+    if (work.size() > budget) {
+        active_.assign(work.begin() + static_cast<std::ptrdiff_t>(budget), work.end());
+        work.resize(budget);
+    }
     for (const auto i : work) queued_[i] = 0;
-    // Bottom rows first, then left to right, as Terraria settles liquid upward.
+    // Within a step: bottom rows first, then left to right, as Terraria settles liquid upward.
     std::sort(work.begin(), work.end(), [this](std::uint32_t a, std::uint32_t b) {
         const auto ya = a / static_cast<std::uint32_t>(width_), yb = b / static_cast<std::uint32_t>(width_);
         return ya != yb ? ya > yb : a < b;
     });
-    if (work.size() > budget) {
-        for (std::size_t n = budget; n < work.size(); ++n)
-            Queue(static_cast<int>(work[n] % width_), static_cast<int>(work[n] / width_));
-        work.resize(budget);
-    }
     const auto open = [&](int x, int y, Kind kind) {
         if (!Inside(x, y) || solid(x, y)) return false;
         const auto k = kind_[Index(x, y)];
@@ -98,15 +99,22 @@ std::vector<std::pair<int, int>> LiquidGrid::Step(const std::function<bool(int, 
                     total += amount_[Index(sx, y)];
                 }
             if (count > 0) {
+                // The remainder stays here; nothing counts as moved unless an amount changes,
+                // so a slope like 7, 9, 7 that cannot level further settles.
                 const int level = total / (count + 1);
-                for (int n = 0; n < count; ++n) {
-                    const auto s = Index(sides[n], y);
-                    amount_[s] = static_cast<std::uint8_t>(level);
-                    kind_[s] = level > 0 ? kind : kNone;
-                    QueueAround(sides[n], y);
+                const int kept = total - level * count;
+                bool moved = kept != amount;
+                for (int n = 0; n < count; ++n) moved = moved || amount_[Index(sides[n], y)] != level;
+                if (moved) {
+                    for (int n = 0; n < count; ++n) {
+                        const auto s = Index(sides[n], y);
+                        amount_[s] = static_cast<std::uint8_t>(level);
+                        kind_[s] = level > 0 ? kind : kNone;
+                        QueueAround(sides[n], y);
+                    }
+                    amount = kept;
+                    changed = true;
                 }
-                amount = total - level * count;
-                changed = true;
             }
         }
         // A lone film too thin to flow dries up.
