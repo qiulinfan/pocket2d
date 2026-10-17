@@ -274,6 +274,9 @@ Engine::Engine(World &world) : world_(world) {
         config_ = GameConfig::Read();
         ActionMap::Load(ResourcePath::ResourcesRootPath());
         GameSave::Configure(config_.save_namespace);
+        // `game --scene NAME` starts elsewhere than the project's initial scene.
+        if (const char *start = SDL_getenv("POCKET_INITIAL_SCENE"); start != nullptr && *start != '\0')
+            config_.initial_scene_name = start;
         current_scene_name = config_.initial_scene_name;
         SceneFormat::SceneAsset initial;
         if(!config_.initial_scene_name.empty())

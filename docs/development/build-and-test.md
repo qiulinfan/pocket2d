@@ -129,6 +129,10 @@ override, configured games use SDL's platform preference directory. See
 `tests/fixtures/persistent_village/CONTRACT.md` and `docs/lua-api/savegame.md` for
 controls, payload scope and expected failures. Tests always use temporary roots.
 
+`--scene NAME` starts a project in another scene than game.config's
+`initial_scene` (a lab or test scene), in graphical and agent mode; agent workers
+inherit it across reset, and a missing scene is a startup error.
+
 The optional TypeScript frontend has pinned local development dependencies:
 
 ```sh

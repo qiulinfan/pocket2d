@@ -15,9 +15,9 @@ def check(condition, message):
 
 
 class Agent:
-    def __init__(self, executable, project):
+    def __init__(self, executable, project, extra_args=()):
         self.process = subprocess.Popen(
-            [executable, "--headless", "--project", project, "--agent"],
+            [executable, "--headless", "--project", project, "--agent", *extra_args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1,
         )

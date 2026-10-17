@@ -101,6 +101,7 @@ int RuntimeApp::Run(int argc, char **argv) {
         std::filesystem::path save_directory;
         std::filesystem::path project;
         std::filesystem::path record, replay;
+        std::string start_scene;
         std::uint32_t seed = 0;
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
@@ -141,6 +142,10 @@ int RuntimeApp::Run(int argc, char **argv) {
                 if (value.empty()) throw std::runtime_error("--save-dir must not be empty");
                 save_directory = std::filesystem::path(std::u8string(value.begin(), value.end()));
             }
+            else if (arg == "--scene" && i + 1 < argc) {
+                start_scene = argv[++i];
+                if (start_scene.empty()) throw std::runtime_error("--scene must not be empty");
+            }
             else if (arg == "--capture" && i + 1 < argc) capture = argv[++i];
             else if (arg == "--record" && i + 1 < argc) record = argv[++i];
             else if (arg == "--replay" && i + 1 < argc) replay = argv[++i];
@@ -158,8 +163,8 @@ int RuntimeApp::Run(int argc, char **argv) {
                 if (result.ec != std::errc{} || result.ptr != value.data() + value.size())
                     throw std::runtime_error("--seed expects uint32");
             } else if (arg == "--help") {
-                std::cout << "game [--project PATH] [--seed UINT32] [--frames N [--capture PNG]]\n"
-                             "game --project PATH --headless --agent [--seed UINT32] [--save-dir ROOT] [--record REPLAY]\n"
+                std::cout << "game [--project PATH] [--scene NAME] [--seed UINT32] [--frames N [--capture PNG]]\n"
+                             "game --project PATH --headless --agent [--scene NAME] [--seed UINT32] [--save-dir ROOT] [--record REPLAY]\n"
                              "game --project PATH --headless --replay REPLAY [--save-dir ROOT]\n"
                              "game --project PATH --headless --mcp [--mcp-access read,simulate,modify] [--seed UINT32]\n";
                 return 0;
@@ -171,6 +176,10 @@ int RuntimeApp::Run(int argc, char **argv) {
             if (SDL_setenv_unsafe("POCKET_SAVE_ROOT", value.c_str(), 1) != 0)
                 throw std::runtime_error("unable to configure save directory");
         }
+        // The engine reads it in place of game.config's initial_scene; agent
+        // workers inherit it, so a reset starts there too.
+        if (!start_scene.empty() && SDL_setenv_unsafe("POCKET_INITIAL_SCENE", start_scene.c_str(), 1) != 0)
+            throw std::runtime_error("unable to configure the start scene");
         if (int(agent) + int(agent_worker) + int(!replay.empty()) + int(mcp) > 1)
             throw std::runtime_error("choose one of --agent, --agent-worker, --replay and --mcp");
         if (!record.empty() && !agent) throw std::runtime_error("--record requires --agent");

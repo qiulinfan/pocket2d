@@ -138,6 +138,9 @@ set_tests_properties(agent_audio_events PROPERTIES TIMEOUT 30)
 add_test(NAME agent_any_key COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_any_key_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_any_key PROPERTIES TIMEOUT 30)
+add_test(NAME agent_start_scene COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/agent_start_scene_test.py" $<TARGET_FILE:game_engine>)
+set_tests_properties(agent_start_scene PROPERTIES TIMEOUT 60)
 add_test(NAME agent_camera COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_camera_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_camera PROPERTIES TIMEOUT 30)
