@@ -248,3 +248,7 @@ automated graphical runs do not take keyboard focus:
 ```sh
 POCKET_WINDOW_DISPLAY=EDB323QU POCKET_WINDOW_BACKGROUND=1 ./build/sdl3-release/game --project tests/fixtures/village_defense --frames 120
 ```
+
+It is for automation only: it makes the unbundled `game` executable a macOS
+background app that never becomes active, so a person who clicks its window
+still cannot type into it. Leave it out whenever someone plays.
