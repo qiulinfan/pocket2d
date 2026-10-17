@@ -197,6 +197,8 @@ Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段�
 | 导入器直接丢弃未启用的实体（VR 旧剑圣、Altar1） | 未启用的实体与 tilemap 一样以 `enabled: false` 导入，场景与 Unity 逐对象对应 |
 | 光照每格一块、最近邻放大、按固定量减光，地块逐格变暗且几格后突然全黑（PT） | `ComputeLight` 改为 RGB 乘法衰减（`air_decay`/`solid_decay`）、彩色光源、`ambient`，光照图线性采样并乘法混合到画面 |
 | Tilemap 宽高上限 512，装不下泰拉瑞亚尺度的世界（PT 1000×400） | 宽高上限 4096、格子总数上限 4,194,304（区块化碰撞与绘制不受影响） |
+| 小地图/全屏地图要在 Lua 里逐格取色绘制（PT） | `Tilemap:ComputeMap`：按地形名配色，每 `step` 格一个像素写入 `dynamic:` 图片 |
+| 没有战争迷雾，探索状态无法存档（PT） | `RevealMap`/`IsRevealed`，`ComputeMap` 的 `fog` 颜色，`SaveRevealed`/`LoadRevealed` 以游程文本存取 |
 
 （VR = Village_Rim，PT = PocketTerraria。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
