@@ -1,0 +1,1 @@
+{"version":1,"actions":{"jump":{"type":"button","keys":["space"]},"move":{"type":"axis2d","left":["left"],"right":["right"],"up":["up"],"down":["down"]}}}

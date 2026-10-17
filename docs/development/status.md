@@ -106,7 +106,10 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   `Input.GetAction*` and set directly by agents. Scenario files and the
   standard-library Gymnasium-style Python client run three two_world_village
   tasks (harvest, defend a wave, close the route) solved by scripted key
-  policies in CTest. Not yet done: vectorized and multi-agent environments,
+  policies in CTest. The client's scripted-player `Session` (fresh save
+  directory, held input, world-point clicks, captures, game observations)
+  carries the PocketTerraria and VillageRim playtests and is checked by
+  `agent_session_test`. Not yet done: vectorized and multi-agent environments,
   game-declared observation functions, and LLM-player evaluation.
 - Authoring loop: `tools/pocket` checks projects (JSON Schemas for every asset
   format, runtime startup diagnostics, optional LuaLS/EmmyLua), runs scenario

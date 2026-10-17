@@ -74,3 +74,63 @@ and `step` return per-environment lists (observations are not stacked), seeds
 are `seed + i`, and autoreset follows Gymnasium 1.x's next-step mode
 (`infos[i]["autoreset"]`). PettingZoo multi-agent channels and LLM-player
 evaluation are not implemented yet.
+
+## Scripted players
+
+Game playtests that script a player through a whole game use `Session`
+(`clients/python/pocket2d/session.py`) instead of scenario files. It launches
+the headless runtime for a project and keeps the protocol plumbing games
+otherwise rewrite; game rules (movement, fighting, quest logic) stay in the
+game's subclass.
+
+```python
+import os, sys
+from pathlib import Path
+PROJECT = Path(__file__).resolve().parents[1]
+# The engine checkout: POCKET2D_ENGINE, else a pocket2d folder beside the games repository.
+ENGINE = Path(os.environ.get("POCKET2D_ENGINE", PROJECT.parents[1] / "pocket2d"))
+sys.path.insert(0, str(ENGINE / "clients/python"))
+from pocket2d import Session
+
+class Bot(Session):
+    @property
+    def player(self):
+        return self.value("player")
+
+with Bot(PROJECT, seed=3, out="build/my-game", select={"names": ["Player"]}) as bot:
+    bot.step({"move": [1, 0]}, frames=30)   # actions and keys are held for the step
+    bot.key("i")                              # press and release a key
+    bot.click_world(4, 2, camera=(bot.player["x"], bot.player["y"]))
+    bot.shot("inventory")                     # build/my-game/inventory.png
+```
+
+- The runtime binary comes from `executable=`, `POCKET_GAME`, or the client's
+  own checkout (`build/sdl3-release/game`, then `sdl3-debug`), so a game
+  repository finds the engine once, through `POCKET2D_ENGINE` or the sibling
+  folder. `ENGINE_ROOT` in `pocket2d.session` is that checkout.
+- Without `save_dir` the game saves into a fresh temporary directory, removed
+  on `close()`; `session.save_dir` is the directory in use.
+- `step(actions, frames, keys, mouse, image)` sends the complete held keys
+  and actions: omitted ones are released. `mouse` is sent only when given, so
+  the runtime keeps the pointer's position and buttons until a step changes
+  them (a partial dict changes only its fields). `select` (kept as
+  `selection`), `game: true` (unless `game=False`) and the `events` types
+  given to the constructor ride along on every step.
+- After a step, `values` maps each `OnAgentObserve` key to its values in UID
+  order and `value(key)` gives the first; `actor(name_or_uid)` searches the
+  step's actors, `events` lists its events, `errors` accumulates failing
+  observers and `frames` counts stepped frames.
+- `key(name, frames)` and `press(action, frames)` hold a key or button action
+  and release it for one frame; `click(x, y, button)` presses and releases at
+  a screen point. `world_to_screen(x, y, camera, zoom)` and `click_world` map
+  world points as `Camera.WorldToScreen` does (100 pixels per unit at zoom 1,
+  centred on the screen); the camera position comes from the game, since
+  observations do not report it, and `zoom` defaults to `rendering.config`.
+- `image=name` (or `shot(name)`) captures the frame at the project's
+  resolution to `out/image_prefix + name`, adding `.png` when missing.
+  `tiles(actor_uid, component_key, layer, cells)` reads tilemap cells without
+  advancing; `request` and `reset` reach the protocol directly.
+
+`tests/agent_session_test.py` drives `tests/fixtures/agent_session` through
+each of these. PocketTerraria's `tools/tbot.py` and VillageRim's
+`tools/playtest.py` in the games repository build their players on it.

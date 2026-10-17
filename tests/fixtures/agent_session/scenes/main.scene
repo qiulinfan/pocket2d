@@ -1,0 +1,4 @@
+{"actors":[
+ {"uid":1,"name":"probe","components":{"probe":{"type":"SessionProbe"}}},
+ {"uid":2,"name":"marker","components":{"transform":{"type":"Transform","x":3,"y":2}}}
+]}

@@ -103,6 +103,9 @@ add_test(NAME scenario_env COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/scenario_env_test.py"
     $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village")
 set_tests_properties(scenario_env PROPERTIES TIMEOUT 180)
+add_test(NAME agent_session COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/agent_session_test.py" $<TARGET_FILE:game_engine>)
+set_tests_properties(agent_session PROPERTIES TIMEOUT 60)
 add_test(NAME agent_image COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_image_test.py"
     $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/two_world_village")
