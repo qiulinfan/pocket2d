@@ -146,6 +146,82 @@ void ComputeTileLight(Tilemap *map, double x, double y, double width, double hei
     map->ComputeLight(static_cast<int>(x), static_cast<int>(y), static_cast<int>(width), static_cast<int>(height), options);
 }
 
+// map:ComputeMap(x, y, width, height, {image=, colors={terrain={r, g, b}}, sky={r, g, b, a},
+//                 cave={r, g, b, a}, cave_y=, step=})
+void ComputeTileMap(Tilemap *map, double x, double y, double width, double height, luabridge::LuaRef table) {
+    if (!table.isTable()) throw std::invalid_argument("Tilemap:ComputeMap options must be a table");
+    for (const double value : {x, y, width, height})
+        if (!std::isfinite(value) || std::floor(value) != value || std::abs(value) > 1e6)
+            throw std::invalid_argument("Tilemap:ComputeMap rectangle must be integers");
+    static const std::set<std::string, std::less<>> kOptions = {"image", "colors", "sky", "cave", "cave_y", "step"};
+    lua_State *state = LuaState();
+    table.push(state);
+    lua_pushnil(state);
+    while (lua_next(state, -2) != 0) {
+        lua_pop(state, 1);
+        const bool known = lua_type(state, -1) == LUA_TSTRING && kOptions.contains(lua_tostring(state, -1));
+        if (!known) {
+            const std::string key = luaL_tolstring(state, -1, nullptr);
+            lua_pop(state, 3);
+            throw std::invalid_argument("Tilemap:ComputeMap has no option '" + key + "'");
+        }
+    }
+    lua_pop(state, 1);
+    // An {r, g, b[, a]} table of 0..255 integers.
+    const auto rgba = [](const luabridge::LuaRef &value, const std::string &what, bool alpha) {
+        std::array<std::uint8_t, 4> out{0, 0, 0, 255};
+        if (!value.isTable() || value.length() < 3 || value.length() > (alpha ? 4 : 3))
+            throw std::invalid_argument("Tilemap:ComputeMap " + what + " must be {r, g, b" + (alpha ? "[, a]}" : "}"));
+        for (int i = 1; i <= value.length(); ++i) {
+            const luabridge::LuaRef channel = value[i];
+            const double v = channel.isNumber() ? channel.cast<double>().value() : -1;
+            if (!(v >= 0 && v <= 255) || std::floor(v) != v)
+                throw std::invalid_argument("Tilemap:ComputeMap " + what + " channels must be integers 0..255");
+            out[static_cast<std::size_t>(i - 1)] = static_cast<std::uint8_t>(v);
+        }
+        return out;
+    };
+    Tilemap::MapOptions options;
+    const luabridge::LuaRef image = table["image"];
+    if (!image.isString()) throw std::invalid_argument("Tilemap:ComputeMap needs an image name");
+    options.image = image.cast<std::string>().value();
+    for (const char *key : {"sky", "cave"}) {
+        const luabridge::LuaRef value = table[key];
+        if (!value.isNil()) (std::string(key) == "sky" ? options.sky : options.cave) = rgba(value, key, true);
+    }
+    for (const auto &[key, field] : {std::pair{"cave_y", &options.cave_y}, std::pair{"step", &options.step}}) {
+        const luabridge::LuaRef value = table[key];
+        if (value.isNil()) continue;
+        if (!value.isNumber() || std::floor(value.cast<double>().value()) != value.cast<double>().value())
+            throw std::invalid_argument(std::string("Tilemap:ComputeMap ") + key + " must be an integer");
+        *field = static_cast<int>(value.cast<double>().value());
+    }
+    const luabridge::LuaRef colors = table["colors"];
+    if (!colors.isNil()) {
+        if (!colors.isTable()) throw std::invalid_argument("Tilemap:ComputeMap colors must be a table");
+        colors.push(state);
+        lua_pushnil(state);
+        while (lua_next(state, -2) != 0) {
+            if (lua_type(state, -2) != LUA_TSTRING) {
+                lua_pop(state, 3);
+                throw std::invalid_argument("Tilemap:ComputeMap colors are keyed by terrain name");
+            }
+            const std::string name = lua_tostring(state, -2);
+            const luabridge::LuaRef value = luabridge::LuaRef::fromStack(state, -1);
+            lua_pop(state, 1);
+            try {
+                const auto c = rgba(value, "colors." + name, false);
+                options.colors[name] = {c[0], c[1], c[2]};
+            } catch (...) {
+                lua_pop(state, 2);
+                throw;
+            }
+        }
+        lua_pop(state, 1);
+    }
+    map->ComputeMap(static_cast<int>(x), static_cast<int>(y), static_cast<int>(width), static_cast<int>(height), options);
+}
+
 luabridge::LuaRef GetTileLayerNames(Tilemap *map) {
     luabridge::LuaRef names = luabridge::newTable(LuaState());
     int index = 1;
@@ -208,6 +284,7 @@ void InjectTilemapAPI() {
         .addFunction("GetCells", &GetTileCells)
         .addFunction("GetLayerNames", &GetTileLayerNames)
         .addFunction("ComputeLight", &ComputeTileLight)
+        .addFunction("ComputeMap", &ComputeTileMap)
         .addFunction("GetTerrain", &GetTileTerrain)
         .addFunction("SetTerrain", &Tilemap::SetTerrain)
         .addFunction("GetRevision", &Tilemap::GetRevision)

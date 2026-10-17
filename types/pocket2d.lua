@@ -285,6 +285,13 @@ function _Tilemap:GetLayerNames() end
 ---@param height integer
 ---@param options any
 function _Tilemap:ComputeLight(x, y, width, height, options) end
+---A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step.
+---@param x integer
+---@param y integer
+---@param width integer
+---@param height integer
+---@param options any
+function _Tilemap:ComputeMap(x, y, width, height, options) end
 ---Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map.
 ---@param layer TileLayer
 ---@param x integer

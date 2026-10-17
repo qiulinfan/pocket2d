@@ -73,6 +73,20 @@ public:
     };
     // Returns the light it drew: r, g, b per cell, row-major, before ambient.
     std::vector<float> ComputeLight(int x, int y, int width, int height, const LightOptions &options) const;
+    // A map picture of a cell rectangle (it may extend past the map), one pixel
+    // per `step` cells: the colour of the topmost terrain there (solid, then
+    // ground, then extra layers), else `sky` above row cave_y and `cave` below
+    // it. Colours are by terrain name (RGB; a terrain without one counts as
+    // empty). Written to a dynamic image of ceil(width/step) x ceil(height/step).
+    struct MapOptions {
+        std::string image;
+        std::map<std::string, std::array<std::uint8_t, 3>> colors;
+        std::array<std::uint8_t, 4> sky{0, 0, 0, 0};
+        std::array<std::uint8_t, 4> cave{0, 0, 0, 0};
+        int cave_y = 0;
+        int step = 1;
+    };
+    void ComputeMap(int x, int y, int width, int height, const MapOptions &options) const;
     // Whether a world point lies in a committed nonzero solid cell of this
     // enabled map (the outline-only collision has no interior to query).
     bool IsSolidAt(double world_x, double world_y) const;

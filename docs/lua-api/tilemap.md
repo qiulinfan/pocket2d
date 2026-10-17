@@ -144,6 +144,23 @@ Image.DrawEx("dynamic:light", x0, y0, 0, 100 * cell_size, 100 * cell_size, 0, 0,
 绘制时乘到已画内容上（暖色光源会给地块染色）。`smooth = false` 时每格是一块纯色。
 未知选项会报错。
 
+## 地图图片
+
+`map:ComputeMap(x, y, width, height, options)` 在原生代码中把一个格子矩形（可超出地图）
+画成一张动态图片，每 `step` 格一个像素，用于小地图和全屏地图：
+
+```lua
+map:ComputeMap(0, 0, map.width, map.height, {
+  image = "dynamic:map",                     -- 必须以 dynamic: 开头
+  colors = {grass = {40, 180, 60}, stone = {120, 120, 130}},  -- 按地形名给 RGB
+  sky = {90, 150, 230, 255}, cave = {20, 15, 15, 255},       -- 空格子：cave_y 行以上为 sky，以下为 cave
+  cave_y = 150, step = 2,
+})
+```
+
+每个像素取该格最上层有颜色的地形：先 solid，再 ground，再额外层；没有颜色的地形视为空。
+图片尺寸为 `ceil(width/step) × ceil(height/step)`，`step` 为 1..64。未知选项会报错。
+
 ## 获取组件与属性
 
 ```lua

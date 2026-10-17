@@ -366,6 +366,44 @@ std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, 
                               {.smooth = options.smooth, .multiply = true});
     return light;
 }
+void Tilemap::ComputeMap(int x0, int y0, int width, int height, const MapOptions &options) const {
+    if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
+    if (options.step < 1 || options.step > 64) throw std::runtime_error("tilemap: map step must be 1..64");
+    if (width <= 0 || height <= 0 || width > 16384 || height > 16384)
+        throw std::runtime_error("tilemap: map rectangle must be 1..16384 cells per side");
+    const int pw = (width + options.step - 1) / options.step;
+    const int ph = (height + options.step - 1) / options.step;
+    // Colour per tile id through its terrain; alpha 0 marks "no colour".
+    const auto terrain_of = TilemapAsset::TerrainIndex(data_);
+    std::vector<std::array<std::uint8_t, 4>> by_terrain(data_.autotile.terrains.size(), {0, 0, 0, 0});
+    for (std::size_t t = 0; t < data_.autotile.terrains.size(); ++t) {
+        const auto found = options.colors.find(data_.autotile.terrains[t].name);
+        if (found != options.colors.end()) by_terrain[t] = {found->second[0], found->second[1], found->second[2], 255};
+    }
+    const auto color_of = [&](int tile) -> const std::array<std::uint8_t, 4> * {
+        if (tile <= 0 || static_cast<std::size_t>(tile) >= terrain_of.size() || terrain_of[tile] < 0) return nullptr;
+        const auto &c = by_terrain[static_cast<std::size_t>(terrain_of[tile])];
+        return c[3] ? &c : nullptr;
+    };
+    std::vector<int> order{1, 0};   // solid first, then ground and the extra layers
+    for (int layer = 2; layer < TilemapAsset::LayerCount(data_); ++layer) order.push_back(layer);
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(pw) * ph * 4);
+    for (int py = 0; py < ph; ++py)
+        for (int px = 0; px < pw; ++px) {
+            const int x = x0 + px * options.step, y = y0 + py * options.step;
+            const std::array<std::uint8_t, 4> *color = nullptr;
+            if (x >= 0 && y >= 0 && x < data_.width && y < data_.height) {
+                const auto cell = static_cast<std::size_t>(y) * data_.width + x;
+                for (const int layer : order) {
+                    color = color_of(TilemapAsset::LayerAtIndex(data_, layer).cells[cell]);
+                    if (color) break;
+                }
+            }
+            const auto &c = color ? *color : (y < options.cave_y ? options.sky : options.cave);
+            std::copy(c.begin(), c.end(), pixels.begin() + (static_cast<std::size_t>(py) * pw + px) * 4);
+        }
+    Renderer::SetDynamicImage(options.image, pw, ph, std::move(pixels));
+}
 bool Tilemap::IsSolidAt(double world_x, double world_y) const {
     if (!HasAsset() || !committed_enabled_ || !std::isfinite(world_x) || !std::isfinite(world_y)) return false;
     const double cx = std::floor((world_x - origin_x_) / data_.cell_size);

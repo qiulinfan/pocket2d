@@ -343,6 +343,23 @@ void Autotile(const Fixture &fixture) {
     auto bad = layered; bad.extra_layers[0].name = "Walls!";
     Reject([&] { TilemapAsset::ValidateData(bad); }, "layer names are [a-z0-9_]");
     walls.OnDestroy();
+    // A map picture: one pixel per cell (or per step cells), by terrain colour.
+    Tilemap::MapOptions picture;
+    picture.image = "dynamic:map-test";
+    picture.colors = {{"dirt", {100, 60, 30}}};
+    picture.sky = {0, 0, 255, 255};
+    picture.cave = {0, 0, 0, 255};
+    picture.cave_y = 3;
+    map.ComputeMap(0, 0, 5, 5, picture);
+    int map_width = 0, map_height = 0;
+    Check(Renderer::GetImageSize("dynamic:map-test", map_width, map_height) && map_width == 5 && map_height == 5,
+          "the map picture has a pixel per cell");
+    picture.step = 2;
+    map.ComputeMap(0, 0, 5, 5, picture);
+    Check(Renderer::GetImageSize("dynamic:map-test", map_width, map_height) && map_width == 3 && map_height == 3,
+          "a step of two halves the picture, rounding up");
+    picture.step = 0;
+    Reject([&] { map.ComputeMap(0, 0, 5, 5, picture); }, "a map step below one rejects");
     map.OnDestroy();
 }
 void Lighting(const Fixture &fixture) {

@@ -1446,6 +1446,34 @@
           "description": "Native coloured tile lighting into a dynamic image (one pixel per cell) that multiplies what is drawn under it; options: image, sky, air_decay, solid_decay, ambient, open_ground, sources (x, y, r, g, b groups), smooth."
         },
         {
+          "name": "ComputeMap",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "integer"
+            },
+            {
+              "name": "y",
+              "type": "integer"
+            },
+            {
+              "name": "width",
+              "type": "integer"
+            },
+            {
+              "name": "height",
+              "type": "integer"
+            },
+            {
+              "name": "options",
+              "type": "unknown"
+            }
+          ],
+          "returns": "void",
+          "description": "A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step."
+        },
+        {
           "name": "GetTerrain",
           "call": "instance",
           "parameters": [
