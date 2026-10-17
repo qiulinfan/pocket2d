@@ -289,6 +289,15 @@ void TestClipSheets(const Fixture &fixture) {
       "sheet":{"image":"run.png","columns":4,"rows":1,"extra":1},"frames":[{"row":1,"column":1,"ticks":1}]}]})"); },
       "sheet fields are exact");
 }
+void TestChangedAtlasRevalidates(const Fixture &fixture) {
+    // Atlas sizes are remembered per file; replacing the image must be noticed.
+    SpriteAnimationAsset::LoadResource("nested/hero.animation.json");
+    WritePNG(fixture.root / "images" / "hero.png", 16, 10);
+    Reject([] { SpriteAnimationAsset::LoadResource("nested/hero.animation.json"); },
+           "a replaced atlas with other dimensions must be rejected");
+    WritePNG(fixture.root / "images" / "hero.png", 12, 10);
+    SpriteAnimationAsset::LoadResource("nested/hero.animation.json");
+}
 } // namespace
 
 int main() {
@@ -301,6 +310,7 @@ int main() {
             TestBoundsAndEncoding(fixture);
             TestPathsAndImages(fixture);
             TestClipSheets(fixture);
+            TestChangedAtlasRevalidates(fixture);
         }
         SDL_Quit();
         std::cout << "SpriteAnimation asset schema, bounds, UTF-8 and atlas confinement regressions passed\n";

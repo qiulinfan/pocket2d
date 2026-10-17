@@ -10,8 +10,10 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace {
@@ -186,16 +188,39 @@ void ValidateData(const Data &data) {
     }
 }
 
+// Pixel size of a decodable atlas image. Every instantiation of a template
+// validates its sheets, so sizes are kept per file and decoded again only when
+// the file's size or write time changes.
+namespace {
+std::pair<int, int> AtlasPixelSize(const std::filesystem::path &path) {
+    struct Known { std::uintmax_t bytes; std::filesystem::file_time_type written; int width, height; };
+    static std::mutex mutex;
+    static std::unordered_map<std::string, Known> known;
+    const std::string key = PathText(path);
+    const std::uintmax_t bytes = std::filesystem::file_size(path);
+    const auto written = std::filesystem::last_write_time(path);
+    {
+        std::lock_guard lock(mutex);
+        const auto found = known.find(key);
+        if (found != known.end() && found->second.bytes == bytes && found->second.written == written)
+            return {found->second.width, found->second.height};
+    }
+    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(IMG_Load(key.c_str()), SDL_DestroySurface);
+    Require(surface != nullptr, "cannot decode atlas " + key + ": " + SDL_GetError());
+    std::lock_guard lock(mutex);
+    known[key] = Known{bytes, written, surface->w, surface->h};
+    return {surface->w, surface->h};
+}
+} // namespace
+
 void ValidateAtlasImage(Data &data, const std::filesystem::path &images_root) {
     ValidateData(data);
     const auto check = [&](const std::string &image, int columns, int rows, const std::string &label) {
         const auto path = ResolveWithin(images_root, image, label);
         Require(std::filesystem::is_regular_file(path), "atlas image missing: " + PathText(path));
-        std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
-            IMG_Load(PathText(path).c_str()), SDL_DestroySurface);
-        Require(surface != nullptr, "cannot decode atlas " + PathText(path) + ": " + SDL_GetError());
-        Require(surface->w == static_cast<std::int64_t>(columns) * data.tile_width_px &&
-                    surface->h == static_cast<std::int64_t>(rows) * data.tile_height_px,
+        const auto [width, height] = AtlasPixelSize(path);
+        Require(width == static_cast<std::int64_t>(columns) * data.tile_width_px &&
+                    height == static_cast<std::int64_t>(rows) * data.tile_height_px,
                 "atlas pixel dimensions must exactly match grid and tile pixel dimensions: " + PathText(path));
         return path;
     };
