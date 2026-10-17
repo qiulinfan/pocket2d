@@ -224,8 +224,8 @@ interface Tilemap extends Component {
     GetLiquidAmount(this: Tilemap, x: number, y: number): number;
     /** Liquid of a cell rectangle, row-major: kind * 256 + amount per cell (kinds 1 water, 2 lava, 3 honey; 0 empty or outside). */
     GetLiquids(this: Tilemap, x: number, y: number, width: number, height: number): unknown;
-    /** One step of Terraria-style flow over the active cells (falling, then levelling sideways; lava and honey slower); options: solid (blocking layer, default "solid"), harden (terrain placed where water meets lava), budget (cells per step). Returns the active cells left. */
-    StepLiquid(this: Tilemap, options: unknown): number;
+    /** One step of Terraria-style flow over the active cells (falling, then levelling sideways; lava and honey slower); options: solid (blocking layer, default "solid"), harden (terrain placed where water meets lava), budget (cells per step). Returns {active = cells left, hardened = {x, y, ...}} (cells where water hardened lava). */
+    StepLiquid(this: Tilemap, options: unknown): unknown;
     /** Turns cells of a layer whose terrain is a key of kinds ({terrain = liquid kind}) into full liquid and clears them; returns the count. */
     LiquidFromTerrain(this: Tilemap, layer: string, kinds: unknown): number;
     /** Liquid of a cell rectangle into a dynamic image, resolution pixels per cell side, each cell filled from its bottom by its amount (full under liquid); options: image, colors (kind -> {r, g, b, a}), resolution (1..16). */

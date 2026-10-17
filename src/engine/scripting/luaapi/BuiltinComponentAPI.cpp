@@ -311,8 +311,8 @@ luabridge::LuaRef GetTileLiquids(Tilemap *map, double x, double y, double width,
     return table;
 }
 
-// map:StepLiquid({solid=, harden=, budget=}) -> active cells left.
-int StepTileLiquid(Tilemap *map, const luabridge::LuaRef &table) {
+// map:StepLiquid({solid=, harden=, budget=}) -> {active = cells left, hardened = {x, y, ...}}.
+luabridge::LuaRef StepTileLiquid(Tilemap *map, const luabridge::LuaRef &table) {
     Tilemap::LiquidStepOptions options;
     if (!table.isNil()) {
         if (!table.isTable()) throw std::invalid_argument("Tilemap:StepLiquid options must be a table");
@@ -331,7 +331,23 @@ int StepTileLiquid(Tilemap *map, const luabridge::LuaRef &table) {
             }
         }
     }
-    return static_cast<int>(map->StepLiquid(options));
+    const auto hardened = map->StepLiquid(options);
+    lua_State *state = LuaState();
+    lua_createtable(state, 0, 2);
+    const auto *grid = map->GetLiquidGrid();
+    lua_pushinteger(state, grid ? static_cast<lua_Integer>(grid->ActiveCount()) : 0);
+    lua_setfield(state, -2, "active");
+    lua_createtable(state, static_cast<int>(hardened.size() * 2), 0);
+    for (std::size_t n = 0; n < hardened.size(); ++n) {
+        lua_pushinteger(state, hardened[n].first);
+        lua_rawseti(state, -2, static_cast<lua_Integer>(2 * n + 1));
+        lua_pushinteger(state, hardened[n].second);
+        lua_rawseti(state, -2, static_cast<lua_Integer>(2 * n + 2));
+    }
+    lua_setfield(state, -2, "hardened");
+    luabridge::LuaRef result = luabridge::LuaRef::fromStack(state, -1);
+    lua_pop(state, 1);
+    return result;
 }
 
 // map:LiquidFromTerrain(layer, {terrain = kind, ...}) -> cells converted.

@@ -331,9 +331,9 @@ function _Tilemap:GetLiquidAmount(x, y) end
 ---@param height number
 ---@return any
 function _Tilemap:GetLiquids(x, y, width, height) end
----One step of Terraria-style flow over the active cells (falling, then levelling sideways; lava and honey slower); options: solid (blocking layer, default "solid"), harden (terrain placed where water meets lava), budget (cells per step). Returns the active cells left.
+---One step of Terraria-style flow over the active cells (falling, then levelling sideways; lava and honey slower); options: solid (blocking layer, default "solid"), harden (terrain placed where water meets lava), budget (cells per step). Returns {active = cells left, hardened = {x, y, ...}} (cells where water hardened lava).
 ---@param options any
----@return integer
+---@return any
 function _Tilemap:StepLiquid(options) end
 ---Turns cells of a layer whose terrain is a key of kinds ({terrain = liquid kind}) into full liquid and clears them; returns the count.
 ---@param layer string

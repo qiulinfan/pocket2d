@@ -177,7 +177,8 @@ map:ComputeMap(0, 0, map.width, map.height, {
 - `map:StepLiquid({solid = "solid", harden = "obsidian", budget = 20000})` 推进一步：
   只处理"活跃"格，先往下落，再与左右少至少两单位的空格拉平；熔岩每 3 步、蜂蜜每 4 步才动一次。
   `solid` 层（含未提交的编辑）的非零格挡住液体；水碰到熔岩时熔岩格清空，并在 `solid` 层放上
-  `harden` 地形（为空则只清空）。每步最多处理 `budget` 格，其余留到下一步；返回剩余活跃格数。
+  `harden` 地形（为空则只清空）。每步最多处理 `budget` 格，其余留到下一步；返回
+  `{active = 剩余活跃格数, hardened = {x1, y1, x2, y2, ...}}`（硬化的格子，方便游戏同步自己的镜像）。
   静止的水体不再活跃，几乎不花时间；任何层的格子编辑都会唤醒周围 3×3 的液体。处理顺序固定，
   同样的起点得到同样的结果。
 - `map:LiquidFromTerrain(layer, {water = "water", lava = "lava"})` 把某层上这些地形的格子

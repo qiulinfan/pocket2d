@@ -109,8 +109,9 @@ public:
         std::string harden;            // terrain placed on `solid` where water meets lava ("" leaves the cell empty)
         std::size_t budget = 20000;    // active cells processed per step
     };
-    // One step of flow; returns the active cells left for the next one.
-    std::size_t StepLiquid(const LiquidStepOptions &options);
+    // One step of flow; returns the cells where water hardened lava (already
+    // set to `harden`, so callers can mirror them).
+    std::vector<std::pair<int, int>> StepLiquid(const LiquidStepOptions &options);
     // Turns cells of `layer` whose terrain is a key of `kinds` into full
     // liquid of the mapped kind and clears the terrain; returns the count.
     int LiquidFromTerrain(const std::string &layer, const std::map<std::string, std::string> &kinds);

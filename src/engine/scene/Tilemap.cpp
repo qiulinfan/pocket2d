@@ -289,15 +289,15 @@ LiquidGrid &Tilemap::Liquid() {
     if (!liquid_) liquid_ = std::make_unique<LiquidGrid>(data_.width, data_.height);
     return *liquid_;
 }
-std::size_t Tilemap::StepLiquid(const LiquidStepOptions &options) {
+std::vector<std::pair<int, int>> Tilemap::StepLiquid(const LiquidStepOptions &options) {
     if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
-    if (!liquid_) return 0;
+    if (!liquid_) return {};
     const int solid = LayerIndex(options.solid);
     const auto hardened = liquid_->Step([&](int x, int y) { return EffectiveCell(solid, x, y) != 0; },
                                         std::max<std::size_t>(1, options.budget));
     if (!options.harden.empty())
         for (const auto &cell : hardened) SetTerrain(options.solid, cell.first, cell.second, options.harden);
-    return liquid_->ActiveCount();
+    return hardened;
 }
 int Tilemap::LiquidFromTerrain(const std::string &layer, const std::map<std::string, std::string> &kinds) {
     if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
