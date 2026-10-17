@@ -16,8 +16,9 @@ index * 100000 + order, and every sprite y-sorts. Solid Box/Circle/Capsule
 colliders become static Rigidbody actors (triggers are left to gameplay).
 GameObjects with a non-static Rigidbody2D are entities owned by gameplay:
 each imports as one SpawnMarker actor (kind = texture folder of its sprite).
-Inactive objects and disabled renderers are skipped; import_report.json lists
-what could not be represented exactly. Hand-authored scene actors (uid below
+Inactive objects and disabled renderers are skipped, except that inactive
+tilemaps and entities import disabled; import_report.json lists what could
+not be represented exactly. Hand-authored scene actors (uid below
 1000) survive re-imports. Needs Pillow.
 """
 import copy
@@ -438,10 +439,13 @@ def import_sprites(world, project, textures, layers, index, actors, stats, next_
         transform = transforms.get(go_key)
         sprite_ref = fields.get("m_Sprite") or {}
         guid, file_id = sprite_ref.get("guid"), sprite_ref.get("fileID")
-        if transform is None or not world.active(transform) or int(fields.get("m_Enabled", 1)) == 0 or not guid:
+        root = entity_of.get(transform)
+        # An inactive entity still carries its own sprite, disabled with it.
+        inactive = transform is not None and not world.active(transform)
+        if (transform is None or (inactive and root != transform) or int(fields.get("m_Enabled", 1)) == 0
+                or not guid):
             stats["skipped"] += 1
             continue
-        root = entity_of.get(transform)
         if root is not None and root != transform:
             continue
         if guid not in world.paths:
@@ -473,6 +477,8 @@ def import_sprites(world, project, textures, layers, index, actors, stats, next_
                        "r": round(255 * float(color.get("r", 1))), "g": round(255 * float(color.get("g", 1))),
                        "b": round(255 * float(color.get("b", 1))), "a": round(255 * float(color.get("a", 1))),
                        "sorting_order": sort_key(layers, fields), "auto_sorting_order": True}
+        if inactive:
+            sprite["enabled"] = False
         if root is not None:  # an entity's own sprite goes on its SpawnMarker
             root_sprites[root] = (world.paths[guid].parent.name, sprite)
             continue
@@ -490,7 +496,8 @@ def scene_index(world):
 
     An entity is a GameObject with a non-static Rigidbody2D (player, enemies,
     NPCs): gameplay scripts own it, so its subtree imports as one SpawnMarker
-    instead of sprites and colliders."""
+    instead of sprites and colliders. Inactive entities count too: they import
+    disabled, like hidden tilemaps."""
     transforms, names, entity_roots = {}, {}, set()
     for key, (cls, fields) in world.objects.items():
         if cls == TRANSFORM:
@@ -500,7 +507,7 @@ def scene_index(world):
     for key, (cls, fields) in world.objects.items():
         if cls == RIGIDBODY_2D and int(fields.get("m_BodyType", 0)) != 2:
             transform = transforms.get(key[:-1] + ((fields.get("m_GameObject") or {}).get("fileID"),))
-            if transform is not None and world.active(transform):
+            if transform is not None:
                 entity_roots.add(transform)
     entity_of = {}
     for transform in transforms.values():
@@ -536,6 +543,9 @@ def import_entities(world, transforms, names, entity_of, root_sprites, actors, s
         x, y, _, _, _ = world.world_transform(root)
         components = {"transform": {"type": "Transform", "x": round(x, 4), "y": round(-y, 4)},
                       "spawn": {"type": "SpawnMarker", "kind": kinds.get(root, "")}}
+        if not world.active(root):
+            components["spawn"]["enabled"] = False
+            stats["inactive_entities"] += 1
         if root in root_sprites:
             components["sprite"] = root_sprites[root][1]
         next_uid += 1
@@ -635,7 +645,7 @@ def import_unity(assets, scene, project, scene_name="world", skip_texture_folder
     actors = []
     used_names = defaultdict(int)
     stats = {"tilemaps": 0, "hidden_tilemaps": 0, "tiles": 0, "sprite_actors": 0, "sprites": 0, "colliders": 0,
-             "entities": 0, "points": 0, "skipped": 0, "triggers_skipped": 0}
+             "entities": 0, "inactive_entities": 0, "points": 0, "skipped": 0, "triggers_skipped": 0}
     layers = sorting_layers(assets)
     next_uid = 1000
     for key, (cls, fields) in sorted(world.objects.items(), key=lambda item: str(item[0])):

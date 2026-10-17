@@ -55,7 +55,8 @@ schema.
   flips become negative scales); sorting layers become `layer index * 100000 +
   order` with y-sorting; solid Box/Circle/Capsule colliders become static
   bodies; GameObjects with a non-static Rigidbody2D become `SpawnMarker`
-  actors (the project defines that component); `--point-prefix` also imports
+  actors (the project defines that component); inactive tilemaps and entities
+  are imported disabled (`enabled: false`) rather than dropped; `--point-prefix` also imports
   GameObjects named with that prefix (spawn points) as `SpawnMarker` actors of
   kind `point`; a point that has a sprite gets the marker on its sprite actor.
   Scaled or rotated tilemaps,

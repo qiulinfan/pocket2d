@@ -110,6 +110,10 @@ def unity_scene():
             game_object % (40, "Hero") + transform % (41, 40, 0, -3, 0) +
             "--- !u!50 &42\nRigidbody2D:\n  m_GameObject: {fileID: 40}\n  m_BodyType: 0\n"
             "--- !u!212 &43\nSpriteRenderer:\n  m_GameObject: {fileID: 40}\n  m_Enabled: 1\n"
+            "  m_Sprite: {fileID: 21300000, guid: %s, type: 3}\n" % g["hero"] +
+            (game_object % (80, "Sleeper")).replace("m_IsActive: 1", "m_IsActive: 0") + transform % (81, 80, 4, -3, 0) +
+            "--- !u!50 &82\nRigidbody2D:\n  m_GameObject: {fileID: 80}\n  m_BodyType: 0\n"
+            "--- !u!212 &83\nSpriteRenderer:\n  m_GameObject: {fileID: 80}\n  m_Enabled: 1\n"
             "  m_Sprite: {fileID: 21300000, guid: %s, type: 3}\n" % g["hero"])
 
 
@@ -156,6 +160,9 @@ def run_unity(game, root):
           actors["spawnPoint1"]["transform"]["y"] == -2, "named empty objects become points: %r" % actors["spawnPoint1"])
     check(actors["Hero"]["spawn"]["kind"] == "Heroes" and actors["Hero"]["transform"]["y"] == 3,
           "Rigidbody2D entities become spawn markers: %r" % actors["Hero"])
+    check("enabled" not in actors["Hero"]["spawn"] and actors["Sleeper"]["spawn"].get("enabled") is False and
+          actors["Sleeper"]["sprite"].get("enabled") is False and actors["Sleeper"]["spawn"]["kind"] == "Heroes",
+          "an inactive entity is imported disabled: %r" % actors["Sleeper"])
     with Runtime(game, project, save_dir=root / "unity_saves") as runtime:
         uid = next(a["uid"] for a in json.loads((project / "scenes/imported.scene").read_text())["actors"]
                    if a["name"] == "Walls_1")
