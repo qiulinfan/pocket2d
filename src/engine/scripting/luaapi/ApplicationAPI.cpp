@@ -2,6 +2,7 @@
 #include "core/Log.h"
 #include "core/FrameClock.h"
 #include "core/Engine.h"
+#include "shared/resources/ResourcePath.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include <chrono>
@@ -57,6 +58,12 @@ int CppApplicationGetWindowHeight() {
     return BoundEngine()->GetWindowHeight();
 }
 
+// Absolute path of the loaded project's resource root, for games that read
+// their own data files on demand (e.g. generated content too large to load at startup).
+std::string CppApplicationGetProjectDirectory() {
+    return ResourcePath::ResourcesRootPath().lexically_normal().string();
+}
+
 void CppApplicationOpenURL(const std::string &url) {
     std::string command;
 #ifdef _WIN32
@@ -79,6 +86,7 @@ void InjectApplicationAPI() {
         .addFunction("GetWindowWidth", &CppApplicationGetWindowWidth)
         .addFunction("GetWindowHeight", &CppApplicationGetWindowHeight)
         .addFunction("OpenURL", &CppApplicationOpenURL)
+        .addFunction("GetProjectDirectory", &CppApplicationGetProjectDirectory)
         .endNamespace();
 }
 

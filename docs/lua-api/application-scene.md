@@ -28,6 +28,12 @@ it once; frozen previews and additional presentations do not advance it.
 Returns the fixed simulation step, currently `1/60` second. Headless stepping
 uses the same lifecycle and physics step as interactive gameplay.
 
+### `Application.GetProjectDirectory() -> string`
+
+Returns the absolute path of the loaded project's resource root (the folder
+holding `game.config`). Trusted gameplay scripts can combine it with `io` and
+`load` to read data files on demand instead of loading them all at startup.
+
 ### `Application.OpenURL(url)`
 
 Asks the host OS to open a URL with the default browser/app.
