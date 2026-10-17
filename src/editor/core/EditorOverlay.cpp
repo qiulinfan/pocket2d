@@ -345,7 +345,7 @@ void BuildDefaultDockLayout(ImGuiID dockspace_id, ImVec2 size) {
     ImGui::DockBuilderDockWindow("Scene", center);
     ImGui::DockBuilderDockWindow("Hierarchy", left);
     ImGui::DockBuilderDockWindow("Inspector", right);
-    ImGui::DockBuilderDockWindow("Map Asset Draft", right);
+    ImGui::DockBuilderDockWindow("Map Asset Draft", bottom);
     ImGui::DockBuilderDockWindow("Project", bottom);
     ImGui::DockBuilderDockWindow("Status", bottom);
     ImGui::DockBuilderFinish(dockspace_id);
@@ -1006,7 +1006,7 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
         engine, scene_document, selected_actor_index_,
         selected_runtime_actor_uid_,
         play_mode_active, scene_editing_enabled, &result.scene_edit_commands,
-        &tilemap_document_);
+        &tilemap_document_, &tilemap_brush_);
     if (!play_mode_active) SyncTilemapPreview(engine);
 
     const EditorPanels::SceneViewPanelResult scene_view_panel_result =
@@ -1015,7 +1015,7 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
             selected_runtime_actor_uid_, editor_config.scene_view_width,
             editor_config.scene_view_height, play_mode_active,
             play_mode_paused, scene_editing_enabled,
-            &result.scene_edit_commands);
+            &result.scene_edit_commands, &tilemap_document_, &tilemap_brush_);
     result.scene_changed |= scene_view_panel_result.scene_changed;
 
     const EditorPanels::ViewportControlsResult viewport_controls =
@@ -1584,18 +1584,44 @@ void EditorOverlay::SyncTilemapPreview(Engine &engine) {
                     if (!tilemap_document_.Revert()) ShowNotice(tilemap_document_.GetLastError());
                     refreshed_clean_document = true;
                 }
-                const AppliedMapPreview desired{actor.runtime_generation, tilemap_document_.GetRevision(), map};
+                AppliedMapPreview desired{actor.runtime_generation, tilemap_document_.GetRevision(), map,
+                                          same_instance ? previous->second.map_revision : 0};
                 const bool changed_document = previous != applied_map_previews_.end() &&
                     previous->second.document_revision != desired.document_revision;
-                if ((tilemap_document_.HasUnsavedChanges() &&
-                     (!same_instance || changed_document || map->GetRevision() == 0)) ||
-                    (same_instance && changed_document)) {
+                // An instance that still shows the previous revision, untouched
+                // since, takes only the edited cells: painting a large map must
+                // not copy and rebuild all of it per stroke step.
+                std::optional<std::vector<TilemapDocument::CellRef>> changes;
+                if (same_instance && changed_document && map->GetRevision() == previous->second.map_revision)
+                    changes = tilemap_document_.ChangesSince(previous->second.document_revision);
+                if (changes) {
+                    const auto &asset = tilemap_document_.GetAsset();
+                    for (const auto &cell : *changes)
+                        map->SetCell(TilemapAsset::LayerName(asset, cell.layer),
+                                     static_cast<double>(cell.index % static_cast<std::size_t>(asset.width)),
+                                     static_cast<double>(cell.index / static_cast<std::size_t>(asset.width)),
+                                     TilemapAsset::LayerAtIndex(asset, cell.layer).cells[cell.index]);
+                    desired.map_revision = kRefreshMapRevision;
+                } else if ((tilemap_document_.HasUnsavedChanges() &&
+                            (!same_instance || changed_document || map->GetRevision() == 0)) ||
+                           (same_instance && changed_document)) {
                     map->ReplaceAsset(tilemap_document_.GetAsset());
+                    desired.map_revision = kRefreshMapRevision;
+                } else if (!same_instance) {
+                    desired.map_revision = kRefreshMapRevision;
                 }
                 next.emplace(identity, desired);
             }
         }
         ComponentManager::CommitTilemaps();
+        // Patched and replaced instances now show the document; others keep
+        // the revision they showed, so a later runtime change is detected.
+        std::uint64_t oldest = tilemap_document_.GetRevision();
+        for (auto &[identity, preview] : next) {
+            if (preview.map_revision == kRefreshMapRevision) preview.map_revision = preview.instance->GetRevision();
+            oldest = std::min(oldest, preview.document_revision);
+        }
+        tilemap_document_.ForgetChangesThrough(oldest);
     }
     applied_map_previews_ = std::move(next);
 }
@@ -1603,7 +1629,13 @@ void EditorOverlay::SyncTilemapPreview(Engine &engine) {
 void EditorOverlay::RenderMapDraftTools(bool play_mode_active) {
     if (!tilemap_document_.HasAsset()) return;
     ImGui::SetNextWindowSize(ImVec2(420, 160), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Map Asset Draft")) {
+    // Appearing must not hide the Project panel or the Inspector's map brush,
+    // but unsaved edits to a map no actor of this scene shows come forward
+    // once, so they can still be saved or discarded.
+    const bool orphaned = !play_mode_active && tilemap_document_.HasUnsavedChanges() && applied_map_previews_.empty();
+    if (orphaned && !map_draft_orphaned_) ImGui::SetNextWindowFocus();
+    map_draft_orphaned_ = orphaned;
+    if (ImGui::Begin("Map Asset Draft", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
         ImGui::TextWrapped("%s", tilemap_document_.GetPath().string().c_str());
         ImGui::TextUnformatted(tilemap_document_.HasUnsavedChanges() ? "Unsaved authoring changes" : "Saved authoring copy");
         if (play_mode_active) ImGui::TextDisabled("Stop playback to edit map assets.");

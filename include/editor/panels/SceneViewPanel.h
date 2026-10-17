@@ -8,6 +8,8 @@
 
 class Engine;
 class SceneDocument;
+class TilemapDocument;
+struct TilemapBrush;
 
 namespace EditorPanels {
 
@@ -35,7 +37,8 @@ SceneViewPanelResult RenderSceneViewPanel(
     int &selected_actor_index, Actor::UID &selected_runtime_actor_uid,
     int scene_view_width, int scene_view_height, bool play_mode_active,
     bool play_mode_paused, bool scene_editing_enabled,
-    std::vector<SceneFormat::SceneEditCommand> *out_edit_commands);
+    std::vector<SceneFormat::SceneEditCommand> *out_edit_commands,
+    TilemapDocument *tilemap_document = nullptr, TilemapBrush *tilemap_brush = nullptr);
 
 } // namespace EditorPanels
 

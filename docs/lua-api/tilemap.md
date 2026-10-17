@@ -276,6 +276,24 @@ fixture metadata。
 `actor:GetComponentByKey(...)` 获取当前组件。旧引用的尺寸、revision 或数学
 坐标转换不是组件存活检查。
 
+## 在编辑器中绘制
+
+选中带 Tilemap 的 actor 后，Inspector 的 **Map Asset** 区打开地图的作者副本：
+
+- **Layer** 列出资源的全部图层：`ground`、`solid`（唯一产生碰撞的层）和每个额外层。
+- 勾选 **Paint in Scene view** 后，在 Scene 视图中按住左键拖动即在所选图层上绘制，
+  选择和拖动 actor 暂停；悬停处的方框显示笔刷覆盖的格子。快速拖动也会连成不断开的线。
+- **Tile** 笔刷写入所选 tile ID（`0` 擦除），可在 atlas 调色板中点选；**Terrain (autotile)**
+  笔刷放置所选地形（`(clear)` 清除），与 Lua `SetTerrain` 一样按邻居选出该格的 tile，
+  并重选上下左右四个地形邻居。**Brush Size** 设定方形笔刷边长。
+- 一次拖动（含被重选的邻居）是一步撤销：Scene 视图聚焦时 `Ctrl+Z`（macOS 为 `Cmd+Z`）撤销，
+  `Ctrl+Shift+Z` 或 `Ctrl+Y` 重做，Inspector 也有 **Undo Map** / **Redo Map**。
+- **Cell by coordinates** 按输入的 X/Y 应用同一笔刷。
+
+预览只把改动的格子写入场景中显示该资源的地图实例，只重建涉及的 32×32 chunk，
+因此大地图上逐帧绘制不复制整张地图；实例在编辑器之外被改过时才整张替换。
+绘制只改作者副本，**Save Map** 后才写入资源。
+
 ## 最小玩法脚本
 
 这个组件对上面的 `terrain` 地图，在新按下 E 时切换一个 ground cell：

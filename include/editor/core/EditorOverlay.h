@@ -91,6 +91,7 @@ public:
     void Shutdown();
     bool HasUnsavedMapChanges() const { return tilemap_document_.HasUnsavedChanges(); }
     TilemapDocument &GetTilemapDocument() { return tilemap_document_; }
+    TilemapBrush &GetTilemapBrush() { return tilemap_brush_; }
     // Explicit owner-thread action shared by the tool button and integration tests.
     const ScriptReloadResult &ExecuteScriptReload(const std::vector<std::string> &types);
     const ScriptReloadResult &GetLastScriptReloadResult() const { return script_reload_result_; }
@@ -108,11 +109,16 @@ private:
     void SyncTilemapPreview(Engine &engine);
     void RenderMapDraftTools(bool play_mode_active);
     TilemapDocument tilemap_document_;
+    TilemapBrush tilemap_brush_;
     struct AppliedMapPreview {
         std::uint64_t actor_generation = 0;
         std::uint64_t document_revision = 0;
         Tilemap *instance = nullptr;
+        // The instance's revision right after this preview last wrote it.
+        std::uint64_t map_revision = 0;
     };
+    static constexpr std::uint64_t kRefreshMapRevision = ~std::uint64_t{0};
+    bool map_draft_orphaned_ = false;
     std::unordered_map<std::string, AppliedMapPreview> applied_map_previews_;
     // Lazily load the project-visible game/rendering config cache from disk.
     void EnsureProjectConfigLoaded();

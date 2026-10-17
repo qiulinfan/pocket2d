@@ -105,7 +105,7 @@ pre-physics 提交先准备新的 cell/fixture 描述，再在 world 未锁定�
 
 SceneFormat 继续保存 actor/component 的 `map_resource`、enabled 和 Transform；不能把 8192 个 cell 塞进普通 component 的任意 Lua property JSON。独立 `TilemapAsset` reader/writer 保存版本化地图数据，使用临时文件写入成功后替换目标。scene 保存不会把运行中种植、拆墙结果写回地图资产。
 
-editor 最小作者流程是选择地图资源、查看维度/atlas/层、输入 layer/x/y/tile ID 后应用单 cell 编辑，并提供 Save Map。无需本切片实现鼠标画笔。用一个窄的 map document 保存作者副本与 old/new cell undo/redo；scene actor 的创建/移动/引用仍用现有 SceneDocument/SceneEditCommand。修改资产和修改运行实例是两种明确操作，Play/Stop 不自动保存 gameplay delta。
+editor 最小作者流程是选择地图资源、查看维度/atlas/层、输入 layer/x/y/tile ID 后应用单 cell 编辑，并提供 Save Map。无需本切片实现鼠标画笔。（后续已加入 Scene 视图画笔、全部图层与地形笔刷，见 `docs/lua-api/tilemap.md` 的“在编辑器中绘制”。）用一个窄的 map document 保存作者副本与 old/new cell undo/redo；scene actor 的创建/移动/引用仍用现有 SceneDocument/SceneEditCommand。修改资产和修改运行实例是两种明确操作，Play/Stop 不自动保存 gameplay delta。
 
 edit-mode cell 修改应更新 preview 的显示和碰撞，但不推进 FrameClock 或 Lua gameplay；在 frozen render 前走同样的安全 map 提交步骤。保存/关闭/重开后作者 cell 数据和 atlas 引用相同，取消未保存编辑恢复磁盘版本。地图载入失败保留当前可用 scene，不清空 editor 文档或运行世界后再报错。
 

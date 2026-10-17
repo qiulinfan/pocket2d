@@ -3,6 +3,7 @@
 #include "editor/documents/SceneDocument.h"
 #include "editor/documents/TilemapDocument.h"
 #include "engine/core/Engine.h"
+#include "rendering/Renderer.h"
 #include "scripting/ComponentManager.h"
 #include "shared/resources/SpriteAssetReference.h"
 #include "shared/resources/ResourcePath.h"
@@ -17,8 +18,39 @@
 namespace EditorPanels {
 namespace {
 
+// Clickable atlas tiles; the selected one is outlined.
+void RenderTilePalette(const TilemapAsset::Data &asset, SDL_Renderer *renderer, int &tile) {
+    if (renderer == nullptr || asset.resolved_image_path.empty()) return;
+    SDL_Texture *texture = Renderer::LoadTexture(asset.resolved_image_path.string(), renderer);
+    if (texture == nullptr) return;
+    const float side = 26.0f;
+    const ImGuiStyle &style = ImGui::GetStyle();
+    const float cell = side + style.FramePadding.x * 2.0f + style.ItemSpacing.x;
+    const int count = asset.atlas.columns * asset.atlas.rows;
+    const int per_row = std::max(1, static_cast<int>((ImGui::GetContentRegionAvail().x - style.WindowPadding.x * 2.0f + style.ItemSpacing.x) / cell));
+    const int rows = (count + per_row - 1) / per_row;
+    const float height = rows * (side + style.FramePadding.y * 2.0f + style.ItemSpacing.y) + style.WindowPadding.y * 2.0f;
+    if (!ImGui::BeginChild("tile_palette", ImVec2(0, std::min(150.0f, height)), ImGuiChildFlags_Borders)) {
+        ImGui::EndChild();
+        return;
+    }
+    for (int id = 1; id <= count; ++id) {
+        const int column = (id - 1) % asset.atlas.columns, row = (id - 1) / asset.atlas.columns;
+        const ImVec2 uv0(static_cast<float>(column) / asset.atlas.columns, static_cast<float>(row) / asset.atlas.rows);
+        const ImVec2 uv1(static_cast<float>(column + 1) / asset.atlas.columns, static_cast<float>(row + 1) / asset.atlas.rows);
+        ImGui::PushID(id);
+        ImGui::PushStyleColor(ImGuiCol_Button, id == tile ? ImVec4(0.95f, 0.75f, 0.2f, 1.0f) : ImVec4(0, 0, 0, 0));
+        if (ImGui::ImageButton("tile", ImTextureRef((ImTextureID)(intptr_t)texture), ImVec2(side, side), uv0, uv1)) tile = id;
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Tile %d", id);
+        ImGui::PopID();
+        if (id % per_row != 0 && id < count) ImGui::SameLine();
+    }
+    ImGui::EndChild();
+}
+
 void RenderTilemapAssetEditor(const std::vector<Actor::ComponentProperty> &properties,
-                              TilemapDocument &document) {
+                              TilemapDocument &document, TilemapBrush &brush, SDL_Renderer *renderer) {
     std::string resource;
     for (const auto &property : properties) {
         if (property.name == "map_resource") {
@@ -52,28 +84,68 @@ void RenderTilemapAssetEditor(const std::vector<Actor::ComponentProperty> &prope
     ImGui::TextWrapped("Atlas: %s (%d x %d)", asset.atlas.image.c_str(), asset.atlas.columns, asset.atlas.rows);
     ImGui::TextDisabled("%s", document.HasUnsavedChanges() ? "Unsaved map edits" : "Map matches saved asset");
 
-    // Values live in this ImGui window's storage, never in process-global state.
-    auto *storage = ImGui::GetStateStorage();
-    const auto layer_key = ImGui::GetID("map_layer");
-    const auto x_key = ImGui::GetID("map_cell_x");
-    const auto y_key = ImGui::GetID("map_cell_y");
-    const auto tile_key = ImGui::GetID("map_tile_id");
-    int layer = storage->GetInt(layer_key, 0);
-    int x = storage->GetInt(x_key, 0), y = storage->GetInt(y_key, 0);
-    int tile = storage->GetInt(tile_key, 1);
-    ImGui::Combo("Layer", &layer, "ground\0solid\0");
-    ImGui::InputInt("Cell X", &x);
-    ImGui::InputInt("Cell Y", &y);
-    ImGui::InputInt("Tile ID (0 = empty)", &tile);
-    storage->SetInt(layer_key, layer); storage->SetInt(x_key, x);
-    storage->SetInt(y_key, y); storage->SetInt(tile_key, tile);
-    const std::string layer_name = layer == 1 ? "solid" : "ground";
-    if (x >= 0 && y >= 0 && x < asset.width && y < asset.height)
-        ImGui::Text("Current tile: %d", TilemapAsset::GetLayer(asset, layer_name).cells[static_cast<std::size_t>(y * asset.width + x)]);
-    else
-        ImGui::TextDisabled("Cell is outside this map.");
-    if (ImGui::Button("Apply Cell")) document.SetCell(layer_name, x, y, tile);
+    // Every layer of the asset: ground, solid (the one that collides), extras.
+    const int layer_count = TilemapAsset::LayerCount(asset);
+    brush.layer = std::clamp(brush.layer, 0, layer_count - 1);
+    std::vector<std::string> layer_labels;
+    for (int index = 0; index < layer_count; ++index)
+        layer_labels.push_back(TilemapAsset::LayerName(asset, index) + (index == 1 ? " (collides)" : ""));
+    if (ImGui::BeginCombo("Layer", layer_labels[static_cast<std::size_t>(brush.layer)].c_str())) {
+        for (int index = 0; index < layer_count; ++index)
+            if (ImGui::Selectable(layer_labels[static_cast<std::size_t>(index)].c_str(), index == brush.layer))
+                brush.layer = index;
+        ImGui::EndCombo();
+    }
+    ImGui::Checkbox("Paint in Scene view", &brush.paint);
+    if (brush.paint)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("Left drag in the Scene view paints the selected layer; Ctrl+Z undoes a stroke.");
+        ImGui::PopStyleColor();
+    }
+    const bool has_terrains = !asset.autotile.terrains.empty();
+    if (!has_terrains) brush.mode = TilemapBrush::Mode::Tile;
+    int mode = brush.mode == TilemapBrush::Mode::Terrain ? 1 : 0;
+    ImGui::RadioButton("Tile", &mode, 0);
     ImGui::SameLine();
+    ImGui::BeginDisabled(!has_terrains);
+    ImGui::RadioButton("Terrain (autotile)", &mode, 1);
+    ImGui::EndDisabled();
+    brush.mode = mode == 1 ? TilemapBrush::Mode::Terrain : TilemapBrush::Mode::Tile;
+    const int tile_count = asset.atlas.columns * asset.atlas.rows;
+    if (brush.mode == TilemapBrush::Mode::Tile) {
+        ImGui::InputInt("Tile ID (0 = empty)", &brush.tile);
+        brush.tile = std::clamp(brush.tile, 0, tile_count);
+        RenderTilePalette(asset, renderer, brush.tile);
+    } else {
+        brush.terrain = std::clamp(brush.terrain, -1, static_cast<int>(asset.autotile.terrains.size()) - 1);
+        const char *current = brush.terrain < 0 ? "(clear)" : asset.autotile.terrains[static_cast<std::size_t>(brush.terrain)].name.c_str();
+        if (ImGui::BeginCombo("Terrain", current)) {
+            if (ImGui::Selectable("(clear)", brush.terrain < 0)) brush.terrain = -1;
+            for (std::size_t index = 0; index < asset.autotile.terrains.size(); ++index)
+                if (ImGui::Selectable(asset.autotile.terrains[index].name.c_str(), static_cast<int>(index) == brush.terrain))
+                    brush.terrain = static_cast<int>(index);
+            ImGui::EndCombo();
+        }
+    }
+    ImGui::SliderInt("Brush Size", &brush.size, 1, 16);
+
+    if (ImGui::TreeNode("Cell by coordinates")) {
+        // Values live in this ImGui window's storage, never in process-global state.
+        auto *storage = ImGui::GetStateStorage();
+        const auto x_key = ImGui::GetID("map_cell_x");
+        const auto y_key = ImGui::GetID("map_cell_y");
+        int x = storage->GetInt(x_key, 0), y = storage->GetInt(y_key, 0);
+        ImGui::InputInt("Cell X", &x);
+        ImGui::InputInt("Cell Y", &y);
+        storage->SetInt(x_key, x); storage->SetInt(y_key, y);
+        if (x >= 0 && y >= 0 && x < asset.width && y < asset.height)
+            ImGui::Text("Current tile: %d", TilemapAsset::LayerAtIndex(asset, brush.layer).cells[static_cast<std::size_t>(y * asset.width + x)]);
+        else
+            ImGui::TextDisabled("Cell is outside this map.");
+        if (ImGui::Button("Apply Brush")) document.Paint(brush, x, y);
+        ImGui::TreePop();
+    }
     ImGui::BeginDisabled(!document.CanUndo());
     if (ImGui::Button("Undo Map")) document.Undo();
     ImGui::EndDisabled();
@@ -625,7 +697,8 @@ bool RenderInspectorPanel(const Engine &engine, SceneDocument &scene_document,
                           bool play_mode_active,
                           bool scene_editing_enabled,
                           std::vector<SceneFormat::SceneEditCommand> *out_edit_commands,
-                          TilemapDocument *tilemap_document) {
+                          TilemapDocument *tilemap_document,
+                          TilemapBrush *tilemap_brush) {
     /*
     Inspector edits the editor-owned SceneDocument cache. Runtime decides later
     when to mirror those document changes into its live copy, except for the
@@ -819,8 +892,9 @@ bool RenderInspectorPanel(const Engine &engine, SceneDocument &scene_document,
                 RenderPhysicsHierarchyInfo(
                     scene_document.GetPhysicsHierarchyState(actor_index));
             }
-            if (component_spec.type == "Tilemap" && tilemap_document != nullptr) {
-                RenderTilemapAssetEditor(inspectable_properties, *tilemap_document);
+            if (component_spec.type == "Tilemap" && tilemap_document != nullptr && tilemap_brush != nullptr) {
+                RenderTilemapAssetEditor(inspectable_properties, *tilemap_document, *tilemap_brush,
+                                         engine.GetRenderer());
             }
         }
 
