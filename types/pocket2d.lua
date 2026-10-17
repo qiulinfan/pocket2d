@@ -285,13 +285,29 @@ function _Tilemap:GetLayerNames() end
 ---@param height integer
 ---@param options any
 function _Tilemap:ComputeLight(x, y, width, height, options) end
----A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step.
+---A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step, fog ({r, g, b, a} for cells never revealed).
 ---@param x integer
 ---@param y integer
 ---@param width integer
 ---@param height integer
 ---@param options any
 function _Tilemap:ComputeMap(x, y, width, height, options) end
+---Marks the cells within radius of a cell as explored (map fog of war).
+---@param x number
+---@param y number
+---@param radius integer
+function _Tilemap:RevealMap(x, y, radius) end
+---Whether a cell has been revealed.
+---@param x number
+---@param y number
+---@return boolean
+function _Tilemap:IsRevealed(x, y) end
+---The revealed cells as comma-separated run lengths, alternating hidden and revealed.
+---@return string
+function _Tilemap:SaveRevealed() end
+---Restores revealed cells from SaveRevealed text; raises unless the runs cover the map.
+---@param runs string
+function _Tilemap:LoadRevealed(runs) end
 ---Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map.
 ---@param layer TileLayer
 ---@param x integer

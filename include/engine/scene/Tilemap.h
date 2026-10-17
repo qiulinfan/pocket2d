@@ -85,8 +85,17 @@ public:
         std::array<std::uint8_t, 4> cave{0, 0, 0, 0};
         int cave_y = 0;
         int step = 1;
+        // When set, cells never revealed (RevealMap) are drawn in this colour.
+        std::optional<std::array<std::uint8_t, 4>> fog;
     };
     void ComputeMap(int x, int y, int width, int height, const MapOptions &options) const;
+    // Map exploration: cells within `radius` of a cell become revealed (a
+    // Terraria-style fog of war). The state saves as text: run lengths of
+    // alternating hidden and revealed cells in row-major order ("12,5,300").
+    void RevealMap(int x, int y, int radius);
+    bool IsRevealed(int x, int y) const;
+    std::string SaveRevealed() const;
+    void LoadRevealed(const std::string &runs);
     // Whether a world point lies in a committed nonzero solid cell of this
     // enabled map (the outline-only collision has no interior to query).
     bool IsSolidAt(double world_x, double world_y) const;
@@ -127,6 +136,7 @@ private:
     };
     TilemapAsset::Data data_;
     std::optional<TilemapAsset::Data> replacement_;
+    std::vector<std::uint8_t> revealed_;   // per cell, allocated on first reveal
     std::map<std::size_t, int> pending_;
     std::vector<Chunk> chunks_;
     int chunks_x_ = 0;

@@ -360,6 +360,21 @@ void Autotile(const Fixture &fixture) {
           "a step of two halves the picture, rounding up");
     picture.step = 0;
     Reject([&] { map.ComputeMap(0, 0, 5, 5, picture); }, "a map step below one rejects");
+    // Fog of war: revealed cells round-trip through their run-length text.
+    Check(!map.IsRevealed(2, 2) && map.SaveRevealed() == "25", "nothing is revealed at first");
+    map.RevealMap(0, 0, 1);
+    Check(map.IsRevealed(0, 0) && map.IsRevealed(1, 0) && map.IsRevealed(0, 1) && !map.IsRevealed(1, 1),
+          "reveal marks a disc of cells");
+    const std::string runs = map.SaveRevealed();
+    Check(runs == "0,2,3,1,19", "revealed cells save as alternating runs");
+    map.LoadRevealed("25");
+    Check(!map.IsRevealed(0, 0), "loading runs replaces the revealed cells");
+    map.LoadRevealed(runs);
+    Check(map.IsRevealed(1, 0) && !map.IsRevealed(4, 4), "saved runs load back");
+    Reject([&] { map.LoadRevealed("3,4"); }, "runs must cover the map exactly");
+    picture.step = 1;
+    picture.fog = std::array<std::uint8_t, 4>{0, 0, 0, 255};
+    map.ComputeMap(0, 0, 5, 5, picture);
     map.OnDestroy();
 }
 void Lighting(const Fixture &fixture) {

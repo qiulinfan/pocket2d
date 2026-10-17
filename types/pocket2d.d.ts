@@ -206,8 +206,16 @@ interface Tilemap extends Component {
     GetLayerNames(this: Tilemap): (string)[];
     /** Native coloured tile lighting into a dynamic image (one pixel per cell) that multiplies what is drawn under it; options: image, sky, air_decay, solid_decay, ambient, open_ground, sources (x, y, r, g, b groups), smooth. */
     ComputeLight(this: Tilemap, x: number, y: number, width: number, height: number, options: unknown): void;
-    /** A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step. */
+    /** A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step, fog ({r, g, b, a} for cells never revealed). */
     ComputeMap(this: Tilemap, x: number, y: number, width: number, height: number, options: unknown): void;
+    /** Marks the cells within radius of a cell as explored (map fog of war). */
+    RevealMap(this: Tilemap, x: number, y: number, radius: number): void;
+    /** Whether a cell has been revealed. */
+    IsRevealed(this: Tilemap, x: number, y: number): boolean;
+    /** The revealed cells as comma-separated run lengths, alternating hidden and revealed. */
+    SaveRevealed(this: Tilemap): string;
+    /** Restores revealed cells from SaveRevealed text; raises unless the runs cover the map. */
+    LoadRevealed(this: Tilemap, runs: string): void;
     /** Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map. */
     GetTerrain(this: Tilemap, layer: TileLayer, x: number, y: number): string | undefined;
     /** Queues the terrain's tile for the cell's neighbourhood ("" clears) and re-chooses the four neighbours; unknown names raise. */

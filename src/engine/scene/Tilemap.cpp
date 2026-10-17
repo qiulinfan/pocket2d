@@ -399,10 +399,62 @@ void Tilemap::ComputeMap(int x0, int y0, int width, int height, const MapOptions
                     if (color) break;
                 }
             }
-            const auto &c = color ? *color : (y < options.cave_y ? options.sky : options.cave);
+            const bool hidden = options.fog && !IsRevealed(x, y);
+            const auto &c = hidden ? *options.fog : color ? *color : (y < options.cave_y ? options.sky : options.cave);
             std::copy(c.begin(), c.end(), pixels.begin() + (static_cast<std::size_t>(py) * pw + px) * 4);
         }
     Renderer::SetDynamicImage(options.image, pw, ph, std::move(pixels));
+}
+void Tilemap::RevealMap(int cx, int cy, int radius) {
+    if (!HasAsset()) throw std::runtime_error("tilemap: no map loaded");
+    if (radius < 0 || radius > 1024) throw std::runtime_error("tilemap: reveal radius must be 0..1024");
+    if (revealed_.empty()) revealed_.assign(static_cast<std::size_t>(data_.width) * data_.height, 0);
+    for (int y = std::max(0, cy - radius); y <= std::min(data_.height - 1, cy + radius); ++y)
+        for (int x = std::max(0, cx - radius); x <= std::min(data_.width - 1, cx + radius); ++x)
+            if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= radius * radius)
+                revealed_[static_cast<std::size_t>(y) * data_.width + x] = 1;
+}
+bool Tilemap::IsRevealed(int x, int y) const {
+    if (revealed_.empty() || x < 0 || y < 0 || x >= data_.width || y >= data_.height) return false;
+    return revealed_[static_cast<std::size_t>(y) * data_.width + x] != 0;
+}
+std::string Tilemap::SaveRevealed() const {
+    if (!HasAsset()) throw std::runtime_error("tilemap: no map loaded");
+    const std::size_t count = static_cast<std::size_t>(data_.width) * data_.height;
+    std::string out;
+    std::uint8_t state = 0;
+    std::size_t run = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::uint8_t value = revealed_.empty() ? 0 : revealed_[i];
+        if (value != state) {
+            out += std::to_string(run) + ",";
+            state = value;
+            run = 0;
+        }
+        ++run;
+    }
+    return out + std::to_string(run);
+}
+void Tilemap::LoadRevealed(const std::string &runs) {
+    if (!HasAsset()) throw std::runtime_error("tilemap: no map loaded");
+    const std::size_t count = static_cast<std::size_t>(data_.width) * data_.height;
+    std::vector<std::uint8_t> cells;
+    cells.reserve(count);
+    std::uint8_t state = 0;
+    std::size_t start = 0;
+    while (start <= runs.size()) {
+        const std::size_t end = std::min(runs.find(',', start), runs.size());
+        const std::string text = runs.substr(start, end - start);
+        if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos || text.size() > 9)
+            throw std::runtime_error("tilemap: revealed runs must be comma-separated counts");
+        const std::size_t run = std::stoul(text);
+        if (cells.size() + run > count) throw std::runtime_error("tilemap: revealed runs exceed the map");
+        cells.insert(cells.end(), run, state);
+        state = state ? 0 : 1;
+        start = end + 1;
+    }
+    if (cells.size() != count) throw std::runtime_error("tilemap: revealed runs do not cover the map");
+    revealed_ = std::move(cells);
 }
 bool Tilemap::IsSolidAt(double world_x, double world_y) const {
     if (!HasAsset() || !committed_enabled_ || !std::isfinite(world_x) || !std::isfinite(world_y)) return false;

@@ -161,6 +161,11 @@ map:ComputeMap(0, 0, map.width, map.height, {
 每个像素取该格最上层有颜色的地形：先 solid，再 ground，再额外层；没有颜色的地形视为空。
 图片尺寸为 `ceil(width/step) × ceil(height/step)`，`step` 为 1..64。未知选项会报错。
 
+战争迷雾：`map:RevealMap(x, y, radius)` 把以某格为圆心、半径内的格子标为已探索；
+`map:IsRevealed(x, y)` 查询。`ComputeMap` 的 `fog = {r, g, b, a}` 选项把从未探索的格子画成该颜色。
+`map:SaveRevealed()` 返回探索状态文本（按行优先、未探索与已探索交替的游程长度，如 `"12,5,300"`），
+可存进存档；`map:LoadRevealed(text)` 恢复，游程总和必须恰好覆盖地图。
+
 ## 获取组件与属性
 
 ```lua

@@ -1471,7 +1471,64 @@
             }
           ],
           "returns": "void",
-          "description": "A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step."
+          "description": "A map picture of a cell rectangle into a dynamic image, one pixel per step cells, coloured by the topmost terrain; options: image, colors (terrain name -> {r, g, b}), sky, cave ({r, g, b, a}), cave_y, step, fog ({r, g, b, a} for cells never revealed)."
+        },
+        {
+          "name": "RevealMap",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            },
+            {
+              "name": "radius",
+              "type": "integer"
+            }
+          ],
+          "returns": "void",
+          "description": "Marks the cells within radius of a cell as explored (map fog of war)."
+        },
+        {
+          "name": "IsRevealed",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            }
+          ],
+          "returns": "boolean",
+          "description": "Whether a cell has been revealed."
+        },
+        {
+          "name": "SaveRevealed",
+          "call": "instance",
+          "parameters": [
+
+          ],
+          "returns": "string",
+          "description": "The revealed cells as comma-separated run lengths, alternating hidden and revealed."
+        },
+        {
+          "name": "LoadRevealed",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "runs",
+              "type": "string"
+            }
+          ],
+          "returns": "void",
+          "description": "Restores revealed cells from SaveRevealed text; raises unless the runs cover the map."
         },
         {
           "name": "GetTerrain",

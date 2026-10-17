@@ -153,7 +153,8 @@ void ComputeTileMap(Tilemap *map, double x, double y, double width, double heigh
     for (const double value : {x, y, width, height})
         if (!std::isfinite(value) || std::floor(value) != value || std::abs(value) > 1e6)
             throw std::invalid_argument("Tilemap:ComputeMap rectangle must be integers");
-    static const std::set<std::string, std::less<>> kOptions = {"image", "colors", "sky", "cave", "cave_y", "step"};
+    static const std::set<std::string, std::less<>> kOptions = {"image", "colors", "sky", "cave", "cave_y", "step",
+                                                                 "fog"};
     lua_State *state = LuaState();
     table.push(state);
     lua_pushnil(state);
@@ -189,6 +190,8 @@ void ComputeTileMap(Tilemap *map, double x, double y, double width, double heigh
         const luabridge::LuaRef value = table[key];
         if (!value.isNil()) (std::string(key) == "sky" ? options.sky : options.cave) = rgba(value, key, true);
     }
+    const luabridge::LuaRef fog = table["fog"];
+    if (!fog.isNil()) options.fog = rgba(fog, "fog", true);
     for (const auto &[key, field] : {std::pair{"cave_y", &options.cave_y}, std::pair{"step", &options.step}}) {
         const luabridge::LuaRef value = table[key];
         if (value.isNil()) continue;
@@ -285,6 +288,17 @@ void InjectTilemapAPI() {
         .addFunction("GetLayerNames", &GetTileLayerNames)
         .addFunction("ComputeLight", &ComputeTileLight)
         .addFunction("ComputeMap", &ComputeTileMap)
+        .addFunction("RevealMap", +[](Tilemap *map, double x, double y, double radius) {
+            for (const double value : {x, y, radius})
+                if (!std::isfinite(value) || std::abs(value) > 1e6)
+                    throw std::invalid_argument("Tilemap:RevealMap needs finite numbers");
+            map->RevealMap(static_cast<int>(std::floor(x)), static_cast<int>(std::floor(y)), static_cast<int>(radius));
+        })
+        .addFunction("IsRevealed", +[](Tilemap *map, double x, double y) {
+            return map->IsRevealed(static_cast<int>(std::floor(x)), static_cast<int>(std::floor(y)));
+        })
+        .addFunction("SaveRevealed", &Tilemap::SaveRevealed)
+        .addFunction("LoadRevealed", &Tilemap::LoadRevealed)
         .addFunction("GetTerrain", &GetTileTerrain)
         .addFunction("SetTerrain", &Tilemap::SetTerrain)
         .addFunction("GetRevision", &Tilemap::GetRevision)
