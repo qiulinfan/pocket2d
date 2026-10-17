@@ -4,7 +4,9 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/Actor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scene.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tilemap.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LiquidGrid.cpp"
         "${PROJECT_SOURCE_DIR}/include/engine/scene/Actor.h"
+        "${PROJECT_SOURCE_DIR}/include/engine/scene/LiquidGrid.h"
         "${PROJECT_SOURCE_DIR}/include/engine/scene/Scene.h"
         "${PROJECT_SOURCE_DIR}/include/engine/scene/Transform.h"
 )

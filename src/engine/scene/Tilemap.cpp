@@ -1,5 +1,6 @@
 #include "scripting/LuaBoundary.h"
 #include "scene/Tilemap.h"
+#include "scene/LiquidGrid.h"
 #include "physics/Rigidbody.h"
 #include "physics/PhysicsMutationGuard.h"
 #include "physics/RayCast.h"
@@ -83,8 +84,10 @@ void FiniteFloat(double value, const char *label) {
 }
 } // namespace
 
+Tilemap::Tilemap() = default;
 Tilemap::Tilemap(const Tilemap &other) : enabled(other.enabled), map_resource(other.map_resource) {
     if (other.HasAsset()) Initialize(other.data_, other.origin_x_, other.origin_y_);
+    if (other.liquid_) liquid_ = std::make_unique<LiquidGrid>(*other.liquid_);
 }
 Tilemap::~Tilemap() {
     // Runtime removal normally calls OnDestroy at its safe pre-physics boundary.
@@ -159,6 +162,7 @@ void Tilemap::ValidateInitialization(const TilemapAsset::Data &data, float x, fl
 }
 void Tilemap::Initialize(const TilemapAsset::Data &data, float x, float y) {
     ValidateInitialization(data, x, y);
+    liquid_.reset();
     const int nx = (data.width + kChunkSize - 1) / kChunkSize;
     const int ny = (data.height + kChunkSize - 1) / kChunkSize;
     auto copy = data;
@@ -216,6 +220,7 @@ void Tilemap::AdoptPreparedState(Tilemap &prepared) {
 void Tilemap::ReplaceAsset(const TilemapAsset::Data &data) {
     if (!HasLiveBinding()) throw std::runtime_error("tilemap: expired component");
     ValidateInitialization(data, origin_x_, origin_y_);
+    liquid_.reset();
     auto prepared = data;
     replacement_ = std::move(prepared);
     pending_.clear();
@@ -276,7 +281,71 @@ bool Tilemap::SetCell(const std::string &layer, double x, double y, double id) {
     if ((found == pending_.end() ? original : found->second) == static_cast<int>(id)) return false;
     if (original == static_cast<int>(id)) pending_.erase(command);
     else pending_[command] = static_cast<int>(id);
+    if (liquid_) liquid_->Wake(static_cast<int>(x), static_cast<int>(y));
     return true;
+}
+LiquidGrid &Tilemap::Liquid() {
+    if (!HasAsset()) throw std::runtime_error("tilemap: no map loaded");
+    if (!liquid_) liquid_ = std::make_unique<LiquidGrid>(data_.width, data_.height);
+    return *liquid_;
+}
+std::size_t Tilemap::StepLiquid(const LiquidStepOptions &options) {
+    if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
+    if (!liquid_) return 0;
+    const int solid = LayerIndex(options.solid);
+    const auto hardened = liquid_->Step([&](int x, int y) { return EffectiveCell(solid, x, y) != 0; },
+                                        std::max<std::size_t>(1, options.budget));
+    if (!options.harden.empty())
+        for (const auto &cell : hardened) SetTerrain(options.solid, cell.first, cell.second, options.harden);
+    return liquid_->ActiveCount();
+}
+int Tilemap::LiquidFromTerrain(const std::string &layer, const std::map<std::string, std::string> &kinds) {
+    if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
+    const int layer_index = LayerIndex(layer);
+    const auto terrain_of = TilemapAsset::TerrainIndex(data_);
+    std::vector<LiquidGrid::Kind> by_terrain(data_.autotile.terrains.size(), LiquidGrid::kNone);
+    for (std::size_t t = 0; t < data_.autotile.terrains.size(); ++t) {
+        const auto found = kinds.find(data_.autotile.terrains[t].name);
+        if (found != kinds.end()) by_terrain[t] = LiquidGrid::KindFromName(found->second);
+    }
+    auto &grid = Liquid();
+    int converted = 0;
+    for (int y = 0; y < data_.height; ++y)
+        for (int x = 0; x < data_.width; ++x) {
+            const int tile = EffectiveCell(layer_index, x, y);
+            if (tile <= 0 || static_cast<std::size_t>(tile) >= terrain_of.size() || terrain_of[tile] < 0) continue;
+            const auto kind = by_terrain[static_cast<std::size_t>(terrain_of[tile])];
+            if (kind == LiquidGrid::kNone) continue;
+            grid.Set(x, y, kind, LiquidGrid::kFull);
+            SetCell(layer, x, y, 0);
+            ++converted;
+        }
+    return converted;
+}
+void Tilemap::ComputeLiquid(int x0, int y0, int width, int height, const LiquidImageOptions &options) const {
+    if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");
+    if (options.resolution < 1 || options.resolution > 16) throw std::runtime_error("tilemap: liquid resolution must be 1..16");
+    if (width <= 0 || height <= 0 || width > 1024 || height > 1024)
+        throw std::runtime_error("tilemap: liquid rectangle must be 1..1024 cells per side");
+    std::array<std::array<std::uint8_t, 4>, 4> color_of{};
+    for (const auto &[name, color] : options.colors) color_of[LiquidGrid::KindFromName(name)] = color;
+    const int r = options.resolution;
+    const int pw = width * r, ph = height * r;
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(pw) * ph * 4, 0);
+    if (liquid_)
+        for (int cy = 0; cy < height; ++cy)
+            for (int cx = 0; cx < width; ++cx) {
+                const auto [kind, amount] = liquid_->Get(x0 + cx, y0 + cy);
+                if (kind == LiquidGrid::kNone || amount == 0) continue;
+                const auto &c = color_of[kind];
+                if (c[3] == 0) continue;
+                const bool covered = liquid_->Get(x0 + cx, y0 + cy - 1).second > 0;
+                const int fill = covered ? r : std::max(1, (amount * r + LiquidGrid::kFull - 1) / LiquidGrid::kFull);
+                for (int py = cy * r + (r - fill); py < (cy + 1) * r; ++py)
+                    for (int px = cx * r; px < (cx + 1) * r; ++px)
+                        std::copy(c.begin(), c.end(), pixels.begin() + (static_cast<std::size_t>(py) * pw + px) * 4);
+            }
+    Renderer::SetDynamicImage(options.image, pw, ph, std::move(pixels));
 }
 std::vector<float> Tilemap::ComputeLight(int x0, int y0, int width, int height, const LightOptions &options) const {
     if (!HasAsset() || !HasLiveBinding()) throw std::runtime_error("tilemap: no map loaded");

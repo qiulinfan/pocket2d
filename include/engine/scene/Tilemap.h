@@ -9,8 +9,11 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <vector>
+
+class LiquidGrid;
 
 class Tilemap {
 public:
@@ -28,7 +31,7 @@ public:
         std::uint64_t visible_tiles = 0;
     };
 
-    Tilemap() = default;
+    Tilemap();
     Tilemap(const Tilemap &other);
     Tilemap &operator=(const Tilemap &) = delete;
     ~Tilemap();
@@ -96,6 +99,30 @@ public:
     bool IsRevealed(int x, int y) const;
     std::string SaveRevealed() const;
     void LoadRevealed(const std::string &runs);
+    // Flowing liquids (scene/LiquidGrid.h) over the map's cells, created on
+    // first use: per cell a kind ("water", "lava", "honey" or "") and an amount
+    // 0..255. Cell edits on any layer wake the liquid around them.
+    LiquidGrid &Liquid();
+    const LiquidGrid *GetLiquidGrid() const { return liquid_.get(); }
+    struct LiquidStepOptions {
+        std::string solid = "solid";   // the layer whose nonzero cells block liquid (pending edits count)
+        std::string harden;            // terrain placed on `solid` where water meets lava ("" leaves the cell empty)
+        std::size_t budget = 20000;    // active cells processed per step
+    };
+    // One step of flow; returns the active cells left for the next one.
+    std::size_t StepLiquid(const LiquidStepOptions &options);
+    // Turns cells of `layer` whose terrain is a key of `kinds` into full
+    // liquid of the mapped kind and clears the terrain; returns the count.
+    int LiquidFromTerrain(const std::string &layer, const std::map<std::string, std::string> &kinds);
+    // Liquid of a cell rectangle (it may extend past the map) into a dynamic
+    // image of `resolution` pixels per cell side: each cell is filled from its
+    // bottom by its amount (full when liquid lies above it), coloured by kind.
+    struct LiquidImageOptions {
+        std::string image;
+        std::map<std::string, std::array<std::uint8_t, 4>> colors;
+        int resolution = 8;
+    };
+    void ComputeLiquid(int x, int y, int width, int height, const LiquidImageOptions &options) const;
     // Whether a world point lies in a committed nonzero solid cell of this
     // enabled map (the outline-only collision has no interior to query).
     bool IsSolidAt(double world_x, double world_y) const;
@@ -137,6 +164,7 @@ private:
     TilemapAsset::Data data_;
     std::optional<TilemapAsset::Data> replacement_;
     std::vector<std::uint8_t> revealed_;   // per cell, allocated on first reveal
+    std::unique_ptr<LiquidGrid> liquid_;   // allocated on first use
     std::map<std::size_t, int> pending_;
     std::vector<Chunk> chunks_;
     int chunks_x_ = 0;

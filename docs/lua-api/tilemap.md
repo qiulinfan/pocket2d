@@ -166,6 +166,27 @@ map:ComputeMap(0, 0, map.width, map.height, {
 `map:SaveRevealed()` 返回探索状态文本（按行优先、未探索与已探索交替的游程长度，如 `"12,5,300"`），
 可存进存档；`map:LoadRevealed(text)` 恢复，游程总和必须恰好覆盖地图。
 
+## 流动液体
+
+地图可以带一层泰拉瑞亚式的流动液体（原生 `LiquidGrid`，第一次使用时创建）：每格一种液体
+（`"water"`、`"lava"`、`"honey"`，`""` 为空）和 0..255 的量。
+
+- `map:SetLiquid(x, y, kind, amount)` 设置一格；`map:GetLiquid(x, y)` 返回种类，
+  `map:GetLiquidAmount(x, y)` 返回量；`map:GetLiquids(x, y, w, h)` 按行优先返回一块区域的
+  `种类 * 256 + 量`（1 水、2 熔岩、3 蜂蜜，0 为空或地图外）。
+- `map:StepLiquid({solid = "solid", harden = "obsidian", budget = 20000})` 推进一步：
+  只处理"活跃"格，先往下落，再与左右少至少两单位的空格拉平；熔岩每 3 步、蜂蜜每 4 步才动一次。
+  `solid` 层（含未提交的编辑）的非零格挡住液体；水碰到熔岩时熔岩格清空，并在 `solid` 层放上
+  `harden` 地形（为空则只清空）。每步最多处理 `budget` 格，其余留到下一步；返回剩余活跃格数。
+  静止的水体不再活跃，几乎不花时间；任何层的格子编辑都会唤醒周围 3×3 的液体。处理顺序固定，
+  同样的起点得到同样的结果。
+- `map:LiquidFromTerrain(layer, {water = "water", lava = "lava"})` 把某层上这些地形的格子
+  变成满格液体并清掉地形，返回转换的格数（用来把地图里画好的水和熔岩变成液体）。
+- `map:ComputeLiquid(x, y, w, h, {image = "dynamic:liquid", colors = {water = {r, g, b, a}}, resolution = 8})`
+  把一块区域画进动态图片，每格 `resolution`（1..16）像素见方，按量从格子底部填充，上方有液体的格子
+  画满；图片可以像光照一样整张画在地图上。
+- `map:SaveLiquid()` 返回游程文本（`"数量:编码"`，逗号分隔），`map:LoadLiquid(text)` 恢复。
+
 ## 获取组件与属性
 
 ```lua

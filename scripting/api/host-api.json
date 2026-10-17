@@ -1531,6 +1531,161 @@
           "description": "Restores revealed cells from SaveRevealed text; raises unless the runs cover the map."
         },
         {
+          "name": "SetLiquid",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "amount",
+              "type": "integer"
+            }
+          ],
+          "returns": "void",
+          "description": "Sets a cell's liquid: kind \"water\", \"lava\", \"honey\" or \"\" (empty) and amount 0..255; wakes the cells around it."
+        },
+        {
+          "name": "GetLiquid",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            }
+          ],
+          "returns": "string",
+          "description": "The liquid kind in a cell (\"water\", \"lava\", \"honey\" or \"\" when empty or outside the map)."
+        },
+        {
+          "name": "GetLiquidAmount",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            }
+          ],
+          "returns": "integer",
+          "description": "The liquid amount in a cell, 0..255."
+        },
+        {
+          "name": "GetLiquids",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            },
+            {
+              "name": "width",
+              "type": "number"
+            },
+            {
+              "name": "height",
+              "type": "number"
+            }
+          ],
+          "returns": "unknown",
+          "description": "Liquid of a cell rectangle, row-major: kind * 256 + amount per cell (kinds 1 water, 2 lava, 3 honey; 0 empty or outside)."
+        },
+        {
+          "name": "StepLiquid",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "options",
+              "type": "unknown"
+            }
+          ],
+          "returns": "integer",
+          "description": "One step of Terraria-style flow over the active cells (falling, then levelling sideways; lava and honey slower); options: solid (blocking layer, default \"solid\"), harden (terrain placed where water meets lava), budget (cells per step). Returns the active cells left."
+        },
+        {
+          "name": "LiquidFromTerrain",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "layer",
+              "type": "string"
+            },
+            {
+              "name": "kinds",
+              "type": "unknown"
+            }
+          ],
+          "returns": "integer",
+          "description": "Turns cells of a layer whose terrain is a key of kinds ({terrain = liquid kind}) into full liquid and clears them; returns the count."
+        },
+        {
+          "name": "ComputeLiquid",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            },
+            {
+              "name": "width",
+              "type": "number"
+            },
+            {
+              "name": "height",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "unknown"
+            }
+          ],
+          "returns": "void",
+          "description": "Liquid of a cell rectangle into a dynamic image, resolution pixels per cell side, each cell filled from its bottom by its amount (full under liquid); options: image, colors (kind -> {r, g, b, a}), resolution (1..16)."
+        },
+        {
+          "name": "SaveLiquid",
+          "call": "instance",
+          "parameters": [],
+          "returns": "string",
+          "description": "The liquid as run-length text (\"count:code\" pairs, code kind * 256 + amount)."
+        },
+        {
+          "name": "LoadLiquid",
+          "call": "instance",
+          "parameters": [
+            {
+              "name": "runs",
+              "type": "string"
+            }
+          ],
+          "returns": "void",
+          "description": "Restores the liquid from SaveLiquid text; raises unless the runs cover the map."
+        },
+        {
           "name": "GetTerrain",
           "call": "instance",
           "parameters": [

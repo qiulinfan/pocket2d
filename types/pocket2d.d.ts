@@ -216,6 +216,24 @@ interface Tilemap extends Component {
     SaveRevealed(this: Tilemap): string;
     /** Restores revealed cells from SaveRevealed text; raises unless the runs cover the map. */
     LoadRevealed(this: Tilemap, runs: string): void;
+    /** Sets a cell's liquid: kind "water", "lava", "honey" or "" (empty) and amount 0..255; wakes the cells around it. */
+    SetLiquid(this: Tilemap, x: number, y: number, kind: string, amount: number): void;
+    /** The liquid kind in a cell ("water", "lava", "honey" or "" when empty or outside the map). */
+    GetLiquid(this: Tilemap, x: number, y: number): string;
+    /** The liquid amount in a cell, 0..255. */
+    GetLiquidAmount(this: Tilemap, x: number, y: number): number;
+    /** Liquid of a cell rectangle, row-major: kind * 256 + amount per cell (kinds 1 water, 2 lava, 3 honey; 0 empty or outside). */
+    GetLiquids(this: Tilemap, x: number, y: number, width: number, height: number): unknown;
+    /** One step of Terraria-style flow over the active cells (falling, then levelling sideways; lava and honey slower); options: solid (blocking layer, default "solid"), harden (terrain placed where water meets lava), budget (cells per step). Returns the active cells left. */
+    StepLiquid(this: Tilemap, options: unknown): number;
+    /** Turns cells of a layer whose terrain is a key of kinds ({terrain = liquid kind}) into full liquid and clears them; returns the count. */
+    LiquidFromTerrain(this: Tilemap, layer: string, kinds: unknown): number;
+    /** Liquid of a cell rectangle into a dynamic image, resolution pixels per cell side, each cell filled from its bottom by its amount (full under liquid); options: image, colors (kind -> {r, g, b, a}), resolution (1..16). */
+    ComputeLiquid(this: Tilemap, x: number, y: number, width: number, height: number, options: unknown): void;
+    /** The liquid as run-length text ("count:code" pairs, code kind * 256 + amount). */
+    SaveLiquid(this: Tilemap): string;
+    /** Restores the liquid from SaveLiquid text; raises unless the runs cover the map. */
+    LoadLiquid(this: Tilemap, runs: string): void;
     /** Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map. */
     GetTerrain(this: Tilemap, layer: TileLayer, x: number, y: number): string | undefined;
     /** Queues the terrain's tile for the cell's neighbourhood ("" clears) and re-chooses the four neighbours; unknown names raise. */

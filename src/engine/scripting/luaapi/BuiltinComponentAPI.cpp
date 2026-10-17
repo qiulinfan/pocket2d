@@ -2,6 +2,7 @@
 #include "rendering/SpriteRenderer.h"
 #include "scene/Transform.h"
 #include "scene/Tilemap.h"
+#include "scene/LiquidGrid.h"
 #include "rendering/SpriteAnimation.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
@@ -268,6 +269,118 @@ void InjectSpriteAnimationAPI() {
         .endClass();
 }
 
+// Liquids ------------------------------------------------------------------
+int LiquidCell(double value, const char *what) {
+    if (!std::isfinite(value) || std::abs(value) > 1e7) throw std::invalid_argument(std::string("Tilemap liquid ") + what + " must be a finite number");
+    return static_cast<int>(std::floor(value));
+}
+
+// map:SetLiquid(x, y, kind, amount): kind "water", "lava", "honey" or "" (empty); amount 0..255.
+void SetTileLiquid(Tilemap *map, double x, double y, const std::string &kind, double amount) {
+    if (!std::isfinite(amount) || amount < 0 || amount > 255 || amount != std::floor(amount))
+        throw std::invalid_argument("Tilemap:SetLiquid amount must be an integer 0..255");
+    map->Liquid().Set(LiquidCell(x, "x"), LiquidCell(y, "y"), LiquidGrid::KindFromName(kind), static_cast<std::uint8_t>(amount));
+}
+
+std::string GetTileLiquid(Tilemap *map, double x, double y) {
+    const auto *grid = map->GetLiquidGrid();
+    return grid ? LiquidGrid::KindName(grid->Get(LiquidCell(x, "x"), LiquidCell(y, "y")).first) : "";
+}
+
+int GetTileLiquidAmount(Tilemap *map, double x, double y) {
+    const auto *grid = map->GetLiquidGrid();
+    return grid ? grid->Get(LiquidCell(x, "x"), LiquidCell(y, "y")).second : 0;
+}
+
+// map:GetLiquids(x, y, width, height): row-major codes kind * 256 + amount
+// (kinds 1 water, 2 lava, 3 honey; 0 is empty or outside the map).
+luabridge::LuaRef GetTileLiquids(Tilemap *map, double x, double y, double width, double height) {
+    const int x0 = LiquidCell(x, "x"), y0 = LiquidCell(y, "y"), w = LiquidCell(width, "width"), h = LiquidCell(height, "height");
+    if (w <= 0 || h <= 0 || w > 1024 || h > 1024) throw std::invalid_argument("Tilemap:GetLiquids rectangle must be 1..1024 cells per side");
+    const auto *grid = map->GetLiquidGrid();
+    lua_State *state = LuaState();
+    lua_createtable(state, w * h, 0);
+    for (int cy = 0; cy < h; ++cy)
+        for (int cx = 0; cx < w; ++cx) {
+            const auto cell = grid ? grid->Get(x0 + cx, y0 + cy) : std::pair{LiquidGrid::kNone, std::uint8_t{0}};
+            lua_pushinteger(state, cell.first * 256 + cell.second);
+            lua_rawseti(state, -2, static_cast<lua_Integer>(cy * w + cx + 1));
+        }
+    luabridge::LuaRef table = luabridge::LuaRef::fromStack(state, -1);
+    lua_pop(state, 1);
+    return table;
+}
+
+// map:StepLiquid({solid=, harden=, budget=}) -> active cells left.
+int StepTileLiquid(Tilemap *map, const luabridge::LuaRef &table) {
+    Tilemap::LiquidStepOptions options;
+    if (!table.isNil()) {
+        if (!table.isTable()) throw std::invalid_argument("Tilemap:StepLiquid options must be a table");
+        for (luabridge::Iterator it(table); !it.isNil(); ++it) {
+            const std::string key = it.key().tostring();
+            const luabridge::LuaRef value = it.value();
+            if (key == "solid" || key == "harden") {
+                if (!value.isString()) throw std::invalid_argument("Tilemap:StepLiquid " + key + " must be a string");
+                (key == "solid" ? options.solid : options.harden) = value.cast<std::string>().value();
+            } else if (key == "budget") {
+                if (!value.isNumber() || value.cast<double>().value() < 1 || value.cast<double>().value() > 1e7)
+                    throw std::invalid_argument("Tilemap:StepLiquid budget must be 1..10000000");
+                options.budget = static_cast<std::size_t>(value.cast<double>().value());
+            } else {
+                throw std::invalid_argument("Tilemap:StepLiquid has no option '" + key + "'");
+            }
+        }
+    }
+    return static_cast<int>(map->StepLiquid(options));
+}
+
+// map:LiquidFromTerrain(layer, {terrain = kind, ...}) -> cells converted.
+int TileLiquidFromTerrain(Tilemap *map, const std::string &layer, const luabridge::LuaRef &table) {
+    if (!table.isTable()) throw std::invalid_argument("Tilemap:LiquidFromTerrain needs a {terrain = kind} table");
+    std::map<std::string, std::string> kinds;
+    for (luabridge::Iterator it(table); !it.isNil(); ++it) {
+        if (!it.key().isString() || !it.value().isString())
+            throw std::invalid_argument("Tilemap:LiquidFromTerrain maps terrain names to liquid kinds");
+        kinds[it.key().cast<std::string>().value()] = it.value().cast<std::string>().value();
+    }
+    return map->LiquidFromTerrain(layer, kinds);
+}
+
+// map:ComputeLiquid(x, y, width, height, {image=, colors={water={r, g, b, a}, ...}, resolution=})
+void ComputeTileLiquid(Tilemap *map, double x, double y, double width, double height, const luabridge::LuaRef &table) {
+    if (!table.isTable()) throw std::invalid_argument("Tilemap:ComputeLiquid options must be a table");
+    Tilemap::LiquidImageOptions options;
+    for (luabridge::Iterator it(table); !it.isNil(); ++it) {
+        const std::string key = it.key().tostring();
+        const luabridge::LuaRef value = it.value();
+        if (key == "image") {
+            if (!value.isString()) throw std::invalid_argument("Tilemap:ComputeLiquid image must be a string");
+            options.image = value.cast<std::string>().value();
+        } else if (key == "resolution") {
+            if (!value.isNumber()) throw std::invalid_argument("Tilemap:ComputeLiquid resolution must be a number");
+            options.resolution = static_cast<int>(value.cast<double>().value());
+        } else if (key == "colors") {
+            if (!value.isTable()) throw std::invalid_argument("Tilemap:ComputeLiquid colors must be a table");
+            for (luabridge::Iterator c(value); !c.isNil(); ++c) {
+                const luabridge::LuaRef rgba = c.value();
+                if (!c.key().isString() || !rgba.isTable() || rgba.length() != 4)
+                    throw std::invalid_argument("Tilemap:ComputeLiquid colors are {kind = {r, g, b, a}}");
+                std::array<std::uint8_t, 4> color{};
+                for (int n = 0; n < 4; ++n) {
+                    const double channel = rgba[n + 1].cast<double>().value();
+                    if (!(channel >= 0 && channel <= 255)) throw std::invalid_argument("Tilemap:ComputeLiquid channels must be 0..255");
+                    color[n] = static_cast<std::uint8_t>(channel);
+                }
+                options.colors[c.key().cast<std::string>().value()] = color;
+            }
+        } else {
+            throw std::invalid_argument("Tilemap:ComputeLiquid has no option '" + key + "'");
+        }
+    }
+    if (options.image.empty()) throw std::invalid_argument("Tilemap:ComputeLiquid needs an image name");
+    map->ComputeLiquid(LiquidCell(x, "x"), LiquidCell(y, "y"), LiquidCell(width, "width"), LiquidCell(height, "height"), options);
+}
+
 void InjectTilemapAPI() {
     luabridge::getGlobalNamespace(LuaState())
         .beginClass<Tilemap>("Tilemap")
@@ -299,6 +412,15 @@ void InjectTilemapAPI() {
         })
         .addFunction("SaveRevealed", &Tilemap::SaveRevealed)
         .addFunction("LoadRevealed", &Tilemap::LoadRevealed)
+        .addFunction("SetLiquid", &SetTileLiquid)
+        .addFunction("GetLiquid", &GetTileLiquid)
+        .addFunction("GetLiquidAmount", &GetTileLiquidAmount)
+        .addFunction("GetLiquids", &GetTileLiquids)
+        .addFunction("StepLiquid", &StepTileLiquid)
+        .addFunction("LiquidFromTerrain", &TileLiquidFromTerrain)
+        .addFunction("ComputeLiquid", &ComputeTileLiquid)
+        .addFunction("SaveLiquid", +[](Tilemap *map) { return map->Liquid().Save(); })
+        .addFunction("LoadLiquid", +[](Tilemap *map, const std::string &runs) { map->Liquid().Load(runs); })
         .addFunction("GetTerrain", &GetTileTerrain)
         .addFunction("SetTerrain", &Tilemap::SetTerrain)
         .addFunction("GetRevision", &Tilemap::GetRevision)

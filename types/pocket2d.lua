@@ -308,6 +308,51 @@ function _Tilemap:SaveRevealed() end
 ---Restores revealed cells from SaveRevealed text; raises unless the runs cover the map.
 ---@param runs string
 function _Tilemap:LoadRevealed(runs) end
+---Sets a cell's liquid: kind "water", "lava", "honey" or "" (empty) and amount 0..255; wakes the cells around it.
+---@param x number
+---@param y number
+---@param kind string
+---@param amount integer
+function _Tilemap:SetLiquid(x, y, kind, amount) end
+---The liquid kind in a cell ("water", "lava", "honey" or "" when empty or outside the map).
+---@param x number
+---@param y number
+---@return string
+function _Tilemap:GetLiquid(x, y) end
+---The liquid amount in a cell, 0..255.
+---@param x number
+---@param y number
+---@return integer
+function _Tilemap:GetLiquidAmount(x, y) end
+---Liquid of a cell rectangle, row-major: kind * 256 + amount per cell (kinds 1 water, 2 lava, 3 honey; 0 empty or outside).
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@return any
+function _Tilemap:GetLiquids(x, y, width, height) end
+---One step of Terraria-style flow over the active cells (falling, then levelling sideways; lava and honey slower); options: solid (blocking layer, default "solid"), harden (terrain placed where water meets lava), budget (cells per step). Returns the active cells left.
+---@param options any
+---@return integer
+function _Tilemap:StepLiquid(options) end
+---Turns cells of a layer whose terrain is a key of kinds ({terrain = liquid kind}) into full liquid and clears them; returns the count.
+---@param layer string
+---@param kinds any
+---@return integer
+function _Tilemap:LiquidFromTerrain(layer, kinds) end
+---Liquid of a cell rectangle into a dynamic image, resolution pixels per cell side, each cell filled from its bottom by its amount (full under liquid); options: image, colors (kind -> {r, g, b, a}), resolution (1..16).
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param options any
+function _Tilemap:ComputeLiquid(x, y, width, height, options) end
+---The liquid as run-length text ("count:code" pairs, code kind * 256 + amount).
+---@return string
+function _Tilemap:SaveLiquid() end
+---Restores the liquid from SaveLiquid text; raises unless the runs cover the map.
+---@param runs string
+function _Tilemap:LoadLiquid(runs) end
 ---Autotile terrain name at a committed cell; empty string when the cell has no terrain, nil outside the map.
 ---@param layer TileLayer
 ---@param x integer

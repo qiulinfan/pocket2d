@@ -152,6 +152,9 @@ add_test(NAME agent_budget COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_budget_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(agent_budget PROPERTIES TIMEOUT 90)
 
+pocket_runtime_test(liquid_test liquid_test.cpp)
+add_test(NAME liquid_native COMMAND liquid_test)
+set_tests_properties(liquid_native PROPERTIES TIMEOUT 30)
 pocket_runtime_test(tilemap_test tilemap_test.cpp)
 add_test(NAME tilemap_native COMMAND tilemap_test)
 set_tests_properties(tilemap_native PROPERTIES TIMEOUT 30)
