@@ -32,6 +32,8 @@ struct EditorConfigData {
     // Editor font: "platform" (SF Pro on macOS, Segoe UI on Windows, else
     // Inter) or "inter" (the bundled .engine/system/fonts/system.ttf).
     std::string font = "platform";
+    // Editor text size in pixels before UI scale, 12 to 24.
+    float font_size = 17.0f;
     // Project browser tile width in pixels (its size slider), 56 to 128.
     float project_icon_size = 80.0f;
     int reference_width = 1600;

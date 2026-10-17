@@ -162,6 +162,7 @@ private:
     std::string imgui_ini_path_;
     float applied_ui_scale_ = 1.0f;
     std::string applied_theme_;
+    float applied_font_size_ = 0.0f;
     bool project_config_loaded_ = false;
     GameConfigData project_config_cache_;
     int selected_actor_index_ = -1;

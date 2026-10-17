@@ -382,7 +382,38 @@ std::string PlatformUiFontPath() {
     return !path.empty() && std::filesystem::is_regular_file(path, error) ? path.string() : std::string();
 }
 
-// "platform": the OS UI font, else the bundled Inter (.engine/system/fonts/system.ttf).
+// A system font with Chinese glyphs, merged into the UI font for characters
+// it lacks. macOS 26's PingFang uses an outline format (hvgl) no font loader
+// reads, so macOS falls back to Hiragino Sans GB, which ships with it.
+std::string CjkFallbackFontPath() {
+#if defined(__APPLE__)
+    const std::filesystem::path candidates[] = {"/System/Library/Fonts/Hiragino Sans GB.ttc",
+                                                "/System/Library/Fonts/STHeiti Light.ttc"};
+#elif defined(_WIN32)
+    const char *windows = std::getenv("WINDIR");
+    const std::filesystem::path fonts = std::filesystem::path(windows != nullptr ? windows : "C:\\Windows") / "Fonts";
+    const std::filesystem::path candidates[] = {fonts / "msyh.ttc", fonts / "simhei.ttf"};
+#else
+    const std::filesystem::path candidates[] = {"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                                                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"};
+#endif
+    for (const auto &path : candidates) {
+        std::error_code error;
+        if (std::filesystem::is_regular_file(path, error)) return path.string();
+    }
+    return {};
+}
+
+void MergeCjkFallback(ImGuiIO &io) {
+    const std::string path = CjkFallbackFontPath();
+    if (path.empty()) return;
+    ImFontConfig config;
+    config.MergeMode = true;  // glyphs load on demand, so the whole CJK range costs nothing up front
+    io.Fonts->AddFontFromFileTTF(path.c_str(), kEditorFontPixelSize, &config);
+}
+
+// "platform": the OS UI font, else the bundled Inter (.engine/system/fonts/system.ttf);
+// either way with a Chinese fallback.
 void LoadEditorDefaultFont(ImGuiIO &io, std::string_view preference) {
     io.Fonts->Clear();
     if (preference != "inter") {
@@ -390,6 +421,7 @@ void LoadEditorDefaultFont(ImGuiIO &io, std::string_view preference) {
         if (!platform_path.empty()) {
             if (ImFont *font = io.Fonts->AddFontFromFileTTF(platform_path.c_str(), kEditorFontPixelSize)) {
                 io.FontDefault = font;
+                MergeCjkFallback(io);
                 return;
             }
         }
@@ -405,6 +437,7 @@ void LoadEditorDefaultFont(ImGuiIO &io, std::string_view preference) {
     if (!font_path.empty()) {
         if (ImFont *font = io.Fonts->AddFontFromFileTTF(font_path.c_str(), kEditorFontPixelSize)) {
             io.FontDefault = font;
+            MergeCjkFallback(io);
             return;
         }
     } else {
@@ -591,7 +624,8 @@ void EditorOverlay::ApplyConfig(const EditorConfigData &config, int window_width
     if (!initialized_) return;
 
     const float effective_ui_scale = ComputeEffectiveUiScale(config, window_width, window_height);
-    if (std::fabs(effective_ui_scale - applied_ui_scale_) < 0.001f && config.theme == applied_theme_) {
+    if (std::fabs(effective_ui_scale - applied_ui_scale_) < 0.001f && config.theme == applied_theme_ &&
+        config.font_size == applied_font_size_) {
         return;
     }
 
@@ -606,6 +640,8 @@ void EditorOverlay::ApplyConfig(const EditorConfigData &config, int window_width
     style.WindowBorderHoverPadding = std::max(style.WindowBorderHoverPadding, 1.0f);
     // Since Dear ImGui 1.92, global font scaling lives on style.FontScaleMain
     style.FontScaleMain = effective_ui_scale;
+    style.FontSizeBase = config.font_size;
+    applied_font_size_ = config.font_size;
     ImGuiIO &io = ImGui::GetIO();
     io.FontGlobalScale = 1.0f;
     applied_ui_scale_ = effective_ui_scale;
@@ -719,6 +755,7 @@ void EditorOverlay::NotifyProjectChanged() {
     viewport_runtime_image_valid_ = false;
     viewport_transport_bar_valid_ = false;
     applied_ui_scale_ = 0.0f;
+    applied_font_size_ = 0.0f;
     applied_theme_.clear();
     show_open_project_window_ = false;
     open_project_error_.clear();
@@ -1141,6 +1178,12 @@ void EditorOverlay::RenderEditorSettingsWindow(Engine &engine,
     }
     ImGui::SameLine();
     ImGui::TextDisabled("(after restart)");
+    float font_size = editor_config.font_size;
+    if (ImGui::SliderFloat("Font Size", &font_size, 12.0f, 24.0f, "%.0f px")) {
+        editor_config.font_size = std::round(font_size);
+        config_changed = true;
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) result.editor_preferences_changed = true;
 
     int window_width = editor_config.window_width;
     int window_height = editor_config.window_height;

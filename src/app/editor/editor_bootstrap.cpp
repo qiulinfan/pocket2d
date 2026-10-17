@@ -691,6 +691,7 @@ void EditorApp::Run() {
                     // Look-and-feel preferences need no Apply: keep them and save now.
                     confirmed_editor_config_.theme = editor_config_.theme;
                     confirmed_editor_config_.font = editor_config_.font;
+                    confirmed_editor_config_.font_size = editor_config_.font_size;
                     confirmed_editor_config_.project_icon_size = editor_config_.project_icon_size;
                     EditorConfig::Write(confirmed_editor_config_);
                 }
