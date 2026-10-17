@@ -38,7 +38,9 @@ public:
         return renderer;
     }
 
-    // Presentation maintains host pacing. Engine simulation owns frame advance.
+    // Presenting does not pace: Engine::GameLoop renders as often as it can
+    // (or as game.config's max_fps/vsync ask), and the editor and --frames
+    // loops, which run one tick per frame, pace themselves to 60 Hz.
     static void SDL_RenderPresent(SDL_Renderer *renderer,
                                   bool advance_gameplay_frame = true) {
         (void)advance_gameplay_frame;
@@ -50,10 +52,6 @@ public:
 
         CaptureFrameIfRecordingEnabled(renderer);
         ::SDL_RenderPresent(renderer);
-        // Count time already spent presenting toward the deadline. VSync alone
-        // is insufficient on high-refresh displays: one 1/60 simulation tick
-        // per 120 Hz present would otherwise run gameplay twice as fast.
-        FrameClock::DelayToMaintain60FPS();
     }
 
     static void SDL_RenderTextureRotated(Actor::UID actor_uid,

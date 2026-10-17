@@ -131,7 +131,9 @@ When there is no project to reopen, as on first launch, the editor creates a `ba
 
 A project can show a "Made with Pocket2D" splash before its first frame, as Unity games do: set `"splash_screen": true` (and optionally `"splash_seconds"`, 0.5 to 10, default 2) in `game.config`, or tick it in `Project -> Game Config`. Only the standalone `game` window shows it; the editor, `--frames` captures and headless agent runs skip it. The image is `.engine/system/splash.png`, drawn by `tools/make_splash.py` and compiled into the runtime.
 
-Press F3 in the standalone `game` window to show or hide its frame rate: frames per second, and the time the engine spends on a frame (average and worst over the last half second, without the wait for the next 1/60 s tick). `"show_fps": true` in `game.config` (or `Project -> Game Config`) starts with it shown.
+Gameplay ticks 60 times a second (a fixed step keeps physics and replays deterministic), but the standalone `game` draws frames as fast as it can between ticks. To limit drawing, set `"max_fps"` (1 to 1000; 0, the default, is no limit) or `"vsync": true` in `game.config`, or in `Project -> Game Config`. Frames between two ticks show the latest tick again; they are not yet interpolated.
+
+Press F3 in the standalone `game` window to show or hide its frame rate: frames per second, gameplay ticks per second, and the time the engine spends on a frame (average and worst over the last half second, not counting a frame limit or vsync wait). `"show_fps": true` in `game.config` (or `Project -> Game Config`) starts with it shown.
 
 `pocket package PROJECT --platform mac|windows|linux|web` packages a project as a game players run without the engine: a macOS `.app`, a Windows or Linux folder, or a web page, each with a zip (a tar.gz for Linux). It needs a runtime kit for the platform, built once by `python3 tools/build_runtime.py PLATFORM` (on a macOS host for `mac`; in Docker for the others). Development files (`tools/`, `scenarios/`, `source_art/`, Markdown, hidden files and `game.config`'s `package_exclude` patterns) stay out. See [Packaging games](docs/development/packaging.md).
 

@@ -1,5 +1,6 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+EM_ASYNC_JS(void, WaitForAnimationFrame, (), { await new Promise(resolve => requestAnimationFrame(resolve)); });
 #endif
 #include "core/Engine.h"
 #include "rendering/SplashScreen.h"
@@ -315,22 +316,52 @@ void Engine::GameLoop() {
     if (const char *hot_reload = SDL_getenv("POCKET_HOT_RELOAD"); hot_reload && std::string_view(hot_reload) == "1")
         SetAssetHotReload(true);
 
+    // Gameplay ticks 60 times a second of real time, whatever the frame rate
+    // (a fixed step keeps physics and replays deterministic). Frames are drawn
+    // as often as possible between ticks, redrawing the last tick's requests,
+    // unless game.config caps them (max_fps) or waits for the display (vsync).
+    // Input that arrives between ticks waits for the next tick.
+    if (config_.vsync && ReadEnvironmentString("POCKET_RENDER_VSYNC").empty() && !SDL_SetRenderVSync(renderer, 1))
+        Log::Warning("render", std::string("vsync unavailable: ") + SDL_GetError());
+    constexpr Uint64 kTickNs = 1000000000ULL / 60;
+    constexpr Uint64 kMaxTicksPerFrame = 5;   // after a stall, drop the backlog instead of racing
+    const Uint64 frame_budget_ns = config_.max_fps > 0 ? 1000000000ULL / config_.max_fps : 0;
+    Uint64 previous = SDL_GetTicksNS();
+    Uint64 lag = kTickNs;   // tick at once, so the first frame has something to draw
     while (IsRunning()) {
         const Uint64 frame_start = SDL_GetTicksNS();
-        RunSingleFrame();
-        const Uint64 frame_end = SDL_GetTicksNS();
-        frame_rate_overlay_.RecordFrame(frame_end - frame_start, frame_end);
+        lag = std::min(lag + (frame_start - previous), kTickNs * kMaxTicksPerFrame);
+        previous = frame_start;
+
+        bool quit_requested = false;
+        SDL_Event event;
+        while (SDLEventHelper::SDL_PollEvent(&event)) ProcessSDLEvent(event, quit_requested);
+        int ticks = 0;
+        for (; lag >= kTickNs && IsRunning(); lag -= kTickNs, ++ticks) {
+            advanceGameplay();
+            if (scene_reset_required_) break;
+            finishGameplayFrame();
+            Renderer::HoldFrameRequests();
+        }
+        if (quit_requested) is_game_running = false;
+        if (!IsRunning()) break;
+        if (!scene_reset_required_) {
+            Renderer::RequeueHeldFrameRequests();
+            render();
+        }
+        const Uint64 work_end = SDL_GetTicksNS();
+        frame_rate_overlay_.RecordFrame(work_end - frame_start, ticks, work_end);
         frame_rate_overlay_.Draw(renderer);
         PresentFrame();
 #ifdef __EMSCRIPTEN__
-        // In the browser the loop yields each frame (the build uses ASYNCIFY)
-        // and keeps to 60 frames a second itself.
-        static double next_frame = emscripten_get_now();
-        next_frame += 1000.0 / 60.0;
-        const double now = emscripten_get_now();
-        if (next_frame < now - 100.0) next_frame = now;
-        emscripten_sleep(static_cast<unsigned int>(std::max(0.0, next_frame - now)));
+        // The browser shows a frame per display refresh: yield until the next
+        // one (ASYNCIFY), which also keeps the page responsive.
+        WaitForAnimationFrame();
 #endif
+        if (frame_budget_ns > 0) {
+            const Uint64 elapsed = SDL_GetTicksNS() - frame_start;
+            if (elapsed < frame_budget_ns) SDL_DelayPrecise(frame_budget_ns - elapsed);
+        }
     }
 
     ShutdownRuntime();

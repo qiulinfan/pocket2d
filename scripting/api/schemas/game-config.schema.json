@@ -32,6 +32,16 @@
       "description": "Start the standalone runtime with its frame-rate readout (frames per second and frame time) shown; F3 toggles it while playing. Default false.",
       "type": "boolean"
     },
+    "max_fps": {
+      "description": "Caps the standalone runtime's frame rate. 0 (the default) draws as often as possible; gameplay ticks 60 times a second either way.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "vsync": {
+      "description": "Wait for the display's refresh before showing each frame (no tearing, at most the display's rate). Default false.",
+      "type": "boolean"
+    },
     "package_exclude": {
       "description": "Extra files `pocket package` leaves out of packaged games: patterns relative to the project, with * wildcards (hidden files, __pycache__, tools/, scenarios/, source_art/ and Markdown are always left out).",
       "type": "array",

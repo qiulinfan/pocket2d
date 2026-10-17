@@ -171,6 +171,15 @@ void TestConfiguration(const ProjectFixture &project) {
     Rejects([] { GameConfig::Read(); }, "show_fps");
     Write(game, R"({"show_fps":true})");
     Check(GameConfig::Read().show_fps, "a project's show_fps setting must be read");
+    Check(GameConfig::Read().max_fps == 0 && !GameConfig::Read().vsync, "frames are unlimited unless a project asks");
+    Write(game, R"({"max_fps":-1})");
+    Rejects([] { GameConfig::Read(); }, "max_fps");
+    Write(game, R"({"max_fps":30.5})");
+    Rejects([] { GameConfig::Read(); }, "max_fps");
+    Write(game, R"({"vsync":"on"})");
+    Rejects([] { GameConfig::Read(); }, "vsync");
+    Write(game, R"({"max_fps":144,"vsync":true})");
+    Check(GameConfig::Read().max_fps == 144 && GameConfig::Read().vsync, "frame limits must be read");
     Write(game, R"({"initial_scene":"valid","game_title":"test"})");
     const std::pair<const char *, const char *> cases[] = {
         {R"({"x_resolution":"wide"})", "x_resolution"},

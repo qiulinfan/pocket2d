@@ -641,6 +641,30 @@ void Renderer::DiscardFrameRequests() {
     Queues().text_draw_requests.clear();
 }
 
+void Renderer::HoldFrameRequests() {
+    RenderQueueState &q = Queues();
+    q.held_scene_draw_requests.swap(q.scene_draw_requests);
+    q.held_scene_particle_batches.swap(q.scene_particle_batches);
+    q.held_ui_draw_requests.swap(q.ui_draw_requests);
+    q.held_pixel_draw_requests.swap(q.pixel_draw_requests);
+    q.held_text_draw_requests.swap(q.text_draw_requests);
+    DiscardFrameRequests();
+}
+
+void Renderer::RequeueHeldFrameRequests() {
+    RenderQueueState &q = Queues();
+    q.scene_draw_requests.insert(q.scene_draw_requests.end(), q.held_scene_draw_requests.begin(),
+                                 q.held_scene_draw_requests.end());
+    q.scene_particle_batches.insert(q.scene_particle_batches.end(), q.held_scene_particle_batches.begin(),
+                                    q.held_scene_particle_batches.end());
+    q.ui_draw_requests.insert(q.ui_draw_requests.end(), q.held_ui_draw_requests.begin(),
+                              q.held_ui_draw_requests.end());
+    q.pixel_draw_requests.insert(q.pixel_draw_requests.end(), q.held_pixel_draw_requests.begin(),
+                                 q.held_pixel_draw_requests.end());
+    q.text_draw_requests.insert(q.text_draw_requests.end(), q.held_text_draw_requests.begin(),
+                                q.held_text_draw_requests.end());
+}
+
 // Render one frame by flushing queued scene images, particles, text, and pixels.
 void Renderer::RenderFrame(SDL_Renderer *renderer, float camera_x,
                            float camera_y, float zoom_factor,

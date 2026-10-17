@@ -66,8 +66,8 @@ shows the "Made with Pocket2D" splash first.
 ## The web runtime
 
 The web build links SDL statically, runs tasks inline (no threads) and uses
-ASYNCIFY so the game loop yields to the browser every frame, pacing itself to
-60 frames a second. Its page (`web/shell.html`) fetches `project.pack` before
+ASYNCIFY so the game loop yields to the browser until its next animation
+frame: it draws at the display's refresh rate while gameplay ticks at 60 Hz. Its page (`web/shell.html`) fetches `project.pack` before
 `main`: a little-endian uint32 manifest length, the JSON manifest (`title`,
 `files` with `path` and `size`) and the files' bytes in order, written under
 `/` (`project/` and `.engine/system/`). Saves live in IndexedDB, mounted at

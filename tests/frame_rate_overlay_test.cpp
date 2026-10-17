@@ -33,17 +33,18 @@ int main() {
     FrameRateOverlay overlay;
     constexpr Uint64 tick = 16666667ULL;   // 1/60 s, rounded up so 30 fill the window
     Uint64 now = 1;
-    overlay.RecordFrame(0, now);   // starts the window
+    overlay.RecordFrame(0, 0, now);   // starts the window
     for (int frame = 1; frame <= 30; ++frame) {
         now += tick;
-        overlay.RecordFrame(frame == 7 ? 10000000ULL : 4000000ULL, now);
+        overlay.RecordFrame(frame == 7 ? 10000000ULL : 4000000ULL, frame % 2, now);
     }
     Check(Near(overlay.Fps(), 60.0f), "30 frames in half a second are 60 FPS");
+    Check(Near(overlay.TicksPerSecond(), 30.0f), "15 ticks in half a second are 30 ticks a second");
     Check(Near(overlay.AverageMs(), 4.2f), "the average frame time covers the window");
     Check(Near(overlay.WorstMs(), 10.0f), "the worst frame time is the slowest frame");
     for (int frame = 1; frame <= 15; ++frame) {   // half the speed
         now += tick * 2;
-        overlay.RecordFrame(4000000ULL, now);
+        overlay.RecordFrame(4000000ULL, 1, now);
     }
     Check(Near(overlay.Fps(), 30.0f) && Near(overlay.WorstMs(), 4.0f), "each window starts afresh");
 

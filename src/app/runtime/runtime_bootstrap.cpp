@@ -1,3 +1,4 @@
+#include "core/FrameClock.h"
 #include "app/runtime/RuntimeApp.h"
 #include "app/runtime/AgentSession.h"
 #include "app/runtime/AgentSupervisor.h"
@@ -245,6 +246,7 @@ int RuntimeApp::Run(int argc, char **argv) {
                     if (!saved) throw std::runtime_error(SDL_GetError());
                 }
                 engine.PresentFrame();
+                FrameClock::DelayToMaintain60FPS();   // one tick per frame
             }
         }
         return 0;

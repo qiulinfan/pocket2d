@@ -101,6 +101,11 @@ public:
     static void Shutdown();
     // Release this tick's presentation requests when simulation runs headless.
     static void DiscardFrameRequests();
+    // The standalone runtime renders more often than it simulates: after a
+    // tick it holds the requests gameplay queued (replacing the last tick's),
+    // and before each render it queues a copy of them again.
+    static void HoldFrameRequests();
+    static void RequeueHeldFrameRequests();
 
     // resource loading and draw queue entry points
     // 资源加载和绘制队列入口
@@ -213,6 +218,12 @@ struct RenderQueueState {
     std::vector<DrawOrderKey> ui_draw_order;
     std::vector<PixelDrawRequest> pixel_draw_requests;
     std::vector<TextDrawRequest> text_draw_requests;
+    // The last tick's requests (Renderer::HoldFrameRequests).
+    std::vector<ImageDrawRequest> held_scene_draw_requests;
+    std::vector<ParticleBatchRequest> held_scene_particle_batches;
+    std::vector<ImageDrawRequest> held_ui_draw_requests;
+    std::vector<PixelDrawRequest> held_pixel_draw_requests;
+    std::vector<TextDrawRequest> held_text_draw_requests;
 };
 
 #endif

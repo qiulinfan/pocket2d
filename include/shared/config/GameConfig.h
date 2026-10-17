@@ -26,6 +26,11 @@ struct GameConfigData {
     // Whether the standalone runtime starts with its frame-rate readout shown
     // (game.config "show_fps"; F3 toggles it while playing).
     bool show_fps = false;
+    // The standalone runtime renders as often as it can while gameplay ticks
+    // 60 times a second. max_fps (1..1000; 0 = no limit) caps the frame rate;
+    // vsync waits for the display's refresh instead.
+    int max_fps = 0;
+    bool vsync = false;
 };
 
 class GameConfig {

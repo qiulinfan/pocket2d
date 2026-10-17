@@ -228,6 +228,17 @@ GameConfigData GameConfig::Read() {
             throw std::runtime_error(game_config_path.string() + ": show_fps must be true or false");
         config.show_fps = game_config["show_fps"].GetBool();
     }
+    if (game_config.HasMember("max_fps")) {
+        const auto &value = game_config["max_fps"];
+        if (!value.IsInt() || value.GetInt() < 0 || value.GetInt() > 1000)
+            throw std::runtime_error(game_config_path.string() + ": max_fps must be an integer in [0, 1000] (0: no limit)");
+        config.max_fps = value.GetInt();
+    }
+    if (game_config.HasMember("vsync")) {
+        if (!game_config["vsync"].IsBool())
+            throw std::runtime_error(game_config_path.string() + ": vsync must be true or false");
+        config.vsync = game_config["vsync"].GetBool();
+    }
 
     if (std::filesystem::exists(rendering_config_path)) {
         rapidjson::Document rendering_config;
@@ -302,6 +313,12 @@ bool GameConfig::Write(const GameConfigData &config) {
     if (config.show_fps || game_config.HasMember("show_fps")) {
         if (game_config.HasMember("show_fps")) game_config["show_fps"].SetBool(config.show_fps);
         else game_config.AddMember("show_fps", config.show_fps, game_config.GetAllocator());
+    }
+    if (config.max_fps != 0 || game_config.HasMember("max_fps"))
+        UpsertIntMember(game_config, "max_fps", std::clamp(config.max_fps, 0, 1000));
+    if (config.vsync || game_config.HasMember("vsync")) {
+        if (game_config.HasMember("vsync")) game_config["vsync"].SetBool(config.vsync);
+        else game_config.AddMember("vsync", config.vsync, game_config.GetAllocator());
     }
 
     UpsertIntMember(rendering_config, "x_resolution",

@@ -1319,6 +1319,10 @@ void EditorOverlay::RenderProjectConfigWindows() {
             ImGui::TextDisabled("Shown by the standalone game before its first frame.");
             config_changed |= ImGui::Checkbox("Show frame rate", &project_config_cache_.show_fps);
             ImGui::TextDisabled("The standalone game's FPS and frame time; F3 toggles it while playing.");
+            config_changed |= ImGui::SliderInt("Max FPS", &project_config_cache_.max_fps, 0, 1000,
+                                               project_config_cache_.max_fps == 0 ? "No limit" : "%d");
+            config_changed |= ImGui::Checkbox("VSync", &project_config_cache_.vsync);
+            ImGui::TextDisabled("Gameplay always ticks 60 times a second; these only limit drawing.");
 
             if (config_changed) {
                 persist_project_config();

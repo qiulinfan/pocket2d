@@ -1,3 +1,4 @@
+#include "core/FrameClock.h"
 #include "app/editor/EditorApp.h"
 #include "core/Log.h"
 #include "editor/core/ProjectTemplates.h"
@@ -752,6 +753,8 @@ void EditorApp::Run() {
             }
             // Present once after both runtime and editor UI have been drawn
             active.PresentFrame(advance_gameplay_frame);
+            // One gameplay tick per editor frame, so the editor keeps 60 Hz.
+            FrameClock::DelayToMaintain60FPS();
             // A script quit or a fatal play-World failure ends play, not the editor.
             if (play_engine_ && (!play_engine_->IsRunning() || play_engine_->RequiresSceneReset())) {
                 if (play_engine_->RequiresSceneReset())

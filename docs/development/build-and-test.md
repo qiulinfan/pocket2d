@@ -31,8 +31,11 @@ Run the graphical editor or runtime from the repository root:
 native SDL3 renderer; `gpu` is SDL 3.4's renderer on SDL_GPU (Metal on macOS,
 Vulkan or Direct3D 12 elsewhere). Empty/`auto` lets SDL choose. An unavailable explicit driver is an
 error; it does not silently substitute another backend. Available backends are
-platform-dependent. `POCKET_RENDER_VSYNC=1` enables synchronization; gameplay
-cadence remains 60 Hz.
+platform-dependent. `POCKET_RENDER_VSYNC=1` enables synchronization (and
+overrides `game.config`'s `vsync`). Gameplay always ticks at 60 Hz: the
+standalone `game` draws as many frames as it can between ticks unless
+`game.config` sets `max_fps` or `vsync`, while the editor's play mode and
+`--frames` runs draw one frame per tick at 60 Hz.
 
 ```sh
 ./build/modern-debug/tests/render_backend_test software
