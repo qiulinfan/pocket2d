@@ -60,10 +60,7 @@ void ExpectToggle(ImGuiTestContext *ctx, bool playing) {
 void RegisterTests(ImGuiTestEngine *engine) {
     ImGuiTest *test = IM_REGISTER_TEST(engine, "editor", "viewport_play_stop_buttons");
     test->TestFunc = [](ImGuiTestContext *ctx) {
-        // Without the editor app's dock layout the viewport starts tiny; the
-        // transport bar appears once the runtime image is at least 120x80.
-        ctx->WindowMove("//Viewport", ImVec2(200, 60));
-        ctx->WindowResize("//Viewport", ImVec2(520, 420));
+        // The default dock layout puts the Viewport behind the Scene tab.
         ctx->WindowFocus("//Viewport");
         ctx->SetRef("//Viewport");
         ctx->ItemClick("transport_play/##transport_icon");

@@ -145,6 +145,11 @@ private:
     bool show_external_editors_window_ = false;
     bool show_new_project_window_ = false;
     bool show_open_project_window_ = false;
+    // Docking layout: checked once per session, rebuilt on View -> Reset Layout.
+    bool dock_layout_checked_ = false;
+    bool reset_dock_layout_requested_ = false;
+    int select_default_tabs_in_ = 0;  // frames left to select the Project tab
+    std::string imgui_ini_path_;
     float applied_ui_scale_ = 1.0f;
     bool project_config_loaded_ = false;
     GameConfigData project_config_cache_;

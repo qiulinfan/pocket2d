@@ -19,6 +19,7 @@
 #include "engine/core/Engine.h"
 #include "shared/resources/ResourcePath.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "backends/imgui_impl_sdlrenderer3.h"
 #include "SDL3/SDL.h"
@@ -214,6 +215,7 @@ void BuildMainMenuBar(bool &show_metrics_window,
                       bool edit_mode_live_preview_enabled,
                       bool window_fullscreen,
                       bool scene_save_enabled,
+                      bool &reset_layout_requested,
                       EditorOverlayResult &result) {
 #if defined(_WIN32) || defined(__APPLE__)
     (void)show_open_project_window;
@@ -309,6 +311,7 @@ void BuildMainMenuBar(bool &show_metrics_window,
         if (ImGui::MenuItem("Fullscreen", "F11", window_fullscreen, true)) {
             result.toggle_fullscreen_requested = true;
         }
+        if (ImGui::MenuItem("Reset Layout")) reset_layout_requested = true;
         ImGui::Separator();
         ImGui::MenuItem("ImGui Metrics", nullptr, &show_metrics_window);
         ImGui::EndMenu();
@@ -323,6 +326,27 @@ void BuildMainMenuBar(bool &show_metrics_window,
     }
 
     ImGui::EndMainMenuBar();
+}
+
+// Unity's default arrangement: Inspector the full height on the right,
+// Project and Status along the bottom, Hierarchy left of the Scene and game
+// Viewport tabs.
+void BuildDefaultDockLayout(ImGuiID dockspace_id, ImVec2 size) {
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspace_id, size);
+    ImGuiID center = dockspace_id;
+    const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f, nullptr, &center);
+    const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.30f, nullptr, &center);
+    const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.22f, nullptr, &center);
+    ImGui::DockBuilderDockWindow("Viewport", center);
+    ImGui::DockBuilderDockWindow("Scene", center);
+    ImGui::DockBuilderDockWindow("Hierarchy", left);
+    ImGui::DockBuilderDockWindow("Inspector", right);
+    ImGui::DockBuilderDockWindow("Map Asset Draft", right);
+    ImGui::DockBuilderDockWindow("Project", bottom);
+    ImGui::DockBuilderDockWindow("Status", bottom);
+    ImGui::DockBuilderFinish(dockspace_id);
 }
 
 float ComputeEffectiveUiScale(const EditorConfigData &config, int window_width,
@@ -558,7 +582,11 @@ bool EditorOverlay::Initialize(SDL_Window *window, SDL_Renderer *renderer) {
     // should remain runtime input instead of moving focus across toolbar buttons.
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = "imgui.ini";
+    // The panel layout is per user, like editor.config, not per launch folder.
+    std::error_code ini_error;
+    std::filesystem::create_directories(ResourcePath::UserConfigRoot(), ini_error);
+    imgui_ini_path_ = (ResourcePath::UserConfigRoot() / "imgui.ini").string();
+    io.IniFilename = imgui_ini_path_.c_str();
     LoadEditorDefaultFont(io);
     ImGuiStyle &style = ImGui::GetStyle();
     ApplyUnityLikeGrayTheme(style, 1.0f);
@@ -923,10 +951,22 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
                      new_project_error_, open_project_path_, editor_config,
                      scene_document, play_mode_active, play_mode_paused,
                      edit_mode_live_preview_enabled, window_fullscreen,
-                     scene_save_enabled, result);
+                     scene_save_enabled, reset_dock_layout_requested_, result);
 
     ImGuiViewport *main_viewport = ImGui::GetMainViewport();
-    ImGui::DockSpaceOverViewport(0, main_viewport, ImGuiDockNodeFlags_None);
+    const ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(0, main_viewport, ImGuiDockNodeFlags_None);
+    // Without a saved docking layout every panel would open as a small
+    // floating window in the same corner; start from the default instead.
+    if (!dock_layout_checked_) {
+        dock_layout_checked_ = true;
+        const ImGuiDockNode *node = ImGui::DockBuilderGetNode(dockspace_id);
+        if (node == nullptr || !node->IsSplitNode()) reset_dock_layout_requested_ = true;
+    }
+    if (reset_dock_layout_requested_) {
+        reset_dock_layout_requested_ = false;
+        BuildDefaultDockLayout(dockspace_id, main_viewport->WorkSize);
+        select_default_tabs_in_ = 60;
+    }
     RenderMapDraftTools(play_mode_active);
 
     EditorPanels::RenderStatusPanel(engine, scene_document,
@@ -1034,6 +1074,17 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
                                 result);
     RenderScriptReloadWindow();
     RenderTransientNotifications();
+    // After a fresh layout, bring Project to the front of its tab group once
+    // it sits in a tab bar (within a second). Scene leads its group because
+    // the Viewport does not take focus as it first appears.
+    if (select_default_tabs_in_ > 0) {
+        --select_default_tabs_in_;
+        ImGuiWindow *project = ImGui::FindWindowByName("Project");
+        if (project != nullptr && project->DockNode != nullptr && project->DockNode->TabBar != nullptr) {
+            project->DockNode->TabBar->NextSelectedTabId = project->TabId;
+            select_default_tabs_in_ = 0;
+        }
+    }
     if (scene_mirror_pending_ || !scene_edit_error_.empty()) {
         ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("Scene edit status", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {

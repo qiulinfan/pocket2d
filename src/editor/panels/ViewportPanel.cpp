@@ -172,9 +172,11 @@ ViewportControlsResult RenderViewportPanel(const Engine &engine,
     ViewportControlsResult controls_result;
     // Viewport is the bridge between runtime and editor: runtime renders into
     // an offscreen SDL texture, then ImGui displays that texture in-panel.
+    // No focus on appearing: in the default layout the Scene tab stays in front.
     if (!ImGui::Begin("Viewport", nullptr,
                       ImGuiWindowFlags_NoScrollbar |
-                          ImGuiWindowFlags_NoScrollWithMouse)) {
+                          ImGuiWindowFlags_NoScrollWithMouse |
+                          ImGuiWindowFlags_NoFocusOnAppearing)) {
         ImGui::End();
         return controls_result;
     }
