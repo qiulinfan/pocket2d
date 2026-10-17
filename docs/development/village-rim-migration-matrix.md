@@ -24,7 +24,10 @@ Pocket2D 的目标栈和总体范围见 [roadmap.md](roadmap.md)。当前 defens
 | 编辑、导入和资产可追溯性 | Unity scenes/prefabs/ScriptableObjects、`.meta` GUID、InputAction 与各类 Inspector 构成当前作者工作流。 | `P:src/editor/documents/SceneDocument.cpp`、`SceneMutations.cpp` 和各 panel 已有 scene/template/component 编辑；新增 `P:src/editor/documents/TilemapDocument.cpp` 负责地图作者副本、数值编辑、undo/redo、显式原子保存、磁盘Revert与纯内存Discard。Overlay按资源匹配预览，保留无map场景下的全局草稿入口。 | `P:tests/tilemap_editor_test.cpp` 与 `P:tests/tilemap_overlay_test.cpp` 使用真实ImGui/Overlay验证绑定、dirty切换、预览、same-UID新代际重载、源文件损坏/删除时的草稿恢复；不是人类编辑效率验收。 | **地图作者工具第一片已实现；P1/P2**：画笔/自动拼接、clip/物品编辑、重命名引用追踪、Unity importer和完整资产转换清单仍缺。迁移只选择明确获准的资产子集并保留来源/许可；本矩阵不授权复制。 |
 
 **真实世界导入（2026-10-16）。** `~/Desktop/pocket2d-games/VillageRim` 用 Unity YAML 导入器导出了 Gameplay 场景的
-tilemap、精灵、碰撞体和实体占位，并移植了玩家、哥布林战斗与 A/B 传送门的可玩切片；
+tilemap、精灵、碰撞体和实体占位（隐藏的 tilemap 以禁用状态导入），并在其上移植了从开场到结局的
+整条游戏：任务链与 NPC 支线、元素祭坛与种树、三岛入侵与魔树、B 世界上锁房间的岛间路线、箭陷阱、
+B 世界敌人与四个 Boss、Golem 与通往 D 岛的桥、最终 Boss、名单与春季融化、主动盾牌、检查点与存档；
+两个 agent playtest 用真实输入走完整条路线（22 项）并覆盖各系统（30 项）。
 发现的引擎缺口与修复见 [game-completeness-tests.md](game-completeness-tests.md)。
 该项目不在引擎仓库中，原游戏资产不随引擎分发。
 

@@ -28,11 +28,14 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
 - `VRInvader` + `VRProjectiles`：入侵的弓箭手与炸弹手（30 HP，向树/祭坛走 4、追玩家跑 7，
   冷却 2 秒，每 0.5 秒重选目标：仇恨中的玩家 → 本岛最近的树 → 最近的祭坛 → 回出生点）。
   弓箭手射程 10、箭速 14、伤害 10，玩家靠近 2 以内会后撤 2 并停 1 秒；炸弹手射程 8，
-  炸弹飞向投掷时目标位置，0.8 秒引信（红圈），半径 2.5 内 20 伤害（有盾 ×0.25）。
+  炸弹飞向投掷时目标位置，0.8 秒引信（红圈），半径 2.5 内 20 伤害（举起的盾在爆炸范围内时 ×0.25）。
   每岛按 `SpawnRandomEnemy` 抽取预制件：每波至多一个弓箭手（A、B 岛只有弓箭手，每波一个；
   C 岛弓箭手与炸弹手）。B1 掉钥匙的 GoblinArcher_KeyDrop 是守点的弓箭手（40 HP）。
 - `VRInventory`：原生 Inventory 的 30 格背包，前 9 格为快捷栏（1–9/滚轮），Tab 面板
-  点击搬运；武器决定攻击力，食物回血，盾牌在快捷栏时伤害减半。
+  点击搬运；武器决定攻击力，食物回血。盾牌（`ShieldBehaviour`，冷却 0.5 秒）在快捷栏时右键朝光标
+  举起 0.25 秒的 1.31×1.44 格挡框：0.25 秒完美弹反窗口内碰到的近战判定不掉血并使攻击者眩晕 1.5 秒
+  （星星特效、"Perfect Block!"），之后为半伤的弱格挡；火球和剑气被反弹向施法者（1.2 倍速、改伤敌人、
+  眩晕施法者）。
 - `VRDialogue` + `VillageGame` 任务链：NPCSO 原文台词（Priest 的 Introduction/
   GetRestore/PlaceRestore/Continue，Knight 给盾，SwordsMan 给指南针，Soldier 的
   BossFight）；修复宝石复活祭坛；指南针传送到已发现且未毁的祭坛。
@@ -52,8 +55,8 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
   256×256）视野由 `tools/pack_minimap.py` 按渲染顺序烘焙；右下角带边框，叠加玩家标记、
   Golem 图标和遭入侵岛屿的标记（B 世界里仍显示 A 世界，与原作一致）。
 - `VRAudio`：A/B 世界、Boss 战和过场的音乐，挥剑、受伤、死亡、哥布林、祭坛毁/复、
-  各元素宝石、拾取、进食、草回血、传送门、箭、炸弹、树、对话打字等 28 段原音效
-  （长 wav 音乐转为 ogg）。
+  各元素宝石、拾取、进食、草回血、传送门、箭、炸弹、树、对话打字、盾牌、各 Boss 战等 39 段原音效
+  （长 wav 音乐转为 160 kbps mp3）。
 - `VRInvasion`：三座岛的祭坛（500 HP，每秒 +2）与出生点；到访且祭坛存活后按
   `max(10, base − wave×5)` 秒倒计时，生成 `base + wave×growth` 个入侵者；祭坛全毁
   则本岛入侵停止，不判负。
@@ -61,8 +64,9 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
   360° 砸地（20 伤害、半径 3）或三圈各 12 发蓝火（每发 10，直线速 7.5、精灵自转
   120°/s、9 帧 × 0.15 秒后消失，相隔 0.35 秒、每圈偏转 10°）；击败即胜利并存档。
 - 存档：F5/F9 用 `Save.Write/Read` 存玩家、背包、祭坛与元素、岛屿入侵、任务与 NPC
-  赠品、Boss、地上掉落、门与宝箱、树和法力（schema 3）；读档先完整校验，再重新加载
-  场景并应用（入侵者不存，与原作一致）。
+  赠品、Boss、地上掉落、门与宝箱、树和法力、魔树、陷阱、桥、春季融化、已击杀的 Boss、支线任务和检查点
+  （schema 4）；读档先完整校验，再重新加载场景并应用（入侵者不存，与原作一致）。死亡 2 秒后在
+  最后碰到的检查点满血重生并存档（`PlayerHealth`/`CheckpointManager`）。
 - `VRRoute`：原作的岛间路线。A 世界四岛与 Golem 小岛互不相连，只经 B 世界的房间
   走通：起始岛 → APortal1 → B1（downdoor_B1、rightdoor_B1）→ BPortal2 → B 岛 →
   APortal3 → B2（leftdoor_B2）→ BPortal4 → C 岛（Soldier）→ APortal5 → B3
@@ -78,32 +82,53 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
   （`action: unlock`，附点击的屏幕坐标），没有就引向最近的钥匙来源（地上的钥匙、
   有钥匙的宝箱 `open_chest`、带钥匙的弓箭手）。路径用 0.25 格（有的宝箱在 1 格宽的
   过道里）。同时作为 HUD 提示和 agent 观测。
+- `VREnemy` + `VRSpawns` + `VRHazards`：B 世界与 D 岛的敌人（新 `EnemyControl` 行为树的数据化移植：
+  近距、视锥与射线视线侦测，前摇/判定/收招与冷却，中立怪受击后仇恨，保持距离的后撤）。
+  幽灵（水弹 11/s、8 伤害，墙挡）、绿/蓝蘑菇（咬击并留下酸液，中毒 3 秒每秒 3、至多两层）、
+  腐烂蘑菇王（半径 3 的全向攻击与三圈酸液）、骷髅王 GhostWizard（落点 0.5 秒的陨石，死后
+  右到左淡入的木桥）、哥布林剑圣（近身热浪、火焰剑气，开战时光墙封住房间，死后掉钥匙）、
+  哥布林大祭司（火球、四道旋转火龙卷与地火，玩家贴近时后撤；最终 Boss）。火祝福减半火焰伤害、
+  免疫地火；草祝福免疫中毒。场景里放置的 Boss 被击杀后不再出现；BP1–BP3 房间进入时按
+  `EnemySpawnTrigger` 生成、离开时清除。
+- `VRPillars`：B、C 岛各一棵魔树（120 HP，B 世界里显示到魔树的距离和近处血条）；砍倒后该岛
+  入侵停止、清场，原地出现奖励宝箱（水/草宝石与番茄）。A 岛没有魔树，从不被入侵。
+- `VRTraps`：24 个箭陷阱，射线 20 内看到玩家就按房间速度射箭（冷却 1 秒）；斧头可以砍坏。
+- `VRBridges` + `VREnding` + `VRReveal`：Golem 死后每 0.3 秒架出一段通往 D 岛的桥（桥的瓦片在此前
+  隐藏、挡路碰撞体逐段移除）；大祭司死后滚动制作人员名单（任意键返回）并以玩家为中心逐圈
+  显现春季的 D 岛（`MeltOnlySpringReveal`）。
+- `VRAltarLooks`：祭坛元素地面（`Prefabs/AltarEffect`，`tools/pack_altar_effects.py` 导入为每元素的
+  tilemap 模板与精灵），换元素时逐圈显现。
+- `VRSideQuests`：NPC 支线（InvasionGuide 镜头展示魔树 5 秒、CompassUse、TreePlantGuide、
+  UseShield、ShieldTesting），原文台词、提示和 NPC 头上的 "!"；A3start 后 Soldier 才开口。
 
 `tools/playtest.py` 只用真实输入和游戏观测，跟随任务指引完成：与 Priest 对话、
 击杀携带宝石的哥布林并拾取、回报、用鼠标在背包里搬运物品、修复祭坛并放置风宝石、
-守住第一波入侵、F5 存档 → `reset` 新 worker → F9 读档、APortal1/BPortal1 往返；
+确认 A 岛不被入侵、F5 存档 → `reset` 新 worker → F9 读档、APortal1/BPortal1 往返；
 然后沿原作路线：B1 用鼠标开宝箱 14、把两把钥匙拖进快捷栏、选中钥匙点开两扇门，
-到 B 岛找 SwordsMan 领指南针，B2 开宝箱 16 开 leftdoor_B2，到 C 岛听 Soldier 的话，
-B3 开宝箱 9 开 updoor_B3，经 BPortal6/APortal6 到 Golem 并击败它、用指南针传回祭坛；
-再从战前存档用其它种子重打（门与宝箱按存档恢复），覆盖两种攻击；bot 从宝箱顺手拿
-番茄和一面盾牌，Boss 战中低血时进食，蓝火前摇起退到射程外。17 项检查全部通过，
-同一种子两次运行的结果逐项一致。
+到 B 岛找 SwordsMan（镜头展示魔树）、从 A1 宝箱 8 拿指南针、守住 B 岛一波入侵、用指南针
+传回祭坛，B2 开宝箱 16 开 leftdoor_B2 并击败封门的剑圣（它掉的钥匙开 updoor_B3），到 C 岛听
+Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段架起，过桥到 D 岛击败大祭司，
+名单出现、春季显现、按任意键离开；再从 Golem 战前存档用其它种子重打（门与宝箱按存档恢复），
+覆盖两种攻击。死亡时在检查点重生后继续。22 项检查全部通过，同一种子两次运行的结果逐项一致。
 
-`tools/playtest_systems.py`（19 项检查，逐项可复现）：新存档目录播放开场（音乐、祭坛被毁、
+`tools/playtest_systems.py`（30 项检查，逐项可复现）：新存档目录播放开场（音乐、祭坛被毁、
 交还控制），reset 后跳过；把 F5 存档改成后期局面（背包里的宝石、树种、番茄，修复的祭坛，
 别处的火祭坛，两座即将被入侵的岛）后 F9 读入；清掉巡逻队；风宝石后奔跑距离翻倍；草替换风
 （风宝石弹出并被拾回）、5 秒回 5 HP；水替换草，挥剑射出水弹并扣法力；火在另一座祭坛上叠加；
-点开/关闭图鉴；在祭坛旁点击种树并长成，祭坛回血从每秒 2 变为 6；C 岛弓箭手和炸弹手轰炸
-祭坛、A 岛弓箭手先射树，并被击退；树与法力经 F5/reset/F9 保留；小地图在画面上；
-全部音效请求都解析到文件（引擎新的 `audio.play`/`music.play` 事件）。
+点开/关闭图鉴；在祭坛旁点击种树并长成，祭坛回血从每秒 2 变为 6，祭坛地面换成元素样式；C 岛
+弓箭手和炸弹手轰炸祭坛、A 岛弓箭手先射树，并被击退；树与法力经 F5/reset/F9 保留；小地图在
+画面上；全部音效请求都解析到文件（引擎新的 `audio.play`/`music.play` 事件）。之后改存档跳到
+各场景：砍倒 B 岛魔树（入侵停止、奖励宝箱）、陷阱射中玩家、斧头砍坏陷阱；蘑菇咬出酸液并
+中毒；幽灵射水弹；击败骷髅王（陨石、桥、记录击杀）；盾牌完美弹反剑圣的热浪（不掉血、
+剑圣眩晕）并把大祭司的火球弹回伤到它；死亡后回到检查点满血。
 
 迁移时的适配（原作行为依赖未迁移内容或不可测）：
 
-- 路线上只需宝箱 14、16、9 的钥匙；宝箱 15 和弓箭手的钥匙是原作的富余。
+- 路线上需要宝箱 14、16 的钥匙和剑圣掉的钥匙（或宝箱 9 的）；宝箱 15 和弓箭手的钥匙是原作的富余。
 - 原作修复宝石只有 15% 掉率；任务所需的修复宝石与风宝石由起始岛巡逻队的第一只
   哥布林必掉（其余敌人仍是 15%、全局上限 5）。
-- 盾牌在快捷栏时被动减半伤害，代替右键举盾（因此也不反弹蓝火）；玉米的回血在原代码中
-  被注释掉，这里用其存储的 10。宝石用 F 放到 2.5 以内的祭坛上，代替原作在光标处丢出
+- ShieldTesting 在举盾（`ShieldUsedEvent`）时完成；Golem 的蓝火与幽灵水弹在原作中不是可反弹的
+  `FireballProjectile`，盾牌也挡不住。玉米的回血在原代码中被注释掉，这里用其存储的 10。宝石用 F 放到 2.5 以内的祭坛上，代替原作在光标处丢出
   宝石、滑进祭坛触发器。
 - 原作 `spawnedArcherThisWave` 从不重置，A、B 岛整局只会来一个弓箭手；这里按变量名的
   本意每波重置。原作的树加速因层名大小写不生效，这里按设计生效。
@@ -151,6 +176,12 @@ B3 开宝箱 9 开 updoor_B3，经 BPortal6/APortal6 到 Golem 并击败它、�
 | headless agent 看不到游戏播放了什么声音，也看不出引用了不存在的音频（VR 音效） | `Audio.Play`/`Music.Play`/`Music.Halt` 作为 `audio.play`/`music.play`/`music.halt` 事件进入请求的事件流，含 clip 是否存在 |
 | 判断两点是否连通只能逐对 `FindPath`，不可达的目标要泛洪整片区域；任务指引每开一扇门重算区域要数秒（VR） | `Physics.PathRegions(points, cell, radius, max_nodes)`：每个连通区域一次泛洪，按 FindPath 的格规则给一批点标区域号 |
 | 起点在净空边距内时，A* 把边距格当作自由格，路径贴着墙走，盒形玩家卡在瓦片墙角（VR 路线上 B2 的门后） | 进入净空格的一步按四步计价，路径先离开边距再前进 |
+| 导入器丢掉隐藏的 tilemap（VR 春季的 D 岛、Golem 的桥在原作中先隐藏） | 隐藏或渲染器关闭的 tilemap 以 `enabled: false` 导入，其道具精灵同样禁用，游戏运行时再启用 |
+| 没有"任意键"输入（VR 名单的 "Press any key"） | `Input.GetAnyKeyDown()`：本帧任意键或鼠标键按下 |
+| `FindPath` 的净空半径只避开碰撞体，不避开实心瓦片，路径贴着小数原点的瓦片边走（VR B2） | 净空半径内的实心瓦片格也算净空格（半径小于半格） |
+| 盒形 mover 贴着瓦片面滑到拐角时，按命中法线忽略了相邻面的接触而滑进瓦片，进去后又被瓦片背面挡住出不来（VR B2 卡死） | 瓦片轮廓（chain）对盒形 mover 是单面的：只挡朝外侧面向内的运动，与 Box2D 接触和射线一致 |
+| 场景重载后首帧约 1.8 秒（任务指引的区域泛洪），负载下超过 agent 请求的 5 秒期限（VR playtest） | 格搜索改用开放寻址的格表，占据查询每次只列一次有实心格的 tilemap；`path_benchmark` 中 PathRegions 80.5 → 10.4 ms、FindPath 11.6 → 1.3 ms，VR 重载首帧约 0.06 秒 |
+| 每次 `Actor.Instantiate` 动画模板、每次加载 tilemap 都解码整张图集 PNG 只为检查尺寸（VR 房间刷怪、重载） | `ImageSize::Decoded` 按文件记住尺寸，文件大小或修改时间变化时才重新解码 |
 
 （VR = Village_Rim，PT = PocketTerraria。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
@@ -158,21 +189,19 @@ B3 开宝箱 9 开 updoor_B3，经 BPortal6/APortal6 到 Golem 并击败它、�
 
 - **导入近似**：Unity Sprite 形状碰撞按整格；有缩放/旋转的 tilemap、九宫格精灵和 trigger 只记录在
   `import_report.json`。
-- **Village_Rim 未迁移的内容**：Golem 之后的内容（它死后 `BridgeManager` 架出通往 D 岛的桥，
-  D 岛的最终 Boss GoblinHighPriest，死后的春季融化 `MeltOnlySpringReveal`；导入场景里这座桥的
-  瓦片现在一直显示，挡路的碰撞体也一直在）；B 世界的敌人与 Boss（Ghost、蘑菇、GoblinSwordSaint、
-  骷髅王 GhostWizard 及其桥——那座桥的碰撞体是 3D BoxCollider，不影响 2D 通行，不在路线上）、
-  魔树柱（摧毁后停止该岛入侵）与箭陷阱，以及 `TreePlantGuide` 等不在已知任务链上的 NPC 任务；
-  原作的田地农场（`FarmPlot`）不在 Gameplay 场景中，故不迁移。原工程玩家出生点位于水面碰撞体内
-  （运行时另有放置逻辑，未迁移）。
-  幽灵墙（`GhostObstacle`，ghostborder 层与所有层碰撞）在原作里就是永久实心，已按实心瓦片导入。
-  这些是内容移植，不是已知的引擎缺口。
+- **Village_Rim 仍是近似或未迁移的部分**：原作的田地农场（`FarmPlot`）不在 Gameplay 场景中，故不迁移；
+  场景里未启用的旧系统敌人（旧版 GoblinSwordSaint、GoblinHighPriest 等）不迁移，路线上用的是新系统版本。
+  开场过场各 NPC 的逐帧动画片段和小地图的运行时相机是近似（见上）。原工程玩家出生点位于水面碰撞体内
+  （运行时另有放置逻辑，未迁移）。幽灵墙（`GhostObstacle`，ghostborder 层与所有层碰撞）在原作里就是
+  永久实心，已按实心瓦片导入。这些是内容移植，不是已知的引擎缺口。
 
 ## 性能
 
 Release、macOS（Apple M5）：PocketTerraria 在 headless agent 模式下（带逐指令计数钩子）
 从 Lua 光照时的 1.56 ms/帧降到原生光照后的 0.076 ms/帧，Village_Rim 约 0.12 ms/帧；
-窗口模式被垂直同步锁在 60 Hz。
+窗口模式被垂直同步锁在 60 Hz。`tests/path_benchmark`（100×100 房间网格、0.25 格、2 次预热、
+9 次取中位数，结果摘要不变）：PathRegions 80.5 → 10.4 ms，FindPath 11.6 → 1.3 ms；Village_Rim
+F9 重载加首帧从约 1.9 秒降到约 0.1 秒（测量时机器有无关负载）。
 绘制排序键从 8 字节增加到 16 字节后，bunnymark 50k 交替 A/B 的结果落在噪声范围内
 （前 17.9/16.0/21.1 ms，后 22.6/18.3/16.1 ms），W1 sprites 也在噪声内。
 原始输出保留在被忽略的 `build/` 中。以上不是跨引擎对比。

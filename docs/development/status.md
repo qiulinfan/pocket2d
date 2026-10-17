@@ -636,11 +636,15 @@ phase15 benchmark directories. No performance gain or SOTA conclusion is claimed
    its quest line, inventory UI, altars and invasions, Ice Golem and saves, and
    the PocketTerraria sandbox with the Eye of Cthulhu, both played through the
    agent protocol. The engine gaps they found are fixed (the table in
-   `game-completeness-tests.md`, latest: `Physics.PathRegions` region labels,
-   FindPath leaving the clearance margin at once, FindPath clearance escape).
-   Village_Rim's original island route (keyed doors, chests) is migrated and
-   played to the Ice Golem; content after the golem, farming and other systems
-   remain unmigrated (listed there).
+   `game-completeness-tests.md`, latest: one-sided tile outlines for the box
+   mover, FindPath clearance from solid tiles, 8-9x faster FindPath/PathRegions,
+   cached atlas sizes, `Input.GetAnyKeyDown`, hidden tilemaps imported disabled).
+   Village_Rim is migrated from the opening to the ending (world B's enemies and
+   bosses, devil trees, traps, bridges, the final boss, credits and spring, the
+   active shield, side quests, checkpoints); its route playtest (22 checks,
+   identical on repeat runs) and systems playtest (30 checks) pass. Remaining
+   approximations are listed there. Both projects live outside the engine in
+   `~/Desktop/pocket2d-games/`.
 
 ## Recovery and artifacts
 
