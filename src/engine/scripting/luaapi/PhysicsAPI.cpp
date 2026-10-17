@@ -204,11 +204,22 @@ std::function<PhysicsQueries::PathCell(float, float)> PathOccupancy(const char *
             }, &hit);
         return hit.any;
     };
-    return [has_world, touches_static, radius](float x, float y) {
+    // Solid tiles keep the clearance too: a square of side 2r (r < 1/2 cell) can
+    // only overlap tiles that contain one of its corners.
+    const auto near_solid_tile = [radius](float x, float y) {
+        if (radius <= 0.001f) return false;
+        const float r = std::min(radius, 0.499f);
+        return ComponentManager::IsSolidTileAt(x - r, y - r) || ComponentManager::IsSolidTileAt(x + r, y - r) ||
+               ComponentManager::IsSolidTileAt(x - r, y + r) || ComponentManager::IsSolidTileAt(x + r, y + r);
+    };
+    return [has_world, touches_static, near_solid_tile, radius](float x, float y) {
         using PhysicsQueries::PathCell;
         if (ComponentManager::IsSolidTileAt(x, y)) return PathCell::Solid;
-        if (!has_world || !touches_static(x, y, std::max(radius, 0.001f))) return PathCell::Free;
-        return radius > 0.001f && !touches_static(x, y, 0.001f) ? PathCell::Clearance : PathCell::Solid;
+        if (has_world && touches_static(x, y, std::max(radius, 0.001f))) {
+            if (radius <= 0.001f || touches_static(x, y, 0.001f)) return PathCell::Solid;
+            return PathCell::Clearance;
+        }
+        return near_solid_tile(x, y) ? PathCell::Clearance : PathCell::Free;
     };
 }
 

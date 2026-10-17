@@ -172,6 +172,12 @@ void Run() {
       local around=Physics.FindPath(Vector2(25,5),Vector2(35,5),1,0.2,20000)
       assert(#around>0 and around[#around].x==35,'path goes around the full-height tile wall')
       for _,p in ipairs(around) do assert(not (p.x>30 and p.x<31 and p.y>0 and p.y<12),'path never enters wall cells') end
+      -- the clearance radius keeps a path off solid tiles as off colliders
+      local wide=Physics.FindPath(Vector2(25,5),Vector2(35,5),0.25,0.4,200000)
+      assert(#wide>0 and wide[#wide].x==35,'a fine path still goes around the wall')
+      for _,p in ipairs(wide) do
+        assert(not (p.x>29.61 and p.x<31.39 and p.y>-0.39 and p.y<12.39),'path keeps its clearance from tiles: '..p.x..','..p.y)
+      end
       local partial=Physics.FindPath(Vector2(25,5),Vector2(35,5),1,0.2,10)
       assert(#partial>0 and partial[#partial].x~=35,'a node limit returns the best partial path')
       -- a walker closer to the pillar than its clearance can still leave, and reach a goal beside it
