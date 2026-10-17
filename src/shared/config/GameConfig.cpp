@@ -212,6 +212,18 @@ GameConfigData GameConfig::Read() {
         config.initial_scene_name = game_config["initial_scene"].GetString();
     }
 
+    if (game_config.HasMember("splash_screen")) {
+        if (!game_config["splash_screen"].IsBool())
+            throw std::runtime_error(game_config_path.string() + ": splash_screen must be true or false");
+        config.splash_screen = game_config["splash_screen"].GetBool();
+    }
+    if (game_config.HasMember("splash_seconds")) {
+        const auto &value = game_config["splash_seconds"];
+        if (!value.IsNumber() || value.GetFloat() < 0.5f || value.GetFloat() > 10.0f)
+            throw std::runtime_error(game_config_path.string() + ": splash_seconds must be a number in [0.5, 10]");
+        config.splash_seconds = value.GetFloat();
+    }
+
     if (std::filesystem::exists(rendering_config_path)) {
         rapidjson::Document rendering_config;
         ReadJsonFile(rendering_config_path.string(), rendering_config);
@@ -277,6 +289,11 @@ bool GameConfig::Write(const GameConfigData &config) {
     UpsertStringMember(game_config, "game_title", config.game_title);
     UpsertStringMember(game_config, "initial_scene", config.initial_scene_name);
     UpsertStringMember(game_config, "save_namespace", config.save_namespace);
+    if (config.splash_screen || game_config.HasMember("splash_screen")) {
+        if (game_config.HasMember("splash_screen")) game_config["splash_screen"].SetBool(config.splash_screen);
+        else game_config.AddMember("splash_screen", config.splash_screen, game_config.GetAllocator());
+        UpsertFloatMember(game_config, "splash_seconds", std::clamp(config.splash_seconds, 0.5f, 10.0f));
+    }
 
     UpsertIntMember(rendering_config, "x_resolution",
                     std::max(1, config.window_width));

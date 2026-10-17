@@ -1263,6 +1263,14 @@ void EditorOverlay::RenderProjectConfigWindows() {
                 "Initial Scene Path", project_config_cache_.initial_scene_name,
                 "e.g. ballgame/hw8_platformer_ballgame");
 
+            ImGui::Separator();
+            config_changed |= ImGui::Checkbox("Show \"Made with Pocket2D\" splash",
+                                              &project_config_cache_.splash_screen);
+            ImGui::BeginDisabled(!project_config_cache_.splash_screen);
+            config_changed |= ImGui::SliderFloat("Splash Seconds", &project_config_cache_.splash_seconds,
+                                                 0.5f, 10.0f, "%.1f s");
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("Shown by the standalone game before its first frame.");
 
             if (config_changed) {
                 persist_project_config();

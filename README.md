@@ -129,6 +129,8 @@ Projects can live anywhere on disk. Like Unity Hub, the editor keeps a per-user 
 
 When there is no project to reopen, as on first launch, the editor creates a `ballgame` project in the new-project location and opens it. The `game` runtime runs the project given by `--project`, else the editor's current project, else the sample template.
 
+A project can show a "Made with Pocket2D" splash before its first frame, as Unity games do: set `"splash_screen": true` (and optionally `"splash_seconds"`, 0.5 to 10, default 2) in `game.config`, or tick it in `Project -> Game Config`. Only the standalone `game` window shows it; the editor, `--frames` captures and headless agent runs skip it. The image is `.engine/system/splash.png`, drawn by `tools/make_splash.py` and compiled into the runtime.
+
 ## Architecture Illustration
 
 All files under `docs/architecture/` are diagram-only for explaining the architecture.

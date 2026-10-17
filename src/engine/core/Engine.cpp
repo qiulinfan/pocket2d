@@ -1,4 +1,5 @@
 #include "core/Engine.h"
+#include "rendering/SplashScreen.h"
 #include <string_view>
 #include <charconv>
 #include "input/ActionMap.h"
@@ -306,6 +307,7 @@ Engine::~Engine() {
 void Engine::GameLoop() {
     WorldScope world_scope(world_);
     InitializeRuntime();
+    if (config_.splash_screen && !SplashScreen::Show(renderer, config_.splash_seconds)) is_game_running = false;
     if (const char *hot_reload = SDL_getenv("POCKET_HOT_RELOAD"); hot_reload && std::string_view(hot_reload) == "1")
         SetAssetHotReload(true);
 

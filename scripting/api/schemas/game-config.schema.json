@@ -17,6 +17,16 @@
       "description": "Save-slot namespace for the Lua Save API. Empty disables saving; otherwise 1..64 ASCII letters, digits, '_' or '-', starting with a letter or digit (SaveStore::IsValidIdentifier).",
       "type": "string",
       "pattern": "^([A-Za-z0-9][A-Za-z0-9_-]{0,63})?$"
+    },
+    "splash_screen": {
+      "description": "Show the \"Made with Pocket2D\" splash before the first frame of the standalone runtime (not in the editor or headless agent runs). Default false.",
+      "type": "boolean"
+    },
+    "splash_seconds": {
+      "description": "How long the splash lasts, fades included. Default 2.",
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 10
     }
   },
   "additionalProperties": true

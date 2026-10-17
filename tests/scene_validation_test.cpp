@@ -158,6 +158,15 @@ void TestConfiguration(const ProjectFixture &project) {
     Rejects([] { GameConfig::Read(); }, "initial_scene");
     Write(game, R"({"game_title":"a","game_title":"b"})");
     Rejects([] { GameConfig::Read(); }, "duplicate field");
+    Write(game, "{}");
+    Check(!GameConfig::Read().splash_screen, "the splash screen is off unless a project asks for it");
+    Write(game, R"({"splash_screen":"yes"})");
+    Rejects([] { GameConfig::Read(); }, "splash_screen");
+    Write(game, R"({"splash_screen":true,"splash_seconds":30})");
+    Rejects([] { GameConfig::Read(); }, "splash_seconds");
+    Write(game, R"({"splash_screen":true,"splash_seconds":3})");
+    Check(GameConfig::Read().splash_screen && GameConfig::Read().splash_seconds == 3.0f,
+          "a project's splash screen settings must be read");
     Write(game, R"({"initial_scene":"valid","game_title":"test"})");
     const std::pair<const char *, const char *> cases[] = {
         {R"({"x_resolution":"wide"})", "x_resolution"},

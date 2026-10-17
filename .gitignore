@@ -40,6 +40,7 @@ osx_build_derived_data
 **.GIF
 !docs/show.gif
 !docs/showcase/*.png
+!.engine/system/splash.png
 
 # **.wav
 **.mp3

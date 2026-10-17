@@ -18,6 +18,11 @@ struct GameConfigData {
     std::string game_title = "";
     std::string save_namespace = "";
     std::string initial_scene_name = "";
+
+    // Optional "Made with Pocket2D" splash before the first frame of the
+    // standalone runtime (game.config "splash_screen", "splash_seconds").
+    bool splash_screen = false;
+    float splash_seconds = 2.0f;
 };
 
 class GameConfig {
