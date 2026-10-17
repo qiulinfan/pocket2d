@@ -63,6 +63,21 @@ class Runtime:
             raise ProtocolError(response)
         return response
 
+    def call(self, name, args=None, *, actor=None, component=None, check=True, **options):
+        """Run the game-declared command `name` (the call command).
+
+        Every targeted Lua component defining OnAgentCommand(self, name, args)
+        handles it; response["call"]["results"] holds their return values. A
+        handler error raises ProtocolError (code agent_command_failed) unless
+        check=False. Other options (select, events, game, ...) are passed on.
+        """
+        command = {"cmd": "call", "name": name, "args": {} if args is None else args, **options}
+        if actor is not None:
+            command["actor"] = str(actor)
+        if component is not None:
+            command["component"] = component
+        return self.request(command, check=check)
+
     def close(self):
         if self.process.poll() is None:
             try:

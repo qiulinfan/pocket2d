@@ -6,6 +6,7 @@
 #include "rapidjson/writer.h"
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -92,4 +93,24 @@ std::string LuaJson::Bounded(const luabridge::LuaRef &payload) {
     }
     lua_settop(state, top);
     return buffer.GetString();
+}
+
+void LuaJson::Push(lua_State *state, const rapidjson::Value &value) {
+    if (!lua_checkstack(state, 4)) throw std::runtime_error("insufficient Lua stack for a JSON value");
+    if (value.IsNull()) lua_pushnil(state);
+    else if (value.IsBool()) lua_pushboolean(state, value.GetBool());
+    else if (value.IsInt64()) lua_pushinteger(state, static_cast<lua_Integer>(value.GetInt64()));
+    else if (value.IsNumber()) lua_pushnumber(state, value.GetDouble());
+    else if (value.IsString()) lua_pushlstring(state, value.GetString(), value.GetStringLength());
+    else if (value.IsArray()) {
+        lua_createtable(state, static_cast<int>(value.Size()), 0);
+        for (rapidjson::SizeType i = 0; i < value.Size(); ++i) { Push(state, value[i]); lua_rawseti(state, -2, i + 1); }
+    } else {
+        lua_createtable(state, 0, static_cast<int>(value.MemberCount()));
+        for (auto member = value.MemberBegin(); member != value.MemberEnd(); ++member) {
+            lua_pushlstring(state, member->name.GetString(), member->name.GetStringLength());
+            Push(state, member->value);
+            lua_rawset(state, -3);
+        }
+    }
 }

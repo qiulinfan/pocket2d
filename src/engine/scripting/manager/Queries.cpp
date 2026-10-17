@@ -488,6 +488,34 @@ bool ComponentManager::CallAgentObserve(Actor::UID actor_uid, const std::string 
     return true;
 }
 
+bool ComponentManager::CallAgentCommand(Actor::UID actor_uid, const std::string &key, const std::string &name,
+                                        const rapidjson::Value &args, std::string &json, std::string &error) {
+    const ComponentRecord *component = FindComponentRecord(actor_uid, key);
+    if (component == nullptr || IsBuiltinComponentType(component->type)) return false;
+    lua_State *state = Runtime().lua_state;
+    const int top = lua_gettop(state);
+    const luabridge::LuaRef instance = component->instance_table;
+    try {
+        const luabridge::LuaRef method = ProtectedField(instance, "OnAgentCommand");
+        if (!method.isFunction()) return false;
+        method.push(state);
+        instance.push(state);
+        lua_pushlstring(state, name.data(), name.size());
+        LuaJson::Push(state, args);
+        LuaBoundary::ProtectedCall(state, 3, 1);
+        json = LuaJson::Bounded(luabridge::LuaRef::fromStack(state));
+        error.clear();
+    } catch (const LuaBoundary::Error &failure) {
+        json = "null";
+        error = failure.what();
+    } catch (...) {
+        lua_settop(state, top);
+        throw;
+    }
+    lua_settop(state, top);
+    return true;
+}
+
 const void *ComponentManager::FindBuiltinComponent(Actor::UID actor_uid, const std::string &key) {
     const ComponentRecord *component = FindComponentRecord(actor_uid, key);
     return component == nullptr ? nullptr : component->native.object;

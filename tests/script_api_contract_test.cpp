@@ -85,6 +85,11 @@ ContractProbe={events=0,completions=0,key_held=false,key_down=false,key_up=false
     self.events=self.events+1
     if event.type=="completed" then self.completions=self.completions+1 end
     self.last_event=event
+  end,
+  OnAgentCommand=function(self,name,args)
+    assert(self.actor:IsValid() and self.key=="probe")
+    self.last_command,self.last_args=name,args
+    return #args.list
   end}
 )";
     }
@@ -385,10 +390,21 @@ void Calls(Engine &engine,lua_State *state,const rapidjson::Value &contract) {
     EmitKey(false); engine.StepSimulation();
     Lua(state,"local p=Actor.Find('player'):GetComponentByKey('probe');assert(not p.key_held and not p.key_down and p.key_up)");
     const auto probe=ComponentManager::GetComponentByKey(1,"probe");
+    rapidjson::Document command_args;
+    command_args.Parse(R"({"list":[1,2.5,"x",true],"nested":{"flag":false},"absent":null})");
+    std::string command_json,command_error;
+    Check(ComponentManager::CallAgentCommand(1,"probe","contract",command_args,command_json,command_error) &&
+          command_error.empty() && command_json=="4","agent command must be delivered with its args");
     for(const auto &callback:contract["callbacks"].GetArray()) {
-        Check(std::string(callback["name"].GetString())=="OnAnimationEvent" && std::string(callback["call"].GetString())=="instance",
-              "new host callback requires actual delivery probe");
-        Check(Matches(probe["last_event"],callback["parameters"][0]["type"],contract),"delivered animation event differs from schema");
+        const std::string name=callback["name"].GetString();
+        Check(std::string(callback["call"].GetString())=="instance","new host callback requires actual delivery probe");
+        if(name=="OnAnimationEvent") {
+            Check(Matches(probe["last_event"],callback["parameters"][0]["type"],contract),"delivered animation event differs from schema");
+        } else {
+            Check(name=="OnAgentCommand","new host callback requires actual delivery probe");
+            Check(Matches(probe["last_command"],callback["parameters"][0]["type"],contract) &&
+                  Matches(probe["last_args"],callback["parameters"][1]["type"],contract),"delivered agent command differs from schema");
+        }
     }
     for(const auto &pair:{std::make_pair("contract_write","SaveWriteResult"),std::make_pair("contract_read","SaveReadResult"),
                          std::make_pair("contract_failure","SaveReadResult"),

@@ -95,6 +95,28 @@ value) that summarizes it for agents, for example
 `return {health = self.health, inventory = self.bag_summary}`. Agents receive it
 when they request `game: true` observations. It must only read state.
 
+### Agent commands
+
+A component may define `OnAgentCommand(self, name, args)` to give agents and
+test tools named commands, for example cheats or setup steps:
+
+```lua
+OnAgentCommand = function(self, name, args)
+  if name == "add_gold" then
+    self.gold = self.gold + (args.amount or 0)
+    return {gold = self.gold}
+  end
+  return nil -- not this component's command
+end
+```
+
+The agent protocol's `call` command runs it between ticks with `args`, a
+table decoded from JSON, and reports the return value; `error(...)` reports a
+failure. A call without a target reaches every component defining the method,
+so return `nil` for unknown names. Commands are replayed by checkpoints and
+replay files, so a handler must depend only on game state and its arguments.
+See [agent-protocol](../development/agent-protocol.md).
+
 ### Batched updates
 
 A component type may define `OnUpdateBatch(instances)` on its type table

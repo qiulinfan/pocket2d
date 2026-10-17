@@ -229,6 +229,8 @@ type SaveValue = string | number | boolean | (SaveValue)[] | SaveObject;
 
 type SavePayload = SaveObject | (SaveValue)[];
 
+interface AgentCommandArgs { [key: string]: SaveValue; }
+
 interface SaveFailure {
     ok: false;
     code: "invalid_argument" | "not_configured" | "not_found" | "invalid_data" | "unsupported_format" | "io_error";
@@ -379,3 +381,4 @@ declare namespace Physics {
 }
 
 type OnAnimationEventCallback<T extends Component> = (this: T, event: AnimationEvent) => void;
+type OnAgentCommandCallback<T extends Component> = (this: T, name: string, args: AgentCommandArgs) => unknown;

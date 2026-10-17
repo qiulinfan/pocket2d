@@ -4,6 +4,7 @@
 #include "scene/Actor.h"
 #include "scene/ActorHandle.h"
 #include "core/Vector2.h"
+#include "rapidjson/fwd.h"
 #include <list>
 #include <filesystem>
 #include <memory>
@@ -172,6 +173,11 @@ public:
     // stores its result as bounded JSON (or "null" with the Lua error).
     // Returns false when the component has no such method.
     static bool CallAgentObserve(Actor::UID actor_uid, const std::string &key, std::string &json, std::string &error);
+    // Calls the Lua component's OnAgentCommand(self, name, args) in a protected
+    // call with args converted from JSON, storing its result like
+    // CallAgentObserve. Returns false when the component has no such method.
+    static bool CallAgentCommand(Actor::UID actor_uid, const std::string &key, const std::string &name,
+                                 const rapidjson::Value &args, std::string &json, std::string &error);
     // The native object of the built-in component at (uid, key), or nullptr.
     // Built-ins compare it with `this` to check that they are still bound.
     static const void *FindBuiltinComponent(Actor::UID actor_uid, const std::string &key);

@@ -853,6 +853,97 @@ std::string WithGameObservations(const Engine &engine, const std::string &observ
     return buffer.GetString();
 }
 
+struct AgentCall {
+    std::string name;
+    std::optional<Actor::UID> actor;
+    std::optional<std::string> component;
+    rapidjson::Document args;
+};
+
+// Validated before any handler runs, so a rejected call changes nothing.
+AgentCall ReadCall(const Engine &engine, const rapidjson::Value &command) {
+    AgentCall call;
+    if (!command.HasMember("name") || !command["name"].IsString() || command["name"].GetStringLength() == 0 ||
+        command["name"].GetStringLength() > 128)
+        throw std::invalid_argument("call.name must be a string of 1 to 128 bytes");
+    call.name.assign(command["name"].GetString(), command["name"].GetStringLength());
+    call.args.SetObject();
+    if (command.HasMember("args")) {
+        if (!command["args"].IsObject()) throw std::invalid_argument("call.args must be an object");
+        call.args.CopyFrom(command["args"], call.args.GetAllocator());
+    }
+    if (command.HasMember("actor")) {
+        if (!command["actor"].IsString()) throw std::invalid_argument("call.actor must be a string");
+        const Actor *actor = FindActorRef(engine, command["actor"].GetString());
+        if (actor == nullptr) throw std::invalid_argument("call.actor matches no live actor");
+        call.actor = actor->uid;
+    }
+    if (command.HasMember("component")) {
+        if (!command["component"].IsString()) throw std::invalid_argument("call.component must be a string");
+        call.component = command["component"].GetString();
+    }
+    return call;
+}
+
+struct CallOutcome {
+    std::string json; // {name, results: [{actor_uid, key, value[, error]}]}
+    int handled = 0;
+    std::string error; // the first handler error
+};
+
+// Runs every targeted Lua OnAgentCommand handler at idle, in UID then key
+// order, like game observations; targets are collected before any runs.
+CallOutcome RunCall(const Engine &engine, const AgentCall &call) {
+    std::vector<std::pair<Actor::UID, std::string>> targets;
+    for (const auto &actor : engine.GetRuntimeActors()) {
+        if (actor.runtime_destroyed || (call.actor && actor.uid != *call.actor)) continue;
+        for (const auto &spec : ComponentManager::GetRuntimeComponentSpecs(actor.uid))
+            if (!call.component || spec.key == *call.component) targets.emplace_back(actor.uid, spec.key);
+    }
+    std::sort(targets.begin(), targets.end());
+    CallOutcome outcome;
+    rapidjson::Document out(rapidjson::kObjectType);
+    auto &allocator = out.GetAllocator();
+    rapidjson::Value results(rapidjson::kArrayType);
+    for (const auto &[uid, key] : targets) {
+        if (ScriptBudget::GetFailure() != ScriptBudget::Failure::None) break;
+        std::string json, error;
+        if (!ComponentManager::CallAgentCommand(uid, key, call.name, call.args, json, error)) continue;
+        ++outcome.handled;
+        rapidjson::Value entry(rapidjson::kObjectType);
+        entry.AddMember("actor_uid", rapidjson::Value(std::to_string(uid).c_str(), allocator), allocator);
+        entry.AddMember("key", rapidjson::Value(key.c_str(), allocator), allocator);
+        rapidjson::Document value;
+        value.Parse(json.data(), json.size());
+        rapidjson::Value copy;
+        if (!value.HasParseError()) copy.CopyFrom(value, allocator);
+        entry.AddMember("value", copy, allocator);
+        if (!error.empty()) {
+            entry.AddMember("error", rapidjson::Value(error.c_str(), allocator), allocator);
+            if (outcome.error.empty()) outcome.error = error;
+        }
+        results.PushBack(entry, allocator);
+    }
+    out.AddMember("name", rapidjson::Value(call.name.c_str(), allocator), allocator);
+    out.AddMember("results", results, allocator);
+    rapidjson::StringBuffer buffer;
+    Writer writer(buffer); out.Accept(writer);
+    outcome.json = buffer.GetString();
+    return outcome;
+}
+
+std::string WithCall(const std::string &response_json, const std::string &call_json) {
+    rapidjson::Document response, call;
+    response.Parse(response_json.data(), response_json.size());
+    call.Parse(call_json.data(), call_json.size());
+    rapidjson::Value copy;
+    copy.CopyFrom(call, response.GetAllocator());
+    response.AddMember("call", copy, response.GetAllocator());
+    rapidjson::StringBuffer buffer;
+    Writer writer(buffer); response.Accept(writer);
+    return buffer.GetString();
+}
+
 struct RunSummary {
     const char *reason;
     int frames;
@@ -1011,10 +1102,11 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 continue;
             }
             std::optional<RunSummary> run_summary;
+            std::optional<CallOutcome> call_outcome;
             EventFilter event_filter;
             ReportedEvents reported;
             std::optional<ActorSelection> selection;
-            if (name == "observe" || name == "step" || name == "run_until") {
+            if (name == "observe" || name == "step" || name == "run_until" || name == "call") {
                 try {
                     selection = ReadSelection(command);
                 } catch (const std::invalid_argument &error) {
@@ -1025,7 +1117,7 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
             const ActorSelection *selected = selection ? &*selection : nullptr;
             std::optional<ImageRequest> image;
             bool game_observations = false;
-            if (name == "observe" || name == "step" || name == "run_until") {
+            if (name == "observe" || name == "step" || name == "run_until" || name == "call") {
                 if (command.HasMember("game")) {
                     if (!command["game"].IsBool()) {
                         EmitResponse(responses, Error("game must be a boolean", "invalid_argument"), request_id);
@@ -1142,6 +1234,31 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 if (run_until)
                     run_summary = RunSummary{matched ? "condition" : engine->IsRunning() ? "max_frames" : "stopped",
                                              advanced, matched, matched_event};
+            } else if (name == "call") {
+                std::optional<AgentCall> call;
+                try {
+                    event_filter = ReadEventFilter(command);
+                    call = ReadCall(*engine, command);
+                } catch (const std::invalid_argument &error) {
+                    EmitResponse(responses, Error(error.what(), "invalid_argument"), request_id);
+                    continue;
+                }
+                if (!engine->IsRunning()) throw std::runtime_error("runtime stopped; reset required");
+                std::optional<PublishTracing> tracing;
+                if (event_filter.enabled) tracing.emplace();
+                call_outcome = RunCall(*engine, *call);
+                if (tracing) {
+                    std::uint64_t trace_dropped = 0;
+                    auto events = EventBus::TakePublishedEvents(&trace_dropped);
+                    reported.Add(event_filter, std::move(events), trace_dropped);
+                }
+                if (ScriptBudget::GetFailure() != ScriptBudget::Failure::None)
+                    throw std::runtime_error(ScriptBudget::FailureMessage());
+                if (call_outcome->handled == 0) {
+                    EmitResponse(responses, Error("no live Lua component defines OnAgentCommand for this call",
+                                                  "no_command_handler"), request_id);
+                    continue;
+                }
             } else if (name != "observe") {
                 throw std::runtime_error("unknown command: " + name);
             }
@@ -1151,6 +1268,13 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                 throw std::runtime_error(engine->GetLastSceneEditError());
             if (engine->RequiresSceneReset() && !engine->GetLastRuntimeActorError().empty())
                 throw std::runtime_error(engine->GetLastRuntimeActorError());
+            if (call_outcome && !call_outcome->error.empty()) {
+                // A handler raised: report it with every result. Earlier
+                // handlers' effects stay; the supervisor still records it.
+                EmitResponse(responses, WithCall(Error(call_outcome->error, "agent_command_failed"), call_outcome->json),
+                             request_id);
+                continue;
+            }
             {
                 std::optional<std::vector<CellQueryResult>> queries;
                 if (command.HasMember("tilemaps")) queries = ReadTileQueries(command["tilemaps"]);
@@ -1166,6 +1290,7 @@ int RunAgentSession(const std::filesystem::path &project, std::uint32_t seed) {
                                                 run_summary->condition,
                                                 run_summary->event ? &*run_summary->event : nullptr);
                 if (event_filter.enabled) observation = WithEvents(observation, reported);
+                if (call_outcome) observation = WithCall(observation, call_outcome->json);
                 EmitResponse(responses, observation, request_id);
             }
         } catch (const SceneLoadFailure &failure) {

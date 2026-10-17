@@ -72,7 +72,7 @@ def run(executable, project):
         check(client.call("ping")["result"] == {}, "ping")
         tools = client.call("tools/list")["result"]["tools"]
         names = [tool["name"] for tool in tools]
-        check(names == ["describe", "observe", "step", "run_until", "reload_scripts", "reload_assets", "reset", "checkpoint", "restore"],
+        check(names == ["describe", "observe", "step", "run_until", "call", "reload_scripts", "reload_assets", "reset", "checkpoint", "restore"],
               "every command except quit is a tool: " + str(names))
         run_until = next(tool for tool in tools if tool["name"] == "run_until")
         check(run_until["inputSchema"]["required"] == ["max_frames", "until"] and

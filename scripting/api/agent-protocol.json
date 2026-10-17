@@ -414,6 +414,57 @@
       }
     },
     {
+      "name": "call",
+      "access": "simulate",
+      "summary": "Run a game-declared command at idle, between ticks: every targeted Lua component that defines OnAgentCommand(self, name, args) is called with the name and args (a Lua table), in UID then key order, and the response is an observation plus call {name, results: [{actor_uid, key, value}]} with each return value as bounded JSON (as event payloads). Does not advance time. A handler error returns agent_command_failed with the error and call results; effects of handlers that already ran are kept. No handler returns no_command_handler; a handler that does not know a broadcast name should return nil. Calls are recorded for checkpoints and replays, so handlers must depend only on game state and args.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "The command name passed to the handlers."
+          },
+          "args": {
+            "type": "object",
+            "description": "JSON arguments, passed as a Lua table (null members are absent). Default {}."
+          },
+          "actor": {
+            "$ref": "#/definitions/actor_ref",
+            "description": "Call only this actor's components: a decimal UID string or a name (the lowest UID with that name)."
+          },
+          "component": {
+            "type": "string",
+            "description": "Call only components with this key."
+          },
+          "events": {
+            "$ref": "#/definitions/events"
+          },
+          "tilemaps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/tile_query"
+            },
+            "maxItems": 16,
+            "description": "Committed tile cells read after the call (as observe). Queries are validated before any handler runs; at most 16 queries and 256 cells."
+          },
+          "select": {
+            "$ref": "#/definitions/selection"
+          },
+          "image": {
+            "$ref": "#/definitions/image"
+          },
+          "game": {
+            "$ref": "#/definitions/game"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
       "name": "reload_scripts",
       "access": "modify",
       "summary": "Atomically reload the source files of registered Lua component types at idle, keeping instances and state; does not advance a tick or rerun OnStart.",
@@ -463,7 +514,7 @@
     {
       "name": "checkpoint",
       "access": "simulate",
-      "summary": "Name the current state: returns a checkpoint id (cp-N) and the frame. A checkpoint is the seed plus the step and run_until requests since the last reset; it is unavailable after a script reload or a failed step until the next reset. At most 64 are kept, oldest evicted.",
+      "summary": "Name the current state: returns a checkpoint id (cp-N) and the frame. A checkpoint is the seed plus the step, run_until and call requests since the last reset; it is unavailable after a script reload or a failed step until the next reset. At most 64 are kept, oldest evicted.",
       "params": {
         "type": "object",
         "properties": {}

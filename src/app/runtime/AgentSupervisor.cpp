@@ -120,6 +120,11 @@ void ValidateShape(const std::string &command, const rapidjson::Value &response)
             !response["run_until"].HasMember("reason") || !response["run_until"]["reason"].IsString() ||
             !response["run_until"].HasMember("frames") || !response["run_until"]["frames"].IsInt())
             throw WorkerFailure("worker_protocol_error", "worker run_until result has an invalid shape");
+    } else if (command == "call") {
+        ValidateObservation(response);
+        if (!response.HasMember("call") || !response["call"].IsObject() ||
+            !response["call"].HasMember("results") || !response["call"]["results"].IsArray())
+            throw WorkerFailure("worker_protocol_error", "worker call result has an invalid shape");
     } else if (command == "quit") {
         if (!response.HasMember("frame") || !response["frame"].IsInt() ||
             !response.HasMember("running") || !response["running"].IsBool() ||
@@ -128,6 +133,11 @@ void ValidateShape(const std::string &command, const rapidjson::Value &response)
     } else {
         throw WorkerFailure("worker_protocol_error", "worker unexpectedly accepted an unknown command");
     }
+}
+
+bool IsRecordedCallFailure(const rapidjson::Value &response) {
+    return response.HasMember("code") && response["code"].IsString() &&
+        std::string(response["code"].GetString()) == "agent_command_failed";
 }
 
 void SetBool(rapidjson::Document &document, const char *name, bool value) {
@@ -522,7 +532,8 @@ AgentHost::Reply AgentHost::Handle(const std::string &line, bool oversized) {
             host.start(host.deadline());
             for (const std::string &step : checkpoint.history) {
                 const auto replayed = ParseResponse(worker.Exchange(step, host.deadline()));
-                if (!replayed["ok"].GetBool()) throw WorkerFailure("restore_failed", "replaying the checkpoint failed");
+                if (!replayed["ok"].GetBool() && !IsRecordedCallFailure(replayed))
+                    throw WorkerFailure("restore_failed", "replaying the checkpoint failed");
             }
             auto document = ParseResponse(worker.Exchange(R"({"cmd":"observe"})", host.deadline()));
             frame = document["frame"].GetInt();
@@ -574,8 +585,10 @@ AgentHost::Reply AgentHost::Handle(const std::string &line, bool oversized) {
         if (name == "reset" && ok) {
             host.history.clear();
             host.history_replayable = true;
-        } else if (name == "step" || name == "run_until") {
-            if (ok) {
+        } else if (name == "step" || name == "run_until" || name == "call") {
+            // A call whose handler raised has still run gameplay code; it is
+            // deterministic, so it is recorded and replayed like a success.
+            if (ok || IsRecordedCallFailure(document)) {
                 rapidjson::Document logged;
                 logged.CopyFrom(request, logged.GetAllocator());
                 logged.RemoveMember("id");
