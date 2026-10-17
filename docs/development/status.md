@@ -638,11 +638,14 @@ phase15 benchmark directories. No performance gain or SOTA conclusion is claimed
    agent protocol. The engine gaps they found are fixed (the table in
    `game-completeness-tests.md`, latest: one-sided tile outlines for the box
    mover, FindPath clearance from solid tiles, 8-9x faster FindPath/PathRegions,
-   cached atlas sizes, `Input.GetAnyKeyDown`, hidden tilemaps imported disabled).
+   cached atlas sizes, `Input.GetAnyKeyDown`, hidden tilemaps and inactive entities
+   imported disabled, `game --scene NAME`).
    Village_Rim is migrated from the opening to the ending (world B's enemies and
    bosses, devil trees, traps, bridges, the final boss, credits and spring, the
-   active shield, side quests, checkpoints); its route playtest (22 checks,
-   identical on repeat runs) and systems playtest (30 checks) pass. Remaining
+   active shield, side quests, checkpoints, the frame-by-frame opening, field
+   farming); its route playtest (22 checks,
+   identical on repeat runs) and systems playtest (32 checks, with the field
+   farming lab started by `game --scene field_lab`) pass. Remaining
    approximations are listed there. Both projects live outside the engine in
    `~/Desktop/pocket2d-games/`.
 

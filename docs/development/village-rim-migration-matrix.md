@@ -26,8 +26,9 @@ Pocket2D 的目标栈和总体范围见 [roadmap.md](roadmap.md)。当前 defens
 **真实世界导入（2026-10-16）。** `~/Desktop/pocket2d-games/VillageRim` 用 Unity YAML 导入器导出了 Gameplay 场景的
 tilemap、精灵、碰撞体和实体占位（隐藏的 tilemap 以禁用状态导入），并在其上移植了从开场到结局的
 整条游戏：任务链与 NPC 支线、元素祭坛与种树、三岛入侵与魔树、B 世界上锁房间的岛间路线、箭陷阱、
-B 世界敌人与四个 Boss、Golem 与通往 D 岛的桥、最终 Boss、名单与春季融化、主动盾牌、检查点与存档；
-两个 agent playtest 用真实输入走完整条路线（22 项）并覆盖各系统（30 项）。
+B 世界敌人与四个 Boss、Golem 与通往 D 岛的桥、最终 Boss、名单与春季融化、主动盾牌、检查点与存档、
+逐帧的开场过场，以及只存在于早期 A 世界 WorldAPhase1 的田地农场（独立的 `field_lab` 场景）；
+两个 agent playtest 用真实输入走完整条路线（22 项）并覆盖各系统（32 项）。
 发现的引擎缺口与修复见 [game-completeness-tests.md](game-completeness-tests.md)。
 该项目不在引擎仓库中，原游戏资产不随引擎分发。
 

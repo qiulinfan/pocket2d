@@ -50,7 +50,10 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
   0.5 秒 +3 HP（原作遮罩写成 "Plant" 而层名是 "plant"，Unity 里这一加速实际不生效）。
 - `VROpening`：开场过场按 Timeline（1.5 倍速）复刻：士兵、巫师、剑士与三只哥布林交战，
   祭坛五次受击后于 8.73 被毁，士兵倒下，牧师两次治疗，9.9 秒后淡出，玩家出现在
-  `manualPosition`、巡逻队开始行动；每个存档目录只播放一次，Esc 可跳过。
+  `manualPosition`、巡逻队开始行动；每个存档目录只播放一次，Esc 可跳过。各角色、牧师的治疗特效和
+  祭坛按 Timeline 的动画轨道逐帧显示（`tools/pack_opening.py` 解析 `OpeningTimeline.playable` 与各
+  `.anim` 的精灵关键帧、Hold 外推和祭坛受击的红色渐变，生成 `VROpeningData.lua`）；Timeline 的
+  wrap mode 是 None，结束时祭坛与特效恢复场景原样。
 - `VRMinimap`：原作只启用的 MiniMapCameraA（中心 (−18.4, 271.3)、正交尺寸 63、
   256×256）视野由 `tools/pack_minimap.py` 按渲染顺序烘焙；右下角带边框，叠加玩家标记、
   Golem 图标和遭入侵岛屿的标记（B 世界里仍显示 A 世界，与原作一致）。
@@ -100,6 +103,13 @@ Unity sorting layer 映射为 `sorting_order = 层序号 * 100000 + order`，全
   tilemap 模板与精灵），换元素时逐圈显现。
 - `VRSideQuests`：NPC 支线（InvasionGuide 镜头展示魔树 5 秒、CompassUse、TreePlantGuide、
   UseShield、ShieldTesting），原文台词、提示和 NPC 头上的 "!"；A3start 后 Soldier 才开口。
+- `VRField` + `VRFieldLab`：田地农场（`FarmPlot`/`CropGrowth`）只存在于原作较早的 A 世界预制件
+  `WorldAPhase1`（Gameplay 的 A 世界是同一布局北移 259，没有田地），所以单独导入为
+  `scenes/field_lab.scene`，用引擎新的 `game --scene field_lab` 启动。手持种子左键点 3 以内的耕地格
+  种下（消耗一粒），番茄作物六阶段各 1 秒；点成熟作物或按 E 收获，按种子掉落番茄 1–2 / 玉米 1、
+  树种无产出。原作祭坛给田地格加元素的 `ApplyAura` 被注释掉，所以总是中性作物；
+  `FreezingCompleteEvent`/`InitCropEvent` 在任何场景都没有发布者，`FarmHighlight` 也从未被开启，
+  这些不移植。
 
 `tools/playtest.py` 只用真实输入和游戏观测，跟随任务指引完成：与 Priest 对话、
 击杀携带宝石的哥布林并拾取、回报、用鼠标在背包里搬运物品、修复祭坛并放置风宝石、
@@ -111,7 +121,7 @@ Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段�
 名单出现、春季显现、按任意键离开；再从 Golem 战前存档用其它种子重打（门与宝箱按存档恢复），
 覆盖两种攻击。死亡时在检查点重生后继续。22 项检查全部通过，同一种子两次运行的结果逐项一致。
 
-`tools/playtest_systems.py`（30 项检查，逐项可复现）：新存档目录播放开场（音乐、祭坛被毁、
+`tools/playtest_systems.py`（32 项检查，逐项可复现）：新存档目录播放开场（音乐、祭坛被毁、
 交还控制），reset 后跳过；把 F5 存档改成后期局面（背包里的宝石、树种、番茄，修复的祭坛，
 别处的火祭坛，两座即将被入侵的岛）后 F9 读入；清掉巡逻队；风宝石后奔跑距离翻倍；草替换风
 （风宝石弹出并被拾回）、5 秒回 5 HP；水替换草，挥剑射出水弹并扣法力；火在另一座祭坛上叠加；
@@ -120,7 +130,8 @@ Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段�
 画面上；全部音效请求都解析到文件（引擎新的 `audio.play`/`music.play` 事件）。之后改存档跳到
 各场景：砍倒 B 岛魔树（入侵停止、奖励宝箱）、陷阱射中玩家、斧头砍坏陷阱；蘑菇咬出酸液并
 中毒；幽灵射水弹；击败骷髅王（陨石、桥、记录击杀）；盾牌完美弹反剑圣的热浪（不掉血、
-剑圣眩晕）并把大祭司的火球弹回伤到它；死亡后回到检查点满血。
+剑圣眩晕）并把大祭司的火球弹回伤到它；死亡后回到检查点满血。最后另起一个以 `--scene field_lab`
+启动的运行时：种下番茄与玉米（够不到的格子种不下），作物成熟后点击与按 E 收获并拾起产出。
 
 迁移时的适配（原作行为依赖未迁移内容或不可测）：
 
@@ -132,9 +143,7 @@ Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段�
   宝石、滑进祭坛触发器。
 - 原作 `spawnedArcherThisWave` 从不重置，A、B 岛整局只会来一个弓箭手；这里按变量名的
   本意每波重置。原作的树加速因层名大小写不生效，这里按设计生效。
-- 开场过场的士兵、巫师、剑士用导入的单帧精灵按轨迹移动（攻击为抖动、倒下为旋转淡出），
-  哥布林用其动画；Timeline 中各 NPC 的逐帧动画片段没有逐一移植。小地图是烘焙的静态
-  世界加动态标记，不是运行时第二台相机。
+- 小地图是烘焙的静态世界加动态标记，不是运行时第二台相机（原作的相机只拍静态世界）。
 
 ## PocketTerraria
 
@@ -182,6 +191,8 @@ Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段�
 | 盒形 mover 贴着瓦片面滑到拐角时，按命中法线忽略了相邻面的接触而滑进瓦片，进去后又被瓦片背面挡住出不来（VR B2 卡死） | 瓦片轮廓（chain）对盒形 mover 是单面的：只挡朝外侧面向内的运动，与 Box2D 接触和射线一致 |
 | 场景重载后首帧约 1.8 秒（任务指引的区域泛洪），负载下超过 agent 请求的 5 秒期限（VR playtest） | 格搜索改用开放寻址的格表，占据查询每次只列一次有实心格的 tilemap；`path_benchmark` 中 PathRegions 80.5 → 10.4 ms、FindPath 11.6 → 1.3 ms，VR 重载首帧约 0.06 秒 |
 | 每次 `Actor.Instantiate` 动画模板、每次加载 tilemap 都解码整张图集 PNG 只为检查尺寸（VR 房间刷怪、重载） | `ImageSize::Decoded` 按文件记住尺寸，文件大小或修改时间变化时才重新解码 |
+| 只能从 game.config 的 `initial_scene` 启动，原作 Lab 式的独立场景无法直接运行或 playtest（VR 田地实验场景） | `game --scene NAME`（图形与 agent 模式，reset 后的 worker 继承），缺失的场景是启动错误 |
+| 导入器直接丢弃未启用的实体（VR 旧剑圣、Altar1） | 未启用的实体与 tilemap 一样以 `enabled: false` 导入，场景与 Unity 逐对象对应 |
 
 （VR = Village_Rim，PT = PocketTerraria。）两个游戏都已改用这些能力，并重新通过各自的 playtest。
 
@@ -189,11 +200,12 @@ Soldier 的话，经 BPortal6/APortal6 到 Golem 并击败它，看着桥逐段�
 
 - **导入近似**：Unity Sprite 形状碰撞按整格；有缩放/旋转的 tilemap、九宫格精灵和 trigger 只记录在
   `import_report.json`。
-- **Village_Rim 仍是近似或未迁移的部分**：原作的田地农场（`FarmPlot`）不在 Gameplay 场景中，故不迁移；
-  场景里未启用的旧系统敌人（旧版 GoblinSwordSaint、GoblinHighPriest 等）不迁移，路线上用的是新系统版本。
-  开场过场各 NPC 的逐帧动画片段和小地图的运行时相机是近似（见上）。原工程玩家出生点位于水面碰撞体内
-  （运行时另有放置逻辑，未迁移）。幽灵墙（`GhostObstacle`，ghostborder 层与所有层碰撞）在原作里就是
-  永久实心，已按实心瓦片导入。这些是内容移植，不是已知的引擎缺口。
+- **Village_Rim 中原作自身就不可达的内容**：场景里未启用、也没有任何对象引用或激活的旧系统剑圣
+  （以及 AltarWithHalo）按原样以禁用的 `SpawnMarker` 导入，与 Unity 中一样不出现；旧版 GoblinHighPriest
+  与 EnemyGenerator 预制件不在 Gameplay 中。海面/陆地结冰（`GameControl`、`IceSpreadFromEdges`）与
+  冰面行走在任何场景或预制件中都没有使用。原工程玩家出生点位于水面碰撞体内（运行时另有放置逻辑，
+  未迁移）。幽灵墙（`GhostObstacle`，ghostborder 层与所有层碰撞）在原作里就是永久实心，已按实心瓦片
+  导入。这些不是已知的引擎缺口。
 
 ## 性能
 
