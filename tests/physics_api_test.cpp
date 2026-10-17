@@ -169,11 +169,18 @@ void Run() {
       local EMBEDDED=Actor.Find('embedded'):GetComponent('Rigidbody')
       local out=Physics.MoveCharacter(EMBEDDED,Vector2(0,1))
       assert(math.abs(out.y-1)<1e-4,'a box inside a solid tile walks out of it: '..out.y)
+      EMBEDDED:SetPosition(Vector2(20.1,10.5))
+      local part=Physics.MoveCharacter(EMBEDDED,Vector2(0,1))
+      assert(math.abs(part.y-1)<1e-4,'a box partly inside a tile, centre outside it, walks out: '..part.y)
       EMBEDDED:SetPosition(Vector2(29.748,8))
       Physics.MoveCharacter(EMBEDDED,Vector2(0.5,0))
       assert(EMBEDDED:GetPosition().x<29.751,'a box touching a tile face cannot enter it: '..EMBEDDED:GetPosition().x)
       local along=Physics.MoveCharacter(EMBEDDED,Vector2(0,1))
       assert(math.abs(along.y-1)<1e-4,'a box touching a tile face slides along it: '..along.y)
+      -- just past the floor's end, its bottom below the floor top: the corner beside it does not catch it
+      EMBEDDED:SetPosition(Vector2(20.255,9.9))
+      local past=Physics.MoveCharacter(EMBEDDED,Vector2(0,0.5))
+      assert(math.abs(past.y-0.5)<1e-4,'a box beside a tile corner falls past it: '..past.y)
       -- grid path finding around solid tiles and static colliders
       local path=Physics.FindPath(Vector2(8,5),Vector2(12,5),0.5,0.2,4000)
       assert(#path>0 and path[#path].x==12 and path[#path].y==5,'path reaches the goal exactly')

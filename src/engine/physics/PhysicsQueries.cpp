@@ -105,11 +105,13 @@ b2Capsule MoverCapsule(const Rigidbody &body, const b2Vec2 &position) {
 
 // Box mover sweep: ignores the body's own shapes and non-colliders; a shape
 // already touching blocks only when it faces against the motion. Tilemap
-// outlines are one-sided chains, as for Box2D's contacts and ray casts: only
-// motion into their outer side is stopped, so a box touching a tile face
-// cannot slip in at a corner, and a box inside a solid tile can walk out.
+// outlines are one-sided chains, as for Box2D's contacts and ray casts: a box
+// whose centre is inside a solid tile can walk out of it, and a box touching a
+// tile face is stopped by motion into that face but not by a corner beside it.
 struct BoxCastContext {
     const Rigidbody *self = nullptr;
+    b2Vec2 center{0, 0};
+    b2Vec2 half{0, 0};
     b2Vec2 direction{0, 0};
     float fraction = 1.0f;
     bool hit = false;
@@ -121,13 +123,35 @@ float CollectBoxCast(b2ShapeId shape, b2Vec2, b2Vec2 normal, float fraction, voi
     if (metadata == nullptr || metadata->kind != RayCast::FixtureKind::Collider) return -1.0f;
     if (b2Shape_GetType(shape) == b2_chainSegmentShape) {
         const b2Segment segment = b2Shape_GetChainSegment(shape).segment;
-        const b2Vec2 edge = b2RotateVector(b2Body_GetRotation(b2Shape_GetBody(shape)),
-                                           b2Sub(segment.point2, segment.point1));
-        // The outer side is right of the segment direction.
-        if (edge.y * cast.direction.x - edge.x * cast.direction.y >= 0.0f) return -1.0f;
-    } else if (fraction == 0.0f && normal.x * cast.direction.x + normal.y * cast.direction.y > -0.5f) {
-        return -1.0f;
+        const b2Transform transform = b2Body_GetTransform(b2Shape_GetBody(shape));
+        const b2Vec2 p1 = b2TransformPoint(transform, segment.point1);
+        const b2Vec2 edge = b2Sub(b2TransformPoint(transform, segment.point2), p1);
+        // The outer side is right of the segment direction. A box whose centre is
+        // behind the segment, overlapping its span, is inside the solid.
+        const b2Vec2 offset = b2Sub(cast.center, p1);
+        const float length = b2Length(edge);
+        const float along = b2Dot(offset, edge) / length;
+        const float reach = (std::abs(edge.x) * cast.half.x + std::abs(edge.y) * cast.half.y) / length;
+        if (edge.y * offset.x - edge.x * offset.y < 0.0f && along + reach > 1e-4f && along - reach < length - 1e-4f)
+            return -1.0f;
+        // A box within the cast's tolerance of the segment gets no contact normal.
+        // It is stopped when the segment lies across its path (overlapping the box
+        // sideways) and faces against the motion, as a wall face at its side does;
+        // a segment it only meets at an end (a corner beside it) lets it pass.
+        if (fraction == 0.0f && b2LengthSquared(normal) < 0.25f) {
+            const b2Vec2 p2 = b2Add(p1, edge);
+            const bool along_x = cast.direction.x != 0.0f;
+            const float low = along_x ? std::min(p1.y, p2.y) : std::min(p1.x, p2.x);
+            const float high = along_x ? std::max(p1.y, p2.y) : std::max(p1.x, p2.x);
+            const float center = along_x ? cast.center.y : cast.center.x;
+            const float half = along_x ? cast.half.y : cast.half.x;
+            const bool across = low < center + half - 1e-4f && high > center - half + 1e-4f;
+            const bool against = edge.y * cast.direction.x - edge.x * cast.direction.y < 0.0f;
+            if (!(across && against)) return -1.0f;
+            normal = b2Normalize({edge.y, -edge.x});
+        }
     }
+    if (fraction == 0.0f && normal.x * cast.direction.x + normal.y * cast.direction.y > -0.5f) return -1.0f;
     if (fraction < cast.fraction) { cast.fraction = fraction; cast.hit = true; }
     return fraction;
 }
@@ -146,8 +170,8 @@ Vector2 MoveBox(Rigidbody &body, const Vector2 &delta) {
                                    {position.x + hx, position.y + hy}, {position.x - hx, position.y + hy}};
         const b2ShapeProxy proxy = b2MakeProxy(corners, 4, 0.0f);
         const b2Vec2 translation = axis == 0 ? b2Vec2{amount, 0} : b2Vec2{0, amount};
-        BoxCastContext cast{&body, {axis == 0 ? (amount > 0 ? 1.0f : -1.0f) : 0.0f,
-                                    axis == 1 ? (amount > 0 ? 1.0f : -1.0f) : 0.0f}};
+        BoxCastContext cast{&body, position, {hx, hy}, {axis == 0 ? (amount > 0 ? 1.0f : -1.0f) : 0.0f,
+                                                        axis == 1 ? (amount > 0 ? 1.0f : -1.0f) : 0.0f}};
         b2World_CastShape(world, &proxy, translation, query, CollectBoxCast, &cast);
         float moved = std::abs(amount);
         if (cast.hit) moved = std::max(0.0f, cast.fraction * std::abs(amount) - skin);
