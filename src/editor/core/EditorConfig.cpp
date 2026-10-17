@@ -1,5 +1,6 @@
 #include "editor/core/EditorConfig.h"
 #include "editor/core/EditorTheme.h"
+#include <algorithm>
 #include "core/Log.h"
 #include "shared/resources/ResourcePath.h"
 #include "rapidjson/document.h"
@@ -367,6 +368,9 @@ EditorConfigData EditorConfig::Read() {
     if (editor_config.HasMember("theme") && editor_config["theme"].IsString()) {
         config.theme = EditorTheme::Normalize(editor_config["theme"].GetString());
     }
+    if (editor_config.HasMember("project_icon_size") && editor_config["project_icon_size"].IsNumber()) {
+        config.project_icon_size = std::clamp(editor_config["project_icon_size"].GetFloat(), 56.0f, 128.0f);
+    }
     if (editor_config.HasMember("font") && editor_config["font"].IsString()) {
         config.font = std::string_view(editor_config["font"].GetString()) == "inter" ? "inter" : "platform";
     }
@@ -437,6 +441,8 @@ void EditorConfig::Write(const EditorConfigData &config) {
     writer.String(config.theme.c_str());
     writer.Key("font");
     writer.String(config.font.c_str());
+    writer.Key("project_icon_size");
+    writer.Double(config.project_icon_size);
     writer.Key("reference_width");
     writer.Int(config.reference_width);
     writer.Key("reference_height");

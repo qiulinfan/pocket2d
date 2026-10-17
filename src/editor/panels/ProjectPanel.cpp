@@ -45,7 +45,7 @@ struct DirectoryListingCache {
 struct ProjectPanelState {
     std::filesystem::path selected_directory;
     std::filesystem::path selected_entry;
-    float tile_size = 80.0f;  // icon tile width, set by the size slider
+    float tile_size = 80.0f;  // icon tile width for this frame (editor.config project_icon_size)
 };
 
 // File type classification drives icon choice plus double-click behavior.
@@ -1124,7 +1124,8 @@ void RenderDirectoryGrid(const std::filesystem::path &resources_root,
 } // namespace
 
 // Render a read-only project browser tree for the active project root.
-ProjectPanelResult RenderProjectPanel( const std::filesystem::path &resources_root, SDL_Renderer *renderer) {
+ProjectPanelResult RenderProjectPanel(const std::filesystem::path &resources_root, SDL_Renderer *renderer,
+                                      float &icon_size) {
     // Project panel owns only UI-navigation state. The actual file-system state
     // lives on disk, and open requests are returned to the host as a result.
     ProjectPanelResult result;
@@ -1146,8 +1147,10 @@ ProjectPanelResult RenderProjectPanel( const std::filesystem::path &resources_ro
     const float slider_width = 120.0f;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionMax().x - slider_width));
     ImGui::SetNextItemWidth(slider_width);
-    ImGui::SliderFloat("##project_icon_size", &GetProjectPanelState().tile_size, 56.0f, 128.0f, "");
+    ImGui::SliderFloat("##project_icon_size", &icon_size, 56.0f, 128.0f, "");
+    result.icon_size_committed = ImGui::IsItemDeactivatedAfterEdit();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Icon size");
+    GetProjectPanelState().tile_size = std::clamp(icon_size, 56.0f, 128.0f);
     ImGui::Separator();
 
     const DirectoryListing &root_listing =

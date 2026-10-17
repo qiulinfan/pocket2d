@@ -960,7 +960,8 @@ EditorOverlayResult EditorOverlay::Render(Engine &engine,
 
     const EditorPanels::ProjectPanelResult project_panel_result =
         EditorPanels::RenderProjectPanel(ResourcePath::ResourcesRootPath(),
-                                         renderer);
+                                         renderer, editor_config.project_icon_size);
+    result.editor_preferences_changed |= project_panel_result.icon_size_committed;
     if (project_panel_result.open_scene_requested) {
         result.open_scene_requested = true;
         result.requested_scene_path = project_panel_result.requested_scene_path;
@@ -1121,6 +1122,7 @@ void EditorOverlay::RenderEditorSettingsWindow(Engine &engine,
             if (ImGui::Selectable(EditorTheme::DisplayName(name), selected)) {
                 editor_config.theme = name;
                 config_changed = true;
+                result.editor_preferences_changed = true;
             }
             if (selected) ImGui::SetItemDefaultFocus();
         }
@@ -1132,6 +1134,7 @@ void EditorOverlay::RenderEditorSettingsWindow(Engine &engine,
             if (ImGui::Selectable(font_label(name), editor_config.font == name)) {
                 editor_config.font = name;
                 config_changed = true;
+                result.editor_preferences_changed = true;
             }
         }
         ImGui::EndCombo();

@@ -39,6 +39,8 @@ struct Host {
     int starts = 0, stops = 0;
     std::filesystem::path new_project_location;
     std::filesystem::path opened_project;
+    float icon_size = 0.0f;  // editor.config project_icon_size after the last frame
+    int preferences_saved = 0;  // frames whose result asked to save preferences
     bool Playing() const { return play != nullptr; }
 
     void Start() {
@@ -103,6 +105,16 @@ void RegisterTests(ImGuiTestEngine *engine) {
         for (int frame = 0; frame < 10 && g_host->opened_project.empty(); ++frame) ctx->Yield();
         IM_CHECK(g_host->opened_project == g_host->new_project_location / "UiGame");
     };
+    test = IM_REGISTER_TEST(engine, "editor", "project_icon_size_slider");
+    test->TestFunc = [](ImGuiTestContext *ctx) {
+        ctx->WindowFocus("//Project");
+        ctx->SetRef("//Project");
+        const int saved_before = g_host->preferences_saved;
+        ctx->ItemInputValue("##project_icon_size", 100.0f);
+        ctx->Yield(2);
+        IM_CHECK(g_host->icon_size == 100.0f);
+        IM_CHECK(g_host->preferences_saved > saved_before);
+    };
 }
 
 void Run(const std::filesystem::path &project) {
@@ -161,6 +173,8 @@ void Run(const std::filesystem::path &project) {
         if (result.play_mode_start_requested && !host.Playing()) host.Start();
         else if (result.play_mode_stop_requested && host.Playing()) host.Stop();
         if (result.open_project_requested) host.opened_project = result.requested_project_root;
+        host.icon_size = config.project_icon_size;
+        if (result.editor_preferences_changed) ++host.preferences_saved;
         (host.Playing() ? *host.play : edit).PresentFrame(host.Playing());
         ImGuiTestEngine_PostSwap(engine);
     }
@@ -171,7 +185,7 @@ void Run(const std::filesystem::path &project) {
     overlay.Shutdown();
     ImGuiTestEngine_DestroyContext(engine);
     if (host.Playing()) host.Stop();
-    Check(tested == 4 && succeeded == 4, "editor UI tests: " + std::to_string(succeeded) + "/" + std::to_string(tested) + " passed");
+    Check(tested == 5 && succeeded == 5, "editor UI tests: " + std::to_string(succeeded) + "/" + std::to_string(tested) + " passed");
     Check(host.starts == 3 && host.stops == 3, "each play test starts and stops play once");
     const std::filesystem::path created = new_project_location / "UiGame";
     Check(std::filesystem::exists(created / "game.config") &&

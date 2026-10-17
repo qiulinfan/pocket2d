@@ -28,6 +28,8 @@ struct EditorOverlayResult {
     bool scene_changed = false;
     std::vector<SceneFormat::SceneEditCommand> scene_edit_commands;
     bool editor_config_changed = false;
+    // Theme, font or Project icon size changed: saved at once, no Apply needed.
+    bool editor_preferences_changed = false;
     bool editor_window_settings_changed = false;
     bool editor_config_apply_requested = false;
     bool editor_config_revert_requested = false;

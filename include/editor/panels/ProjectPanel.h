@@ -15,11 +15,15 @@ struct ProjectPanelResult {
     EditorExternalFileType requested_external_file_type = EditorExternalFileType::Generic;
     std::filesystem::path requested_external_file_path;
     std::filesystem::path requested_external_project_root;
+    // The icon size slider was released at a new value.
+    bool icon_size_committed = false;
 };
 
-// Render a read-only browser tree for the active project root.
+// Render a read-only browser tree for the active project root. `icon_size`
+// is the tile width (editor.config "project_icon_size"), set by its slider.
 // 渲染当前项目根目录的只读工程浏览树.
-ProjectPanelResult RenderProjectPanel( const std::filesystem::path &resources_root, SDL_Renderer *renderer);
+ProjectPanelResult RenderProjectPanel(const std::filesystem::path &resources_root, SDL_Renderer *renderer,
+                                      float &icon_size);
 void InvalidateProjectPanelCache();
 
 } // namespace EditorPanels

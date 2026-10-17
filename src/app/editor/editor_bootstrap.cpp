@@ -687,6 +687,13 @@ void EditorApp::Run() {
                     editor_config_dirty_ =
                         !AreEditorConfigsEqualForConfirmation( editor_config_, confirmed_editor_config_);
                 }
+                if (overlay_result.editor_preferences_changed) {
+                    // Look-and-feel preferences need no Apply: keep them and save now.
+                    confirmed_editor_config_.theme = editor_config_.theme;
+                    confirmed_editor_config_.font = editor_config_.font;
+                    confirmed_editor_config_.project_icon_size = editor_config_.project_icon_size;
+                    EditorConfig::Write(confirmed_editor_config_);
+                }
                 if (overlay_result.editor_window_settings_changed) {
                     ApplyEditorWindowSettings();
                     SyncWindowStateFromLiveWindow();
