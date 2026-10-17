@@ -104,7 +104,10 @@ b2Capsule MoverCapsule(const Rigidbody &body, const b2Vec2 &position) {
 }
 
 // Box mover sweep: ignores the body's own shapes and non-colliders; a shape
-// already touching blocks only when it faces against the motion.
+// already touching blocks only when it faces against the motion. Tilemap
+// outlines are one-sided chains, as for Box2D's contacts and ray casts: only
+// motion into their outer side is stopped, so a box touching a tile face
+// cannot slip in at a corner, and a box inside a solid tile can walk out.
 struct BoxCastContext {
     const Rigidbody *self = nullptr;
     b2Vec2 direction{0, 0};
@@ -116,7 +119,15 @@ float CollectBoxCast(b2ShapeId shape, b2Vec2, b2Vec2 normal, float fraction, voi
     if (b2Shape_GetBody(shape) == cast.self->body) return -1.0f;
     const auto *metadata = RayCast::FindShapeMetadata(shape);
     if (metadata == nullptr || metadata->kind != RayCast::FixtureKind::Collider) return -1.0f;
-    if (fraction == 0.0f && normal.x * cast.direction.x + normal.y * cast.direction.y > -0.5f) return -1.0f;
+    if (b2Shape_GetType(shape) == b2_chainSegmentShape) {
+        const b2Segment segment = b2Shape_GetChainSegment(shape).segment;
+        const b2Vec2 edge = b2RotateVector(b2Body_GetRotation(b2Shape_GetBody(shape)),
+                                           b2Sub(segment.point2, segment.point1));
+        // The outer side is right of the segment direction.
+        if (edge.y * cast.direction.x - edge.x * cast.direction.y >= 0.0f) return -1.0f;
+    } else if (fraction == 0.0f && normal.x * cast.direction.x + normal.y * cast.direction.y > -0.5f) {
+        return -1.0f;
+    }
     if (fraction < cast.fraction) { cast.fraction = fraction; cast.hit = true; }
     return fraction;
 }

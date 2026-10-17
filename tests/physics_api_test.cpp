@@ -68,7 +68,8 @@ struct Fixture {
           {"uid":12,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":48,"y":5,"has_trigger":false,"width":2,"height":8}}},
           {"uid":13,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":52,"y":5,"has_trigger":false,"width":2,"height":8}}},
           {"uid":14,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":50,"y":2,"has_trigger":false,"width":6,"height":2}}},
-          {"uid":15,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":50,"y":8,"has_trigger":false,"width":6,"height":2}}}
+          {"uid":15,"name":"pen","components":{"body":{"type":"Rigidbody","body_type":"static","x":50,"y":8,"has_trigger":false,"width":6,"height":2}}},
+          {"uid":16,"name":"embedded","components":{"transform":{"type":"Transform","x":5.5,"y":10.5},"body":{"type":"Rigidbody","body_type":"kinematic","x":5.5,"y":10.5,"has_trigger":false,"collider_type":"box","width":0.5,"height":0.4}}}
         ]})";
     }
     ~Fixture() { ResourcePath::SetResourcesRootPath(previous); std::error_code error; fs::remove_all(root, error); }
@@ -163,6 +164,16 @@ void Run() {
       Physics.MoveCharacter(BOXER,Vector2(5,0))
       local wall=BOXER:GetPosition().x
       assert(wall>29.5 and wall<29.61,'box mover stops at the wall: '..wall)
+      -- tile outlines are one-sided: a box inside a solid tile walks out, and
+      -- touching a face blocks only motion into it
+      local EMBEDDED=Actor.Find('embedded'):GetComponent('Rigidbody')
+      local out=Physics.MoveCharacter(EMBEDDED,Vector2(0,1))
+      assert(math.abs(out.y-1)<1e-4,'a box inside a solid tile walks out of it: '..out.y)
+      EMBEDDED:SetPosition(Vector2(29.748,8))
+      Physics.MoveCharacter(EMBEDDED,Vector2(0.5,0))
+      assert(EMBEDDED:GetPosition().x<29.751,'a box touching a tile face cannot enter it: '..EMBEDDED:GetPosition().x)
+      local along=Physics.MoveCharacter(EMBEDDED,Vector2(0,1))
+      assert(math.abs(along.y-1)<1e-4,'a box touching a tile face slides along it: '..along.y)
       -- grid path finding around solid tiles and static colliders
       local path=Physics.FindPath(Vector2(8,5),Vector2(12,5),0.5,0.2,4000)
       assert(#path>0 and path[#path].x==12 and path[#path].y==5,'path reaches the goal exactly')
