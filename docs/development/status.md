@@ -227,6 +227,14 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   TilemapDocument/Inspector/Overlay support authoring preview, save, undo/redo,
   explicit memory discard and dirty guards. Fresh scene instances do not receive
   stale clean cached data. Actual UI drawing and mapless-scene draft access pass.
+- Editor map painting: the Inspector lists every layer of the asset (extra
+  layers included, with per-layer dirty cells) and drives a Scene-view brush:
+  tile or autotile-terrain strokes, square sizes, one undo step per drag.
+  Terrain strokes frame the cell and re-frame its neighbours exactly as runtime
+  `SetTerrain`, which now also re-frames extra layers on their own layer. The
+  preview patches only changed cells. `editor_ui_tilemap` paints a 1000x400 map
+  with real Test Engine drags and checks chunk-bounded rebuilds; selection,
+  rectangle/fill tools, layer creation and map resizing remain open.
 - Tilemap pixel readback passes on software, Metal and OpenGL, including atlas
   selection, alpha, ordering ties, culling, 2× target scaling and zoom. Both game
   fixtures also launch and capture successfully from copies containing only

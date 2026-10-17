@@ -402,6 +402,8 @@ if(POCKET_ENABLE_IMGUI_TEST_ENGINE)
     target_link_libraries(editor_ui_test PRIVATE GameEngine::Editor)
     add_test(NAME editor_ui COMMAND editor_ui_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
     set_tests_properties(editor_ui PROPERTIES TIMEOUT 120)
+    add_test(NAME editor_ui_tilemap COMMAND editor_ui_test --tilemap "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tilemap_farm")
+    set_tests_properties(editor_ui_tilemap PROPERTIES TIMEOUT 120)
 endif()
 
 pocket_runtime_test(physics_api_test physics_api_test.cpp)

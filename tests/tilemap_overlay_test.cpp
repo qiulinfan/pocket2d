@@ -73,6 +73,22 @@ void Run(const std::filesystem::path &fixture) {
           "Overlay failed to preview every reference to the authoring asset");
     Check(TilemapAsset::LoadResource("farm.tilemap.json").ground.cells[8*64+8]==2,
           "preview implicitly saved authoring changes");
+    // Later edits patch only their cells into a preview that still shows the
+    // previous revision: one render chunk, no collision, no asset copy.
+    const int original=document.GetAsset().ground.cells[40*64+40];
+    Map(10)->ResetDiagnostics();
+    Check(document.SetCell("ground",40,40,original==4?5:4),"second cell edit failed");
+    Draw(overlay,engine,scene,config);
+    Check(Map(10)->GetCell("ground",40,40)==document.GetAsset().ground.cells[40*64+40] &&
+          Map(10)->GetDiagnostics().render_chunk_rebuilds==1 && Map(10)->GetDiagnostics().collision_chunk_rebuilds==0,
+          "a cell edit re-copied the whole asset into the preview");
+    // A runtime change the document never made forces a full copy again.
+    Check(Map(10)->SetCell("ground",1,1,6),"runtime cell edit failed");Map(10)->CommitPending();
+    Check(document.Undo(),"undo failed");
+    Draw(overlay,engine,scene,config);
+    Check(Map(10)->GetCell("ground",40,40)==original &&
+          Map(10)->GetCell("ground",1,1)==document.GetAsset().ground.cells[1*64+1],
+          "a runtime-changed preview was patched instead of replaced");
     Check(document.Save(),document.GetLastError());
     Draw(overlay,engine,scene,config);
     const auto old_generation=engine.GetRuntimeActorByUID(10)->runtime_generation;

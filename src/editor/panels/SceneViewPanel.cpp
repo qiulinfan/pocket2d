@@ -1,8 +1,11 @@
 #include "editor/panels/SceneViewPanel.h"
 #include "editor/core/EditorDragDrop.h"
 #include "editor/documents/SceneDocument.h"
+#include "editor/documents/TilemapDocument.h"
 #include "engine/core/Engine.h"
+#include "scene/Tilemap.h"
 #include "scripting/ComponentManager.h"
+#include "shared/resources/ResourcePath.h"
 #include "imgui.h"
 #include "SDL3/SDL.h"
 #include <algorithm>
@@ -1152,6 +1155,76 @@ void ZoomSceneCameraAtCursor(const Engine &engine, const ImVec2 &image_min,
     g_scene_camera_state.world_y += world_before_zoom.y - world_after_zoom.y;
 }
 
+// A brush stroke in progress: the cell the mouse was over last frame.
+struct MapStrokeState {
+    bool active = false;
+    int last_x = 0;
+    int last_y = 0;
+};
+
+MapStrokeState g_map_stroke;
+
+/* The selected scene actor's Tilemap when it shows the open map document. */
+Tilemap *FindPaintTarget(SceneDocument &scene_document, int selected_actor_index,
+                         const TilemapDocument &document) {
+    if (selected_actor_index < 0 ||
+        selected_actor_index >= static_cast<int>(scene_document.GetActorCount())) return nullptr;
+    const Actor::UID uid = scene_document.GetActorUID(static_cast<std::size_t>(selected_actor_index));
+    for (const auto &spec : ComponentManager::GetRuntimeComponentSpecs(uid)) {
+        if (spec.type != "Tilemap") continue;
+        Tilemap *map = ComponentManager::GetTilemap(uid, spec.key);
+        if (map == nullptr || !map->HasAsset() || map->map_resource.empty()) continue;
+        std::error_code error;
+        const auto path = std::filesystem::weakly_canonical(
+            std::filesystem::absolute(ResourcePath::ResourcesRootPath() / "maps" / map->map_resource), error);
+        if (!error && path == std::filesystem::weakly_canonical(document.GetPath(), error)) return map;
+    }
+    return nullptr;
+}
+
+/* Paints every cell on the line between two cells, so fast drags leave no gaps. */
+void PaintMapLine(TilemapDocument &document, const TilemapBrush &brush,
+                  int x0, int y0, int x1, int y1) {
+    const int dx = std::abs(x1 - x0), dy = -std::abs(y1 - y0);
+    const int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    int error = dx + dy;
+    while (true) {
+        document.Paint(brush, x0, y0);
+        if (x0 == x1 && y0 == y1) break;
+        const int twice = 2 * error;
+        if (twice >= dy) { error += dy; x0 += sx; }
+        if (twice <= dx) { error += dx; y0 += sy; }
+    }
+}
+
+/* The map cell under a panel position, clamped near the map so lines stay short. */
+std::pair<int, int> MapCellAt(const Engine &engine, const Tilemap &map, const ImVec2 &image_min,
+                              const ImVec2 &image_size, const ImVec2 &panel_position) {
+    const ImVec2 world = SceneViewPanelPixelsToWorldPosition(engine, g_scene_camera_state, image_min,
+                                                             image_size, panel_position);
+    const Vector2 first = map.GetCellCenter(0, 0);
+    const double size = map.GetCellSize();
+    constexpr double kMargin = 64.0;
+    const double x = std::floor((world.x - (first.x - size * 0.5)) / size);
+    const double y = std::floor((world.y - (first.y - size * 0.5)) / size);
+    return {static_cast<int>(std::clamp(x, -kMargin, map.GetWidth() + kMargin)),
+            static_cast<int>(std::clamp(y, -kMargin, map.GetHeight() + kMargin))};
+}
+
+/* Outlines cells [x0, x1) x [y0, y1) of the map in the panel. */
+void DrawMapCellRect(ImDrawList *draw_list, const Engine &engine, const Tilemap &map,
+                     const ImVec2 &image_min, const ImVec2 &image_size,
+                     int x0, int y0, int x1, int y1, ImU32 color) {
+    const Vector2 first = map.GetCellCenter(x0, y0);
+    const float half = map.GetCellSize() * 0.5f;
+    const float left = first.x - half, top = first.y - half;
+    const ImVec2 a = WorldToSceneViewPanelPosition(engine, g_scene_camera_state, image_min, image_size, left, top);
+    const ImVec2 b = WorldToSceneViewPanelPosition(engine, g_scene_camera_state, image_min, image_size,
+                                                   left + (x1 - x0) * map.GetCellSize(),
+                                                   top + (y1 - y0) * map.GetCellSize());
+    draw_list->AddRect(a, b, color, 0.0f, 0, 2.0f);
+}
+
 } // namespace
 
 SceneViewPanelResult RenderSceneViewPanel(
@@ -1159,7 +1232,8 @@ SceneViewPanelResult RenderSceneViewPanel(
         int &selected_actor_index, Actor::UID &selected_runtime_actor_uid,
         int scene_view_width, int scene_view_height, bool play_mode_active,
         bool play_mode_paused, bool scene_editing_enabled,
-        std::vector<SceneFormat::SceneEditCommand> *out_edit_commands) {
+        std::vector<SceneFormat::SceneEditCommand> *out_edit_commands,
+        TilemapDocument *tilemap_document, TilemapBrush *tilemap_brush) {
 
     (void)scene_view_width;
     (void)scene_view_height;
@@ -1239,7 +1313,40 @@ SceneViewPanelResult RenderSceneViewPanel(
         }
     }
 
-    if (scene_editing_enabled && image_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    // Map painting replaces selection clicks while the Inspector's brush is on
+    // and the selected actor shows the open map document.
+    Tilemap *paint_map = nullptr;
+    if (!play_mode_active && scene_editing_enabled && tilemap_document != nullptr &&
+        tilemap_brush != nullptr && tilemap_brush->paint && tilemap_document->HasAsset())
+        paint_map = FindPaintTarget(scene_document, selected_actor_index, *tilemap_document);
+    std::optional<std::pair<int, int>> hovered_cell;
+    if (paint_map != nullptr && ImGui::IsMousePosValid())
+        hovered_cell = MapCellAt(engine, *paint_map, centered_cursor, image_size, ImGui::GetMousePos());
+    if (hovered_cell) {
+        const auto [x, y] = *hovered_cell;
+        if (image_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            ResetSceneDragState();
+            tilemap_document->BeginStroke();
+            tilemap_document->Paint(*tilemap_brush, x, y);
+            g_map_stroke = {true, x, y};
+        } else if (g_map_stroke.active && ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                   (x != g_map_stroke.last_x || y != g_map_stroke.last_y)) {
+            PaintMapLine(*tilemap_document, *tilemap_brush, g_map_stroke.last_x, g_map_stroke.last_y, x, y);
+            g_map_stroke.last_x = x;
+            g_map_stroke.last_y = y;
+        }
+    }
+    if (paint_map != nullptr) {
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z)) tilemap_document->Undo();
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z) || ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y))
+            tilemap_document->Redo();
+    }
+    if (g_map_stroke.active && (paint_map == nullptr || !ImGui::IsMouseDown(ImGuiMouseButton_Left))) {
+        if (tilemap_document != nullptr) tilemap_document->EndStroke();
+        g_map_stroke.active = false;
+    }
+
+    if (paint_map == nullptr && scene_editing_enabled && image_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const std::vector<ActorScreenBounds> pick_bounds = BuildPickBoundsForClick(engine, g_scene_camera_state, scene_document, play_mode_active, centered_cursor, image_size);
         const ImVec2 mouse_position = ImGui::GetMousePos();
         const std::optional<ActorScreenBounds> hit_bounds = FindTopmostHitBounds(mouse_position, pick_bounds);
@@ -1295,7 +1402,26 @@ SceneViewPanelResult RenderSceneViewPanel(
                                  selected_actor_index,
                                  selected_runtime_actor_uid, play_mode_active,
                                  centered_cursor, image_size);
-    if (selected_bounds.has_value()) {
+    if (paint_map != nullptr) {
+        draw_list->PushClipRect(centered_cursor, image_max, true);
+        DrawMapCellRect(draw_list, engine, *paint_map, centered_cursor, image_size, 0, 0,
+                        paint_map->GetWidth(), paint_map->GetHeight(), IM_COL32(90, 168, 255, 160));
+        if (image_hovered && hovered_cell) {
+            const int size = std::clamp(tilemap_brush->size, 1, 64);
+            const int x0 = hovered_cell->first - (size - 1) / 2, y0 = hovered_cell->second - (size - 1) / 2;
+            DrawMapCellRect(draw_list, engine, *paint_map, centered_cursor, image_size, x0, y0,
+                            x0 + size, y0 + size, IM_COL32(255, 214, 90, 255));
+        }
+        draw_list->PopClipRect();
+        const auto &asset = tilemap_document->GetAsset();
+        std::string label = "PAINT ";
+        if (tilemap_brush->layer >= 0 && tilemap_brush->layer < TilemapAsset::LayerCount(asset))
+            label += TilemapAsset::LayerName(asset, tilemap_brush->layer);
+        if (image_hovered && hovered_cell)
+            label += " | cell " + std::to_string(hovered_cell->first) + ", " + std::to_string(hovered_cell->second);
+        draw_list->AddText(ImVec2(centered_cursor.x + 10.0f, centered_cursor.y + 50.0f),
+                           IM_COL32(255, 214, 90, 235), label.c_str());
+    } else if (selected_bounds.has_value()) {
         DrawActorSelectionOutline(draw_list, *selected_bounds);
     }
 

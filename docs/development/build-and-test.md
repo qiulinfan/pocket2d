@@ -239,6 +239,14 @@ See phase15-checkpoint.md and the fixture CONTRACT for scope and final evidence.
 `POCKET_ENABLE_IMGUI_TEST_ENGINE` (default on) compiles Dear ImGui Test Engine
 hooks into ImGui and builds `editor_ui_test`, which clicks real editor
 controls. The engine's license is in `thirdparty/imgui_test_engine/LICENSE.txt`.
+`editor_ui_tilemap` runs it with `--tilemap`: Scene-view drags paint a
+1000x400 map's extra layer and autotile terrain on the offscreen software
+renderer. A third argument writes a PNG of the final strokes from a real window
+on the native renderer instead:
+
+```sh
+POCKET_WINDOW_DISPLAY=EDB323QU POCKET_WINDOW_BACKGROUND=1 ./build/sdl3-release/tests/editor_ui_test --tilemap tests/fixtures/tilemap_farm build/captures/map-paint.png
+```
 
 `POCKET_WINDOW_DISPLAY` places new windows on a display chosen by 0-based index
 or by part of its name (for example a monitor model such as `EDB323QU`);
