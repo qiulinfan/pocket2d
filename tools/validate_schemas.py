@@ -8,7 +8,7 @@ asset in the repository:
     python3 tools/validate_schemas.py [--root REPO]
 
 A project is any directory that contains game.config (tests/fixtures/*,
-Projects/*). Its assets are matched to schemas by the same patterns as
+.engine/templates/*). Its assets are matched to schemas by the same patterns as
 `pocket check`. The command also runs negative self-checks that must be
 rejected, and exits nonzero when anything fails.
 

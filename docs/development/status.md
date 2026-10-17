@@ -110,6 +110,11 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   scaffolds projects with `AGENTS.md`. `scripting/api/schemas/` holds the
   asset schemas and `tools/validate_schemas.py` validates all 41 fixture
   assets in CTest. A root `llms.txt` indexes the agent-facing documentation.
+- Project management follows Unity Hub: the editor's project list and
+  settings live in the per-user config folder (absolute paths, projects
+  anywhere on disk), the ball game sample is the read-only template
+  `.engine/templates/ballgame`, and New Project copies a chosen template into
+  a remembered location. `editor_ui_test` drives New Project through the UI.
   No Lua checker is installed here, so that path is untested.
 - Per-frame systems (sprite submission, animation, tilemap commit/queue,
   Rigidbody body types) now walk cached lists of actors owning each built-in

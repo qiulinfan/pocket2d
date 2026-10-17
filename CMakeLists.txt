@@ -16,7 +16,7 @@ find_package(Threads REQUIRED)
 
 option(
     GAME_ENGINE_STAGE_RESOURCES
-    "Copy Projects/Default into the executable output directory after each build."
+    "Copy the engine's .engine/system and .engine/templates next to the executable after each build."
     ON
 )
 option(
@@ -54,9 +54,13 @@ function(game_engine_stage_resources target)
             POST_BUILD
             COMMAND
                 ${CMAKE_COMMAND} -E copy_directory
-                "${PROJECT_SOURCE_DIR}/Projects/Default"
-                "$<TARGET_FILE_DIR:${target}>/Projects/Default"
-            COMMENT "Staging default project for ${target}"
+                "${PROJECT_SOURCE_DIR}/.engine/system"
+                "$<TARGET_FILE_DIR:${target}>/.engine/system"
+            COMMAND
+                ${CMAKE_COMMAND} -E copy_directory
+                "${PROJECT_SOURCE_DIR}/.engine/templates"
+                "$<TARGET_FILE_DIR:${target}>/.engine/templates"
+            COMMENT "Staging engine resources and project templates for ${target}"
         )
     endif()
 endfunction()

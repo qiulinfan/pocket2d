@@ -9,7 +9,7 @@ Pocket2D Lua API documentation lives here:
 - GitHub Pages: https://qiulinfan.github.io/pocket2d/
 
 > Below is a demo of the editor and runtime in action, running the example
-> "ball game" included in `Projects/Default/`. This example game originates from the
+> "ball game" included in `.engine/templates/ballgame/`. This example game originates from the
 > [A2 Engine](https://a2engine.org/) ecosystem.
 
 ![Pocket2D Demo](docs/show.gif)
@@ -80,24 +80,23 @@ Run the game executable:
 - `src/editor/*`: editor shell, documents, panels
 - `src/shared/*`: config, scene format, resource helpers
 - `include/*`: public headers for the same layers
-- `Projects/Default/*`: the default sample project
-- `Projects/*`: local project slots; every project except `Default` is ignored by this engine repository
-- `.engine/*`: editor-facing config, state, fonts, and icons
+- `.engine/system/*`: editor fonts and icons
+- `.engine/templates/*`: project templates, including the ball game sample
 - `thirdparty/*`: vendored dependencies; SDL3 (with SDL_image, SDL_ttf, SDL_mixer) and Box2D 3 are fetched at configure time
 - `scripting/api/*`: Lua host API contract, agent command schema and asset JSON Schemas
 - `clients/python/*`, `tools/*`: the Python agent client and the `pocket` command line
 - `tests/*`: CTest suites and fixture projects
 
 ## Projects
-Pocket2D suggests project management in the `Projects/` directory, butyou are also welcome to create projects anywhere and open them with the editor through `File -> Open Project...`.
+Projects can live anywhere on disk. Like Unity Hub, the editor keeps a per-user list of project paths in `projects.config`, next to `editor.config`, in `~/Library/Application Support/Pocket2D/` on macOS, `%APPDATA%\Pocket2D\` on Windows, and `$XDG_CONFIG_HOME/pocket2d/` (default `~/.config/pocket2d/`) on Linux. Nothing about your projects is stored in the engine folder. `File -> Open Project...` adds an existing project folder and `File -> Recent Projects` reopens one.
 
-There is a sample project(the ballgame) bundled with installation of the engine, located at `Projects/Default/`. The editor opens this project by default on startup, so it is recommended to keep it
- and the editor's default project root. 
+`File -> New Project...` asks for a template, a project name and a location, then copies the template into `<location>/<name>`. The location starts as your home folder and is remembered for the next project. Linux users type the location; Windows/macOS users can also pick it with the system folder picker. Templates are never edited in place:
+- `Empty` creates `game.config`, `rendering.config`, `scenes/main.scene`, `actor_templates/empty.template`, and the standard project directories: `audio/`, `component_types/`, `fonts/`, `images/`, `scenes/`, and `actor_templates/`.
+- `ballgame` copies the sample in `.engine/templates/ballgame/`.
 
-`File -> New Project...` creates a complete minimal project. Linux users can type any local or absolute path, and Windows/macOS users can also use a system-native UI to choose the location.
+When there is no project to reopen, as on first launch, the editor creates a `ballgame` project in the new-project location and opens it. The `game` runtime runs the project given by `--project`, else the editor's current project, else the sample template.
 
 ## Architecture Illustration
-A new project is initialized with `game.config`, `rendering.config`, `scenes/main.scene`, `actor_templates/empty.template`, and the standard project direcgtories: `audio/`, `component_types/`, `fonts/`, `images/`, `scenes/`, and `actor_templates/`.
 
 All files under `docs/architecture/` are diagram-only for explaining the architecture.
 - [Frame Pipeline](docs/architecture/frame-pipeline.md)
@@ -106,7 +105,7 @@ All files under `docs/architecture/` are diagram-only for explaining the archite
 - [Editor Workflow](docs/architecture/editor-workflow.md)
 
 ## Sample Project
-`Projects/Default/` contains the default sample project.
+`.engine/templates/ballgame/` contains the sample project, offered as the `ballgame` template.
 
 ## License
 

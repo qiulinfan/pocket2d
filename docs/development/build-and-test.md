@@ -23,7 +23,7 @@ Run the graphical editor or runtime from the repository root:
 
 ```sh
 ./build/modern-debug/pocket
-./build/modern-debug/game --project Projects/Default
+./build/modern-debug/game --project .engine/templates/ballgame
 ```
 
 `POCKET_RENDER_DRIVER=metal`, `opengl`, `gpu` or `software` selects the

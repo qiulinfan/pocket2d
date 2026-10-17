@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
         Check(samples > 0 && samples <= 5000, "samples must be in 1..5000");
         SDL_setenv_unsafe("POCKET_RENDER_DRIVER", backend.c_str(), 1);
         SDL_setenv_unsafe("POCKET_RENDER_VSYNC", "0", 1);
-        const auto font = std::filesystem::path(POCKET_SOURCE_DIR) / "Projects/Default/fonts/NotoSans-Regular.ttf";
+        const auto font = std::filesystem::path(POCKET_SOURCE_DIR) / ".engine/templates/ballgame/fonts/NotoSans-Regular.ttf";
         Fixture fixture(font);
         Engine engine;
         Check(engine.GetLastSceneLoadError().empty(), engine.GetLastSceneLoadError());

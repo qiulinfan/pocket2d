@@ -1,6 +1,7 @@
 // Editor UI driven by Dear ImGui Test Engine: real clicks on the viewport
 // transport buttons, the Runtime menu and the F5 shortcut start and stop a
-// separate play World exactly as the editor host does.
+// separate play World exactly as the editor host does, and File > New Project
+// copies a template into a chosen location.
 #include "core/Engine.h"
 #include "core/FrameClock.h"
 #include "core/World.h"
@@ -27,6 +28,8 @@ struct Host {
     std::unique_ptr<World> play_world;
     std::unique_ptr<Engine> play;
     int starts = 0, stops = 0;
+    std::filesystem::path new_project_location;
+    std::filesystem::path opened_project;
     bool Playing() const { return play != nullptr; }
 
     void Start() {
@@ -82,9 +85,26 @@ void RegisterTests(ImGuiTestEngine *engine) {
         ctx->KeyPress(ImGuiKey_F5);
         ExpectToggle(ctx, false);
     };
+    test = IM_REGISTER_TEST(engine, "editor", "new_project_from_template");
+    test->TestFunc = [](ImGuiTestContext *ctx) {
+        ctx->SetRef("##MainMenuBar");
+        ctx->MenuClick("File/New Project...");
+        ctx->SetRef("//New Project");
+        ctx->ComboClick("Template/ballgame");
+        ctx->ItemInputValue("Project Name", "UiGame");
+        ctx->ItemInputValue("Location", g_host->new_project_location.string().c_str());
+        ctx->ItemClick("Create");
+        for (int frame = 0; frame < 10 && g_host->opened_project.empty(); ++frame) ctx->Yield();
+        IM_CHECK(g_host->opened_project == g_host->new_project_location / "UiGame");
+    };
 }
 
 void Run(const std::filesystem::path &project) {
+    // Templates resolve from the repository root, as when the editor runs there.
+    std::filesystem::current_path(project.parent_path().parent_path().parent_path());
+    const std::filesystem::path new_project_location =
+        std::filesystem::temp_directory_path() / ("pocket2d-editor-ui-" + std::to_string(SDL_GetTicksNS()));
+    std::filesystem::create_directories(new_project_location);
     ResourcePath::SetResourcesRootPath(project);
     Engine edit;
     edit.InitializeRuntime();
@@ -95,6 +115,7 @@ void Run(const std::filesystem::path &project) {
     session.LoadInitialScene(edit);
     session.SyncRuntimeMirrorIfDirty(edit);
     Host host{&edit, &session};
+    host.new_project_location = new_project_location;
     g_host = &host;
 
     EditorOverlay overlay;
@@ -130,6 +151,7 @@ void Run(const std::filesystem::path &project) {
                                            false, host.Playing(), false, false, !host.Playing(), true);
         if (result.play_mode_start_requested && !host.Playing()) host.Start();
         else if (result.play_mode_stop_requested && host.Playing()) host.Stop();
+        if (result.open_project_requested) host.opened_project = result.requested_project_root;
         (host.Playing() ? *host.play : edit).PresentFrame(host.Playing());
         ImGuiTestEngine_PostSwap(engine);
     }
@@ -140,8 +162,15 @@ void Run(const std::filesystem::path &project) {
     overlay.Shutdown();
     ImGuiTestEngine_DestroyContext(engine);
     if (host.Playing()) host.Stop();
-    Check(tested == 3 && succeeded == 3, "editor UI tests: " + std::to_string(succeeded) + "/" + std::to_string(tested) + " passed");
-    Check(host.starts == 3 && host.stops == 3, "each test starts and stops play once");
+    Check(tested == 4 && succeeded == 4, "editor UI tests: " + std::to_string(succeeded) + "/" + std::to_string(tested) + " passed");
+    Check(host.starts == 3 && host.stops == 3, "each play test starts and stops play once");
+    const std::filesystem::path created = new_project_location / "UiGame";
+    Check(std::filesystem::exists(created / "game.config") &&
+              std::filesystem::exists(created / "scenes") &&
+              !std::filesystem::exists(created / ".pocketengine"),
+          "New Project copies the ballgame template without its editor state");
+    Check(config.new_project_location == new_project_location, "New Project remembers its location");
+    std::filesystem::remove_all(new_project_location);
     WorldScope scope(edit.GetWorld());
     Check(FrameClock::GetFrameNumber() == edit_frame, "playing advanced the edit World");
 }
@@ -155,7 +184,7 @@ int main(int argc, char **argv) {
         SDL_setenv_unsafe("POCKET_RENDER_DRIVER", "software", 1);
         SDL_setenv_unsafe("POCKET_RENDER_VSYNC", "0", 1);
         Run(std::filesystem::absolute(argv[1]));
-        std::cout << "editor_ui_test: viewport buttons, Runtime menu and F5 start and stop play\n";
+        std::cout << "editor_ui_test: viewport buttons, Runtime menu and F5 start and stop play; New Project copies a template\n";
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "editor_ui_test: " << error.what() << '\n';

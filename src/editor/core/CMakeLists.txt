@@ -4,7 +4,9 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/EditorConfig.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/EditorOverlay.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneSession.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ProjectTemplates.cpp"
         "${PROJECT_SOURCE_DIR}/include/editor/core/EditorConfig.h"
         "${PROJECT_SOURCE_DIR}/include/editor/core/EditorOverlay.h"
         "${PROJECT_SOURCE_DIR}/include/editor/core/EditorSceneSession.h"
+        "${PROJECT_SOURCE_DIR}/include/editor/core/ProjectTemplates.h"
 )

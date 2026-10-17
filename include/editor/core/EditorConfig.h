@@ -43,12 +43,13 @@ struct EditorConfigData {
     std::string external_editor_scene;
     std::string external_editor_generic;
 
-    // Engine/editor-level project history. The selected path is the logical
-    // project root used by the editor; project-private state lives inside
-    // that folder rather than under .engine.
-    std::filesystem::path current_project_root =
-        std::filesystem::path("Projects") / "Default";
+    // Per-user project list, like Unity Hub's: absolute paths to project
+    // folders anywhere on disk. Project-private state lives inside each
+    // project folder. An empty current root means no project yet.
+    std::filesystem::path current_project_root;
     std::vector<std::filesystem::path> recent_project_roots;
+    // Where New Project puts the next project folder.
+    std::filesystem::path new_project_location;
 };
 
 class EditorConfig {
@@ -57,7 +58,7 @@ public:
     static EditorConfigData Read();
     // Persist the current editor host settings back to editor.config.
     static void Write(const EditorConfigData &config);
-    // Persist frequently updated project history to editor/projects.config.
+    // Persist the project list to projects.config in the user config folder.
     static void WriteProjectHistory(const EditorConfigData &config);
     // Return all built-in file types that support external editor mapping.
     static const std::array<EditorExternalFileType, 8> &

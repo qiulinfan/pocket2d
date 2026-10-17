@@ -1,4 +1,6 @@
 #include "app/editor/EditorApp.h"
+#include "core/Log.h"
+#include "editor/core/ProjectTemplates.h"
 #include "input/SDLEventHelper.h"
 #include "SDL3/SDL.h"
 #include "SDL3_image/SDL_image.h"
@@ -388,23 +390,31 @@ bool IsExistingDirectory(const std::filesystem::path &path) {
            std::filesystem::is_directory(path);
 }
 
-std::filesystem::path CreateFallbackTemporaryProjectRoot() {
-    const std::filesystem::path projects_root = std::filesystem::path("Projects");
-    ResourcePath::EnsureDirectoryExists(projects_root);
-
-    for (int index = 1; index < 10000; ++index) {
-        const std::filesystem::path candidate =
-            projects_root / ("tmp" + std::to_string(index));
-        if (std::filesystem::exists(candidate)) continue;
-        if (ResourcePath::EnsureDirectoryExists(candidate)) {
-            return candidate;
-        }
+// With no project to reopen, start the way Unity Hub's first run does: make a
+// project from the bundled sample (or an empty one) in the new-project location.
+std::filesystem::path CreateFirstProject(const EditorConfigData &editor_config) {
+    ProjectTemplate project_template{"Empty", {}};
+    for (const ProjectTemplate &candidate : ProjectTemplates::List()) {
+        if (candidate.source == ResourcePath::SampleProjectRoot())
+            project_template = candidate;
     }
-
-    const std::filesystem::path fallback =
-        projects_root / "tmp";
-    ResourcePath::EnsureDirectoryExists(fallback);
-    return fallback;
+    const std::filesystem::path location = editor_config.new_project_location;
+    const std::string base_name =
+        project_template.source.empty() ? "NewProject" : project_template.name;
+    const std::string project_name =
+        ProjectTemplates::UniqueProjectName(location, base_name);
+    const std::filesystem::path project_root = location / project_name;
+    std::string error;
+    if (location.empty() ||
+        !ProjectTemplates::Create(project_template, project_root, project_name,
+                                  error)) {
+        Log::Error("editor", "unable to create a first project in [" +
+                                location.string() + "]: " + error);
+        std::exit(1);
+    }
+    Log::Info("editor", "created project [" + project_root.string() +
+                            "] from template " + project_template.name);
+    return project_root;
 }
 
 void PruneMissingRecentProjectRoots(EditorConfigData &editor_config) {
@@ -432,8 +442,7 @@ std::filesystem::path ChooseStartupProjectRoot(EditorConfigData &editor_config) 
     PruneMissingRecentProjectRoots(editor_config);
 
     const std::filesystem::path configured_root =
-        ResourcePath::NormalizeProjectRoot(
-            editor_config.current_project_root);
+        editor_config.current_project_root;
     if (IsExistingDirectory(configured_root)) {
         EditorConfig::RememberProject(editor_config, configured_root);
         return configured_root;
@@ -448,17 +457,9 @@ std::filesystem::path ChooseStartupProjectRoot(EditorConfigData &editor_config) 
         return normalized_recent;
     }
 
-    const std::filesystem::path default_root =
-        ResourcePath::DefaultResourcesRoot();
-    if (IsExistingDirectory(default_root)) {
-        EditorConfig::RememberProject(editor_config, default_root);
-        return default_root;
-    }
-
-    const std::filesystem::path temporary_root =
-        CreateFallbackTemporaryProjectRoot();
-    EditorConfig::RememberProject(editor_config, temporary_root);
-    return temporary_root;
+    const std::filesystem::path first_root = CreateFirstProject(editor_config);
+    EditorConfig::RememberProject(editor_config, first_root);
+    return editor_config.current_project_root;
 }
 
 } // namespace

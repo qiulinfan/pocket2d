@@ -121,7 +121,8 @@ private:
     void ShowExternalEditorMissingConfigNotice(EditorExternalFileType type);
     // Render the project-level config editors that write directly to disk.
     void RenderProjectConfigWindows();
-    void RenderNewProjectWindow(EditorOverlayResult &result);
+    void RenderNewProjectWindow(EditorConfigData &editor_config,
+                                EditorOverlayResult &result);
     void RenderOpenProjectWindow(EditorOverlayResult &result);
     // Render the editor-local settings window that edits overlay/window
     // parameters instead of asking users to edit editor.config by hand.
@@ -167,7 +168,9 @@ private:
     bool show_transient_notice_ = false;
     double transient_notice_expire_time_ = 0.0;
     std::string transient_notice_text_;
-    std::string new_project_path_;
+    std::string new_project_name_;
+    std::string new_project_location_;
+    int new_project_template_index_ = 0;
     std::string new_project_error_;
     std::string open_project_path_;
     std::string open_project_error_;

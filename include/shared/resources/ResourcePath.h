@@ -2,6 +2,7 @@
 #define SHARED_RESOURCE_PATH_H
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -12,16 +13,51 @@ inline std::filesystem::path EngineRootPath() {
     return std::filesystem::path(".engine");
 }
 
+inline std::filesystem::path UserHomePath() {
+#ifdef _WIN32
+    const char *home = std::getenv("USERPROFILE");
+#else
+    const char *home = std::getenv("HOME");
+#endif
+    return home != nullptr ? std::filesystem::path(home) : std::filesystem::path();
+}
+
+// Per-user editor settings and the project list live outside any engine
+// checkout or project, as Unity Hub keeps its own: %APPDATA%\Pocket2D,
+// ~/Library/Application Support/Pocket2D, or $XDG_CONFIG_HOME/pocket2d.
+inline std::filesystem::path UserConfigRoot() {
+#if defined(_WIN32)
+    if (const char *app_data = std::getenv("APPDATA"); app_data != nullptr && *app_data != '\0')
+        return std::filesystem::path(app_data) / "Pocket2D";
+#elif defined(__APPLE__)
+    if (const std::filesystem::path home = UserHomePath(); !home.empty())
+        return home / "Library" / "Application Support" / "Pocket2D";
+#else
+    if (const char *config_home = std::getenv("XDG_CONFIG_HOME"); config_home != nullptr && *config_home != '\0')
+        return std::filesystem::path(config_home) / "pocket2d";
+    if (const std::filesystem::path home = UserHomePath(); !home.empty())
+        return home / ".config" / "pocket2d";
+#endif
+    return EngineRootPath() / "user";
+}
+
 inline std::filesystem::path EditorConfigPath() {
-    return EngineRootPath() / "editor" / "editor.config";
+    return UserConfigRoot() / "editor.config";
 }
 
 inline std::filesystem::path EditorProjectsConfigPath() {
-    return EngineRootPath() / "editor" / "projects.config";
+    return UserConfigRoot() / "projects.config";
 }
 
-inline std::filesystem::path DefaultResourcesRoot() {
-    return std::filesystem::path("Projects") / "Default";
+// Engine-owned starting points for new projects. They are copied, never
+// opened for editing in place.
+inline std::filesystem::path ProjectTemplatesRoot() {
+    return EngineRootPath() / "templates";
+}
+
+// The bundled ball game. The runtime falls back to it when no project is given.
+inline std::filesystem::path SampleProjectRoot() {
+    return ProjectTemplatesRoot() / "ballgame";
 }
 
 inline std::filesystem::path LegacyResourcesRoot() {
@@ -31,13 +67,13 @@ inline std::filesystem::path LegacyResourcesRoot() {
 inline std::filesystem::path NormalizeProjectRoot(
     const std::filesystem::path &resources_root) {
     const std::filesystem::path normalized =
-        resources_root.empty() ? DefaultResourcesRoot()
+        resources_root.empty() ? SampleProjectRoot()
                                : resources_root.lexically_normal();
-    return normalized == "." ? DefaultResourcesRoot() : normalized;
+    return normalized == "." ? SampleProjectRoot() : normalized;
 }
 
 inline std::filesystem::path &MutableResourcesRootPath() {
-    static std::filesystem::path resources_root = DefaultResourcesRoot();
+    static std::filesystem::path resources_root = SampleProjectRoot();
     return resources_root;
 }
 

@@ -497,16 +497,13 @@ game_editor_linux
 .engine/project/
 resources/.pocketengine/
 **/.pocketengine/
-/Projects/*
-!/Projects/Default/
-!/Projects/Default/**
-/Projects/Default/.pocketengine/
-/Projects/Default/**/*.meta
-/Projects/Default/**/*.mp3
-/Projects/Default/**/*.MP3
-/Projects/Default/**/*.raw
-/Projects/Default/**/*.mp4
-/Projects/Default/**/*.mov
+/Projects/
+/.engine/templates/**/*.meta
+/.engine/templates/**/*.mp3
+/.engine/templates/**/*.MP3
+/.engine/templates/**/*.raw
+/.engine/templates/**/*.mp4
+/.engine/templates/**/*.mov
 
 # Self-authored, reproducible test geometry is part of the runnable fixtures.
 !/tests/fixtures/village_defense/images/**/*.bmp

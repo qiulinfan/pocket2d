@@ -167,8 +167,13 @@ void ReadProjectHistoryDocument(const rapidjson::Document &project_config,
     }
     if (current_project_key != nullptr) {
         config.current_project_root =
-            ResourcePath::NormalizeProjectRoot(
-                project_config[current_project_key].GetString());
+            project_config[current_project_key].GetString();
+    }
+    if (project_config.HasMember("new_project_location") &&
+        project_config["new_project_location"].IsString() &&
+        project_config["new_project_location"].GetStringLength() > 0) {
+        config.new_project_location =
+            project_config["new_project_location"].GetString();
     }
 
     const char *recent_projects_key = nullptr;
@@ -180,8 +185,8 @@ void ReadProjectHistoryDocument(const rapidjson::Document &project_config,
         recent_projects_key = "recent_project_resources_roots";
     }
     if (recent_projects_key == nullptr) {
-        EditorConfig::RememberProject(config,
-                                      config.current_project_root);
+        if (!config.current_project_root.empty())
+            EditorConfig::RememberProject(config, config.current_project_root);
         return;
     }
 
@@ -192,8 +197,7 @@ void ReadProjectHistoryDocument(const rapidjson::Document &project_config,
          ++index) {
         if (!recent_projects[index].IsString()) continue;
         const std::filesystem::path project_root =
-            ResourcePath::NormalizeProjectRoot(
-                recent_projects[index].GetString());
+            ComparableProjectRoot(recent_projects[index].GetString());
         bool duplicate = false;
         for (const std::filesystem::path &existing :
              config.recent_project_roots) {
@@ -207,11 +211,13 @@ void ReadProjectHistoryDocument(const rapidjson::Document &project_config,
         }
     }
 
-    EditorConfig::RememberProject(config, config.current_project_root);
+    if (!config.current_project_root.empty())
+        EditorConfig::RememberProject(config, config.current_project_root);
 }
 
 void ReadProjectHistoryConfig(EditorConfigData &config,
                               const rapidjson::Document *legacy_editor_config) {
+    config.new_project_location = ResourcePath::UserHomePath();
     if (std::filesystem::exists(kEditorProjectsConfigPath)) {
         rapidjson::Document project_config;
         ReadJsonFile(kEditorProjectsConfigPath.string(), project_config);
@@ -223,10 +229,7 @@ void ReadProjectHistoryConfig(EditorConfigData &config,
     // editor.config. Read it once, then future writes go to projects.config.
     if (legacy_editor_config != nullptr) {
         ReadProjectHistoryDocument(*legacy_editor_config, config);
-        return;
     }
-
-    EditorConfig::RememberProject(config, config.current_project_root);
 }
 
 void WriteProjectHistoryConfig(
@@ -241,6 +244,8 @@ void WriteProjectHistoryConfig(
         writer.String(project_root.generic_string().c_str());
     }
     writer.EndArray();
+    writer.Key("new_project_location");
+    writer.String(config.new_project_location.generic_string().c_str());
 }
 
 void WriteProjectHistoryFile(const EditorConfigData &config) {
@@ -476,7 +481,7 @@ void EditorConfig::RememberProject(
     EditorConfigData &config, const std::filesystem::path &project_root) {
     constexpr std::size_t kMaxRecentProjects = 12;
     const std::filesystem::path normalized_root =
-        ResourcePath::NormalizeProjectRoot(project_root);
+        ComparableProjectRoot(project_root);
     config.current_project_root = normalized_root;
 
     std::vector<std::filesystem::path> next_recent_projects;
@@ -492,8 +497,7 @@ void EditorConfig::RememberProject(
             }
         }
         if (duplicate) continue;
-        next_recent_projects.emplace_back(
-            ResourcePath::NormalizeProjectRoot(existing_root));
+        next_recent_projects.emplace_back(ComparableProjectRoot(existing_root));
         if (next_recent_projects.size() >= kMaxRecentProjects) break;
     }
     config.recent_project_roots = std::move(next_recent_projects);
