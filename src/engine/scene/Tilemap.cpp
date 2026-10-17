@@ -500,7 +500,7 @@ void Tilemap::ReframeTerrainCell(int layer, int x, int y, const std::vector<int>
     if (id <= 0 || static_cast<std::size_t>(id) >= terrain_of.size() || terrain_of[id] < 0) return;
     const int framed = TilemapAsset::FrameTerrainCell(asset, terrain_of, terrain_of[id], x, y,
         [&](int nx, int ny) { return EffectiveCell(layer, nx, ny); });
-    if (framed != id) SetCell(layer == 0 ? "ground" : "solid", x, y, framed);
+    if (framed != id) SetCell(TilemapAsset::LayerName(asset, layer), x, y, framed);
 }
 std::optional<std::string> Tilemap::GetTerrain(const std::string &layer, double x, double y) const {
     const auto id = GetCell(layer, x, y);

@@ -335,6 +335,18 @@ void Autotile(const Fixture &fixture) {
     Check(walls.SetCell("walls", 2, 2, 4), "extra layer edits queue");
     walls.CommitPending();
     Check(*walls.GetCell("walls", 2, 2) == 4 && !walls.IsSolidAt(2.5, 2.5), "extra layers commit and never collide");
+    // A terrain on an extra layer re-frames that layer's neighbours, never
+    // solid's: (2,1) joins the dirt at (1,1) and (3,1), which also connects to
+    // the outside on its right (mask 10 for both).
+    auto walls_terrain = reloaded;
+    walls_terrain.autotile = data.autotile;
+    Tilemap framed;
+    framed.Initialize(walls_terrain, 0, 0);
+    Check(framed.SetTerrain("walls", 2, 1, "dirt") && framed.SetTerrain("walls", 3, 1, "dirt"), "extra layer terrain queues");
+    framed.CommitPending();
+    Check(*framed.GetCell("walls", 2, 1) == 3 && *framed.GetCell("walls", 3, 1) == 3 &&
+          *framed.GetCell("solid", 2, 1) == walls_terrain.solid.cells[6], "extra layer neighbours re-frame on their own layer");
+    framed.OnDestroy();
     bool drawn = false;
     for (const auto &draw : walls.CollectVisible(0, 0, 4, 4)) drawn |= draw.sorting_order == -50;
     Check(drawn, "extra layers draw at their own sorting order");
