@@ -1,6 +1,6 @@
 #include "shared/tilemap/TilemapAsset.h"
+#include "shared/resources/ImageSize.h"
 #include "shared/resources/ResourcePath.h"
-#include "SDL3_image/SDL_image.h"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/prettywriter.h"
@@ -69,12 +69,11 @@ void RequireMapExtension(const std::filesystem::path &path) {
 }
 void ValidatePixels(const TilemapAsset::Data &data, const std::filesystem::path &path) {
     Require(std::filesystem::is_regular_file(path), "atlas image missing: " + path.string());
-    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
-        IMG_Load(path.string().c_str()), SDL_DestroySurface);
-    Require(image != nullptr, "cannot decode atlas " + path.string() + ": " + SDL_GetError());
+    const auto image = ImageSize::Decoded(path);
+    Require(image.error.empty(), "cannot decode atlas " + path.string() + ": " + image.error);
     const auto width = static_cast<std::int64_t>(data.atlas.columns) * data.atlas.tile_width_px;
     const auto height = static_cast<std::int64_t>(data.atlas.rows) * data.atlas.tile_height_px;
-    Require(image->w == width && image->h == height,
+    Require(image.width == width && image.height == height,
             "atlas pixel dimensions must exactly match columns/rows and tile dimensions: " + path.string());
 }
 TilemapAsset::Layer ReadLayer(const Json &value, std::size_t cell_count, const char *name) {

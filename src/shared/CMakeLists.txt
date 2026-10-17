@@ -9,8 +9,10 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/persistence/SaveStore.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inventory/InventoryModel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inventory/ItemCatalog.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/ImageSize.cpp"
         "${PROJECT_SOURCE_DIR}/include/shared/config/GameConfig.h"
         "${PROJECT_SOURCE_DIR}/include/shared/config/SpritesheetConfig.h"
+        "${PROJECT_SOURCE_DIR}/include/shared/resources/ImageSize.h"
         "${PROJECT_SOURCE_DIR}/include/shared/resources/ResourcePath.h"
         "${PROJECT_SOURCE_DIR}/include/shared/scene_format/SceneFormat.h"
 )
