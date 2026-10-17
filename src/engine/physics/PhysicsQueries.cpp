@@ -3,12 +3,12 @@
 #include "scene/Actor.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <deque>
-#include <map>
 #include <queue>
 #include <set>
-#include <unordered_map>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -270,44 +270,116 @@ Vector2 MoveCharacter(Rigidbody &body, const Vector2 &delta) {
 // the obstacle, where a walker wider than a point snags.
 constexpr float kClearanceStepCost = 4.0f;
 
+namespace {
+// Per-cell bookkeeping of the grid searches: open addressing on the packed cell
+// coordinates. The searches touch 10^5 cells; node-based maps spent most of
+// their time allocating and chasing pointers.
+std::uint64_t CellKey(int x, int y) {
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) << 32) | static_cast<std::uint32_t>(y);
+}
+template <typename Value> class CellTable {
+public:
+    // The value for `key`, default-constructed on first use.
+    Value &operator[](std::uint64_t key) {
+        if ((size_ + 1) * 4 > keys_.size() * 3) Grow();
+        std::size_t slot = Slot(key);
+        while (used_[slot]) {
+            if (keys_[slot] == key) return values_[slot];
+            slot = (slot + 1) & mask_;
+        }
+        used_[slot] = 1;
+        keys_[slot] = key;
+        ++size_;
+        return values_[slot];
+    }
+    const Value *Find(std::uint64_t key) const {
+        if (keys_.empty()) return nullptr;
+        for (std::size_t slot = Slot(key); used_[slot]; slot = (slot + 1) & mask_)
+            if (keys_[slot] == key) return &values_[slot];
+        return nullptr;
+    }
+
+private:
+    std::size_t Slot(std::uint64_t key) const {
+        return static_cast<std::size_t>((key * 0x9E3779B97F4A7C15ull) >> 32) & mask_;
+    }
+    void Grow() {
+        std::vector<std::uint64_t> keys = std::move(keys_);
+        std::vector<Value> values = std::move(values_);
+        std::vector<std::uint8_t> used = std::move(used_);
+        const std::size_t capacity = keys.empty() ? 1024 : keys.size() * 2;
+        keys_.assign(capacity, 0);
+        values_.assign(capacity, Value{});
+        used_.assign(capacity, 0);
+        mask_ = capacity - 1;
+        size_ = 0;
+        for (std::size_t i = 0; i < keys.size(); ++i)
+            if (used[i]) (*this)[keys[i]] = std::move(values[i]);
+    }
+    std::vector<std::uint64_t> keys_;
+    std::vector<Value> values_;
+    std::vector<std::uint8_t> used_;
+    std::size_t size_ = 0, mask_ = 0;
+};
+
+// A cell's occupancy, computed once; Unknown until first asked.
+enum class Seen : std::uint8_t { Unknown, Free, Clearance, Solid };
+Seen ToSeen(PathCell cell) {
+    return cell == PathCell::Free ? Seen::Free : cell == PathCell::Clearance ? Seen::Clearance : Seen::Solid;
+}
+} // namespace
+
 std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell, int max_nodes, float clearance,
                               const std::function<PathCell(float, float)> &occupancy) {
     Finite(from, "path start must be finite");
     Finite(to, "path goal must be finite");
     Positive(cell, "path cell size must be positive and finite");
     Require(max_nodes >= 1 && max_nodes <= 1000000, "path max_nodes must be in [1, 1000000]");
-    using Cell = std::pair<int, int>;
+    struct Cell {
+        int x, y;
+        bool operator==(const Cell &o) const { return x == o.x && y == o.y; }
+    };
     const auto cell_of = [&](const Vector2 &p) {
         return Cell{static_cast<int>(std::floor(p.x / cell)), static_cast<int>(std::floor(p.y / cell))};
     };
     const Cell start = cell_of(from), goal = cell_of(to);
-    const auto center = [&](const Cell &c) { return Vector2((c.first + 0.5f) * cell, (c.second + 0.5f) * cell); };
+    const auto center = [&](const Cell &c) { return Vector2((c.x + 0.5f) * cell, (c.y + 0.5f) * cell); };
     const auto heuristic = [&](const Cell &c) {
-        const float dx = std::abs(static_cast<float>(c.first - goal.first));
-        const float dy = std::abs(static_cast<float>(c.second - goal.second));
+        const float dx = std::abs(static_cast<float>(c.x - goal.x));
+        const float dy = std::abs(static_cast<float>(c.y - goal.y));
         return std::max(dx, dy) + 0.41421356f * std::min(dx, dy);
     };
-    std::map<Cell, PathCell> occupancy_cache;
-    const auto occupied = [&](const Cell &c) {
-        if (c == start) return PathCell::Free;
-        const auto found = occupancy_cache.find(c);
-        if (found != occupancy_cache.end()) return found->second;
-        const Vector2 p = center(c);
-        return occupancy_cache[c] = occupancy(p.x, p.y);
+    struct Node {
+        Seen seen = Seen::Unknown;
+        bool reached = false;
+        float cost = 0.0f;
+        Cell parent{0, 0};
+    };
+    CellTable<Node> nodes;
+    const auto node = [&](const Cell &c) -> Node & {
+        Node &n = nodes[CellKey(c.x, c.y)];
+        if (n.seen == Seen::Unknown) {
+            const Vector2 p = center(c);
+            n.seen = c == start ? Seen::Free : ToSeen(occupancy(p.x, p.y));
+        }
+        return n;
     };
     // Clearance cells pass only this many cells (Chebyshev) from the start or goal.
     const int margin = static_cast<int>(std::ceil(std::max(clearance, 0.0f) / cell)) + 1;
     const auto near = [&](const Cell &a, const Cell &b) {
-        return std::max(std::abs(a.first - b.first), std::abs(a.second - b.second)) <= margin;
+        return std::max(std::abs(a.x - b.x), std::abs(a.y - b.y)) <= margin;
     };
     const auto passable = [&](const Cell &c) {
-        const PathCell kind = occupied(c);
-        return kind == PathCell::Free || (kind == PathCell::Clearance && (near(c, start) || near(c, goal)));
+        const Seen kind = node(c).seen;
+        return kind == Seen::Free || (kind == Seen::Clearance && (near(c, start) || near(c, goal)));
     };
     struct Open { float f; float g; Cell cell; bool operator>(const Open &o) const { return f > o.f; } };
     std::priority_queue<Open, std::vector<Open>, std::greater<Open>> open;
-    std::map<Cell, float> cost{{start, 0.0f}};
-    std::map<Cell, Cell> parent;
+    {
+        Node &first = node(start);
+        first.reached = true;
+        first.cost = 0.0f;
+    }
     open.push({heuristic(start), 0.0f, start});
     Cell best = start;
     float best_h = heuristic(start);
@@ -315,7 +387,7 @@ std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell
     while (!open.empty() && expanded < max_nodes) {
         const Open current = open.top();
         open.pop();
-        if (current.g > cost[current.cell]) continue;
+        if (current.g > node(current.cell).cost) continue;
         ++expanded;
         const float h = heuristic(current.cell);
         if (h < best_h) { best_h = h; best = current.cell; }
@@ -323,21 +395,22 @@ std::vector<Vector2> FindPath(const Vector2 &from, const Vector2 &to, float cell
         for (int dy = -1; dy <= 1; ++dy)
             for (int dx = -1; dx <= 1; ++dx) {
                 if (dx == 0 && dy == 0) continue;
-                const Cell next{current.cell.first + dx, current.cell.second + dy};
+                const Cell next{current.cell.x + dx, current.cell.y + dy};
                 if (!passable(next)) continue;
-                if (dx != 0 && dy != 0 && (!passable({current.cell.first + dx, current.cell.second}) ||
-                                           !passable({current.cell.first, current.cell.second + dy}))) continue;
+                if (dx != 0 && dy != 0 && (!passable({current.cell.x + dx, current.cell.y}) ||
+                                           !passable({current.cell.x, current.cell.y + dy}))) continue;
+                Node &n = node(next);
                 const float step = dx != 0 && dy != 0 ? 1.41421356f : 1.0f;
-                const float g = current.g + (occupied(next) == PathCell::Clearance ? step * kClearanceStepCost : step);
-                const auto known = cost.find(next);
-                if (known != cost.end() && known->second <= g) continue;
-                cost[next] = g;
-                parent[next] = current.cell;
+                const float g = current.g + (n.seen == Seen::Clearance ? step * kClearanceStepCost : step);
+                if (n.reached && n.cost <= g) continue;
+                n.reached = true;
+                n.cost = g;
+                n.parent = current.cell;
                 open.push({g + heuristic(next), g, next});
             }
     }
     std::vector<Vector2> path;
-    for (Cell c = best; c != start; c = parent.at(c)) path.push_back(center(c));
+    for (Cell c = best; !(c == start); c = nodes.Find(CellKey(c.x, c.y))->parent) path.push_back(center(c));
     std::reverse(path.begin(), path.end());
     if (best == goal && !path.empty()) path.back() = to;
     return path;
@@ -348,49 +421,56 @@ std::vector<int> PathRegions(const std::vector<Vector2> &points, float cell, int
     Positive(cell, "path cell size must be positive and finite");
     Require(max_nodes >= 1 && max_nodes <= 1000000, "path max_nodes must be in [1, 1000000]");
     Require(points.size() <= 1024, "path regions take at most 1024 points");
-    using Cell = std::pair<int, int>;
+    struct Cell { int x, y; };
     std::vector<Cell> seeds;
     for (const Vector2 &p : points) {
         Finite(p, "path region point must be finite");
         seeds.push_back(Cell{static_cast<int>(std::floor(p.x / cell)), static_cast<int>(std::floor(p.y / cell))});
     }
+    struct State {
+        Seen seen = Seen::Unknown;
+        bool near = false;      // within the clearance margin of a point
+        bool seed = false;      // a point's own cell, always free
+        int label = 0;
+    };
+    CellTable<State> cells;
     // Cells within the clearance margin of a point, where clearance cells pass.
     const int margin = static_cast<int>(std::ceil(std::max(clearance, 0.0f) / cell)) + 1;
-    std::set<Cell> near;
-    for (const Cell &seed : seeds)
+    for (const Cell &seed : seeds) {
+        cells[CellKey(seed.x, seed.y)].seed = true;
         for (int dy = -margin; dy <= margin; ++dy)
-            for (int dx = -margin; dx <= margin; ++dx) near.insert({seed.first + dx, seed.second + dy});
-    const std::set<Cell> seed_cells(seeds.begin(), seeds.end());
-    std::map<Cell, PathCell> occupancy_cache;
-    const auto passable = [&](const Cell &c) {
-        if (seed_cells.count(c)) return true;
-        auto found = occupancy_cache.find(c);
-        if (found == occupancy_cache.end())
-            found = occupancy_cache.emplace(c, occupancy((c.first + 0.5f) * cell, (c.second + 0.5f) * cell)).first;
-        return found->second == PathCell::Free || (found->second == PathCell::Clearance && near.count(c) > 0);
+            for (int dx = -margin; dx <= margin; ++dx) cells[CellKey(seed.x + dx, seed.y + dy)].near = true;
+    }
+    const auto passable = [&](int x, int y, State &state) {
+        if (state.seed) return true;
+        if (state.seen == Seen::Unknown) state.seen = ToSeen(occupancy((x + 0.5f) * cell, (y + 0.5f) * cell));
+        return state.seen == Seen::Free || (state.seen == Seen::Clearance && state.near);
     };
-    std::map<Cell, int> label_of;
     std::vector<int> labels(points.size(), 0);
     int next_label = 0;
+    std::deque<Cell> queue;
     for (std::size_t i = 0; i < seeds.size(); ++i) {
-        const auto known = label_of.find(seeds[i]);
-        if (known != label_of.end()) { labels[i] = known->second; continue; }
+        State &seed = cells[CellKey(seeds[i].x, seeds[i].y)];
+        if (seed.label != 0) { labels[i] = seed.label; continue; }
         const int label = ++next_label;
         labels[i] = label;
-        std::deque<Cell> queue{seeds[i]};
-        label_of[seeds[i]] = label;
+        seed.label = label;
+        queue.assign(1, seeds[i]);
         for (int expanded = 0; !queue.empty() && expanded < max_nodes; ++expanded) {
             const Cell current = queue.front();
             queue.pop_front();
             for (int dy = -1; dy <= 1; ++dy)
                 for (int dx = -1; dx <= 1; ++dx) {
                     if (dx == 0 && dy == 0) continue;
-                    const Cell next{current.first + dx, current.second + dy};
-                    if (label_of.count(next) || !passable(next)) continue;
-                    if (dx != 0 && dy != 0 && (!passable({current.first + dx, current.second}) ||
-                                               !passable({current.first, current.second + dy}))) continue;
-                    label_of[next] = label;
-                    queue.push_back(next);
+                    const int nx = current.x + dx, ny = current.y + dy;
+                    State &next = cells[CellKey(nx, ny)];
+                    if (next.label != 0 || !passable(nx, ny, next)) continue;
+                    if (dx != 0 && dy != 0 &&
+                        (!passable(nx, current.y, cells[CellKey(nx, current.y)]) ||
+                         !passable(current.x, ny, cells[CellKey(current.x, ny)]))) continue;
+                    // The side checks may have grown the table: look the cell up again.
+                    cells[CellKey(nx, ny)].label = label;
+                    queue.push_back({nx, ny});
                 }
         }
     }

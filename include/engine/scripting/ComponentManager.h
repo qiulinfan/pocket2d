@@ -188,6 +188,9 @@ public:
                               bool scene_backed_only = false);
     // Whether any live tilemap has a solid cell at the world point.
     static bool IsSolidTileAt(float x, float y);
+    // The live tilemaps IsSolidTileAt consults that have a solid cell, for a
+    // query that tests many points; valid until tilemaps change.
+    static std::vector<const Tilemap *> SolidTilemaps();
     static bool SetTilemapResource(Actor::UID actor_uid, const std::string &key,
                                   const std::string &resource);
     static bool TryGetRuntimeTransformWorld(Actor::UID actor_uid,

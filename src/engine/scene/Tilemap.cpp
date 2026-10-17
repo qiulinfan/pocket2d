@@ -364,6 +364,11 @@ bool Tilemap::IsSolidAt(double world_x, double world_y) const {
     if (cx < 0 || cy < 0 || cx >= data_.width || cy >= data_.height) return false;
     return data_.solid.cells[static_cast<std::size_t>(cy) * data_.width + static_cast<std::size_t>(cx)] != 0;
 }
+bool Tilemap::HasSolidCells() const {
+    if (!HasAsset() || !committed_enabled_) return false;
+    const auto &cells = data_.solid.cells;
+    return std::any_of(cells.begin(), cells.end(), [](int cell) { return cell != 0; });
+}
 std::vector<int> Tilemap::GetCells(const std::string &layer, double x, double y, double width, double height) const {
     const int index = LayerIndex(layer);
     RequireInteger(x, "cell x"); RequireInteger(y, "cell y");

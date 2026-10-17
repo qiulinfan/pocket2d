@@ -170,6 +170,7 @@ set_tests_properties(tilemap_render_software PROPERTIES TIMEOUT 30)
 pocket_runtime_test(tilemap_benchmark tilemap_benchmark.cpp)
 pocket_runtime_test(text_benchmark text_benchmark.cpp)
 pocket_runtime_test(physics_benchmark physics_benchmark.cpp)
+pocket_runtime_test(path_benchmark path_benchmark.cpp)
 pocket_runtime_test(bunnymark_benchmark bunnymark_benchmark.cpp)
 add_test(NAME physics_threads COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/physics_threads_test.py" $<TARGET_FILE:physics_benchmark>)

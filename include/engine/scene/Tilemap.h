@@ -74,6 +74,8 @@ public:
     // Whether a world point lies in a committed nonzero solid cell of this
     // enabled map (the outline-only collision has no interior to query).
     bool IsSolidAt(double world_x, double world_y) const;
+    // Whether IsSolidAt can be true anywhere: enabled, with a solid cell.
+    bool HasSolidCells() const;
     // Layer names in index order: ground, solid, then the extra layers.
     std::vector<std::string> GetLayerNames() const;
     bool HasLayer(const std::string &layer) const;

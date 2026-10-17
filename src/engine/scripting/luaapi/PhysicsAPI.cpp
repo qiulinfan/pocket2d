@@ -5,11 +5,13 @@
 #include "physics/Rigidbody.h"
 #include "scripting/ComponentManager.h"
 #include "scene/Actor.h"
+#include "scene/Tilemap.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
 #include "LuaBridge/detail/ClassInfo.h"
 #include "scripting/LuaBoundary.h"
 #include "RawMetamethod.h"
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string>
@@ -204,17 +206,21 @@ std::function<PhysicsQueries::PathCell(float, float)> PathOccupancy(const char *
             }, &hit);
         return hit.any;
     };
+    // The query runs synchronously, so the solid maps are listed once for its
+    // many cells.
+    const auto solid_at = [maps = ComponentManager::SolidTilemaps()](float x, float y) {
+        return std::any_of(maps.begin(), maps.end(), [&](const Tilemap *map) { return map->IsSolidAt(x, y); });
+    };
     // Solid tiles keep the clearance too: a square of side 2r (r < 1/2 cell) can
     // only overlap tiles that contain one of its corners.
-    const auto near_solid_tile = [radius](float x, float y) {
+    const auto near_solid_tile = [radius, solid_at](float x, float y) {
         if (radius <= 0.001f) return false;
         const float r = std::min(radius, 0.499f);
-        return ComponentManager::IsSolidTileAt(x - r, y - r) || ComponentManager::IsSolidTileAt(x + r, y - r) ||
-               ComponentManager::IsSolidTileAt(x - r, y + r) || ComponentManager::IsSolidTileAt(x + r, y + r);
+        return solid_at(x - r, y - r) || solid_at(x + r, y - r) || solid_at(x - r, y + r) || solid_at(x + r, y + r);
     };
-    return [has_world, touches_static, near_solid_tile, radius](float x, float y) {
+    return [has_world, touches_static, near_solid_tile, solid_at, radius](float x, float y) {
         using PhysicsQueries::PathCell;
-        if (ComponentManager::IsSolidTileAt(x, y)) return PathCell::Solid;
+        if (solid_at(x, y)) return PathCell::Solid;
         if (has_world && touches_static(x, y, std::max(radius, 0.001f))) {
             if (radius <= 0.001f || touches_static(x, y, 0.001f)) return PathCell::Solid;
             return PathCell::Clearance;

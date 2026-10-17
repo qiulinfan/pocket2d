@@ -221,6 +221,22 @@ bool ComponentManager::IsSolidTileAt(float x, float y) {
     return false;
 }
 
+std::vector<const Tilemap *> ComponentManager::SolidTilemaps() {
+    std::vector<const Tilemap *> maps;
+    for (Actor::UID uid : ManagerDetail::ActorsWithNative(ManagerDetail::Runtime(), ManagerDetail::NativeKind::Tilemap)) {
+        const auto owner = ManagerDetail::Runtime().actor_by_uid.find(uid);
+        if (owner == ManagerDetail::Runtime().actor_by_uid.end() || owner->second == nullptr ||
+            owner->second->runtime_destroyed) continue;
+        const auto components = ManagerDetail::Runtime().actor_components.find(uid);
+        if (components == ManagerDetail::Runtime().actor_components.end()) continue;
+        for (auto &entry : components->second) {
+            if (entry->removed || entry->Native<Tilemap>() == nullptr) continue;
+            if (entry->Native<Tilemap>()->HasSolidCells()) maps.push_back(entry->Native<Tilemap>());
+        }
+    }
+    return maps;
+}
+
 namespace ManagerDetail {
 void PrepareDetachedTilemapAssets(const Actor &actor,
     const std::vector<std::unique_ptr<ComponentRecord>> &records) {
