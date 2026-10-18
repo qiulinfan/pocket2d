@@ -99,6 +99,9 @@ add_test(NAME agent_mcp COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_mcp_test.py"
     $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/village_defense")
 set_tests_properties(agent_mcp PROPERTIES TIMEOUT 90)
+add_test(NAME determinism COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/determinism_test.py" $<TARGET_FILE:game_engine> "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/determinism")
+set_tests_properties(determinism PROPERTIES TIMEOUT 60)
 add_test(NAME netplay COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/netplay_test.py" $<TARGET_FILE:game_engine>)
 set_tests_properties(netplay PROPERTIES TIMEOUT 180)

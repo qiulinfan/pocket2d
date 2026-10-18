@@ -39,6 +39,7 @@ include(GameEngineSDL)
 game_engine_ensure_sdl()
 include(GameEngineTracy)
 include(GameEngineBox2D)
+include(GameEngineDetMath)
 
 add_library(game_engine_vendor_headers INTERFACE)
 target_compile_definitions(game_engine_vendor_headers INTERFACE

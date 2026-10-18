@@ -126,6 +126,37 @@ keep their simulation in Lua and check it with the sync test.
   functions (addresses differ).
 - **Floating point**: see the cross-platform section below.
 
+## Cross-platform determinism
+
+Peers on different systems (macOS arm64, Windows x64, Linux x64) must compute
+the same bits.
+
+- **Basic arithmetic** (`+ - * /`, `math.sqrt`, `math.fmod`, `math.floor`,
+  integer operations) is exact IEEE 754 on every supported CPU: arm64 and
+  x86_64 both use 64-bit doubles (SSE2, no x87). Lua is compiled with
+  `-ffp-contract=off`, so the compiler never fuses a multiply and an add into
+  an FMA on one platform and not on another.
+- **Transcendental functions and `^`** differ between C libraries in their
+  last bits. Lua's `math.sin/cos/tan/asin/acos/atan/exp/log` and `^` call
+  `pocket_det_*` instead (`thirdparty/detmath`): openlibm's (FreeBSD msun /
+  FDLIBM) double functions, fetched at a pinned tag and compiled from source
+  with plain IEEE arithmetic and no contraction, under prefixed names so the
+  platform's own libm is untouched (`cmake/GameEngineDetMath.cmake`).
+  `pocket_lua_user.h` (Lua's `LUA_USER_H`) maps them, and also fixes the
+  string-hash seed.
+- **Formatting and parsing** (`tostring`, `string.format`, `tonumber`) use the
+  C library's correctly rounded `printf`/`strtod` (Apple libc, glibc, the
+  Windows UCRT).
+- `tests/determinism_test.py` (CTest `determinism`) hashes 41,100 results of
+  float math, formatting, table order and sorting and compares them with the
+  recorded digest. The macOS arm64 build and the Linux x86_64 runtime kit
+  (GCC 14, glibc, run under qemu) produce the same digest. The Windows x64
+  build has not been run here: Wine does not start under qemu user emulation,
+  and a Rosetta-backed VM needs Rosetta on the host. Running CTest on Windows
+  (or `tests/determinism_test.py` with the Windows runtime) checks it.
+- Engine-side math (Box2D, particles) still uses the platform's libm; games
+  that use rollback keep their simulation in Lua.
+
 ## Deploying the room server
 
 The server is one Python 3.8+ file with no dependencies, using UDP port 27777.

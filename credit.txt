@@ -8,3 +8,6 @@ Source: https://github.com/ocornut/imgui
 
 4. ImGuizmo is vendored directly into thirdparty/imguizmo for editor gizmo support.
 Source: https://github.com/CedricGuillemet/ImGuizmo
+
+5. OpenLibm (FreeBSD msun / FDLIBM; MIT, BSD and ISC licenses) is fetched at build time; Lua's transcendental math functions use its double functions so scripts compute the same results on every platform (thirdparty/detmath).
+Source: https://github.com/JuliaMath/openlibm

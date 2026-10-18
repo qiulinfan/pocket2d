@@ -29,11 +29,11 @@ target_compile_definitions(
         # _setjmp/_longjmp skip the signal-mask syscalls of setjmp/longjmp on
         # every protected call; also selects POSIX popen, mkstemp, *_r time.
         $<$<NOT:$<PLATFORM_ID:Windows>>:LUA_USE_POSIX>
-        # A fixed string-hash seed (stock Lua mixes in the time and addresses), so
-        # table iteration order is the same in every run and on every machine:
-        # replays and lockstep netplay depend on it.
-        "luai_makeseed(L)=((unsigned int)0x2D504B32u)"
+        # A fixed string-hash seed, and transcendental functions and ^ through
+        # deterministic math (thirdparty/detmath/pocket_lua_user.h).
+        "LUA_USER_H=\"pocket_lua_user.h\""
 )
+target_link_libraries(lua_runtime PRIVATE pocket_detmath)
 target_compile_options(
     lua_runtime
     PRIVATE
@@ -41,6 +41,8 @@ target_compile_options(
         $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall>
         $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wextra>
         $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wno-deprecated-declarations>
+        # Each float operation rounds on its own, as on every other platform.
+        $<$<NOT:$<C_COMPILER_ID:MSVC>>:-ffp-contract=off>
 )
 set_target_properties(lua_runtime PROPERTIES FOLDER "thirdparty")
 
