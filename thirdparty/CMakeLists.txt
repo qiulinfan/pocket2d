@@ -29,6 +29,10 @@ target_compile_definitions(
         # _setjmp/_longjmp skip the signal-mask syscalls of setjmp/longjmp on
         # every protected call; also selects POSIX popen, mkstemp, *_r time.
         $<$<NOT:$<PLATFORM_ID:Windows>>:LUA_USE_POSIX>
+        # A fixed string-hash seed (stock Lua mixes in the time and addresses), so
+        # table iteration order is the same in every run and on every machine:
+        # replays and lockstep netplay depend on it.
+        "luai_makeseed(L)=((unsigned int)0x2D504B32u)"
 )
 target_compile_options(
     lua_runtime
