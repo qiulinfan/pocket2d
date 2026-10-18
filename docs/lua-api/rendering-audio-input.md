@@ -87,6 +87,12 @@ compete with normal SFX channels.
 | `Input.GetKeyUp(keycode)` | Key released this frame |
 | `Input.GetAnyKeyDown()` | Any key or mouse button pressed this frame |
 
+A key tapped and released within one frame still reads as pressed that frame.
+Modifier names: `left ctrl` / `right ctrl` (`lctrl`, `rctrl`), `left alt` /
+`right alt` (also `left option`), `left shift` / `right shift`, and the GUI
+keys `left gui` / `right gui` (`lgui`, `rgui`, `left command`, `lcmd`...):
+Command on macOS, the Windows key elsewhere.
+
 ### Actions
 
 Actions are declared in an optional `actions.json` at the project root and read

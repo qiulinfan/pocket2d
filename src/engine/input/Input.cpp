@@ -319,7 +319,10 @@ bool Input::GetKey(SDL_Scancode key) {
 
 bool Input::GetKeyDown(SDL_Scancode key) {
     if (!IsValidScancode(key)) return false;
-    return State().keyboard_states_[key] == INPUT_STATE_JUST_BECAME_DOWN;
+    if (State().keyboard_states_[key] == INPUT_STATE_JUST_BECAME_DOWN) return true;
+    // A tap pressed and released within one frame still counts as pressed.
+    const auto &down = State().just_became_down_scancodes_;
+    return std::find(down.begin(), down.end(), key) != down.end();
 }
 
 bool Input::GetKeyUp(SDL_Scancode key) {
@@ -346,8 +349,24 @@ Input::KeyBinding Input::ParseKeyBinding(const std::string &keycode) {
         {"shift", {SDL_SCANCODE_LSHIFT, SDLK_LSHIFT}},
         {"lctrl", {SDL_SCANCODE_LCTRL, SDLK_LCTRL}},
         {"rctrl", {SDL_SCANCODE_RCTRL, SDLK_RCTRL}},
+        {"left ctrl", {SDL_SCANCODE_LCTRL, SDLK_LCTRL}},
+        {"right ctrl", {SDL_SCANCODE_RCTRL, SDLK_RCTRL}},
         {"lalt", {SDL_SCANCODE_LALT, SDLK_LALT}},
         {"ralt", {SDL_SCANCODE_RALT, SDLK_RALT}},
+        {"left alt", {SDL_SCANCODE_LALT, SDLK_LALT}},
+        {"right alt", {SDL_SCANCODE_RALT, SDLK_RALT}},
+        {"left option", {SDL_SCANCODE_LALT, SDLK_LALT}},
+        {"right option", {SDL_SCANCODE_RALT, SDLK_RALT}},
+        // GUI keys (Command on macOS, Windows key elsewhere). Not through SDL's
+        // names: on macOS SDL renames them "Left Command" once video starts.
+        {"lgui", {SDL_SCANCODE_LGUI, SDLK_LGUI}},
+        {"rgui", {SDL_SCANCODE_RGUI, SDLK_RGUI}},
+        {"left gui", {SDL_SCANCODE_LGUI, SDLK_LGUI}},
+        {"right gui", {SDL_SCANCODE_RGUI, SDLK_RGUI}},
+        {"lcmd", {SDL_SCANCODE_LGUI, SDLK_LGUI}},
+        {"rcmd", {SDL_SCANCODE_RGUI, SDLK_RGUI}},
+        {"left command", {SDL_SCANCODE_LGUI, SDLK_LGUI}},
+        {"right command", {SDL_SCANCODE_RGUI, SDLK_RGUI}},
         {"tab", {SDL_SCANCODE_TAB, SDLK_TAB}},
         {"return", {SDL_SCANCODE_RETURN, SDLK_RETURN}},
         {"enter", {SDL_SCANCODE_RETURN, SDLK_RETURN}},
@@ -452,8 +471,9 @@ bool Input::GetKeyDown(const std::string &keycode) {
     if (GetKeyDown(binding.scancode)) return true;
     if (!IsValidKeycode(binding.keycode)) return false;
     const auto found = State().keycode_states_.find(binding.keycode);
-    return found != State().keycode_states_.end() &&
-           found->second == INPUT_STATE_JUST_BECAME_DOWN;
+    if (found != State().keycode_states_.end() && found->second == INPUT_STATE_JUST_BECAME_DOWN) return true;
+    const auto &down = State().just_became_down_keycodes_;
+    return std::find(down.begin(), down.end(), binding.keycode) != down.end();
 }
 
 // string keycode overloads
