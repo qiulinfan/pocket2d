@@ -40,6 +40,11 @@
 #define floorl pocket_det_floorl
 #define copysignl pocket_det_copysignl
 
+/* A static library inside the engine: no dllexport (MSVC also rejects the
+   kernels' plain declarations against their exported definitions). */
+#define OPENLIBM_DEFS_H_
+#define OLM_DLLEXPORT
+
 /* MSVC's C compiler has no C99 complex type: skip openlibm's complex header
    (only the real functions are built; their complex declarations go unused). */
 #if defined(_MSC_VER) && !defined(__clang__)
