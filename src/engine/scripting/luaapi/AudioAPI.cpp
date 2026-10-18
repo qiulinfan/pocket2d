@@ -1,5 +1,6 @@
 #include "RegistrationDetail.h"
 #include "audio/AudioManager.h"
+#include "net/Netplay.h"
 #include "scripting/EventBus.h"
 #include "lua.hpp"
 #include "LuaBridge/LuaBridge.h"
@@ -14,7 +15,8 @@ using APIRegistrationDetail::LuaState;
 bool CanRouteAudioCommands() {
     // Top-level component scripts run before an Engine is bound. Respect the
     // headless host's disabled flag there too, before opening any audio device.
-    return AudioManager::IsPlaybackEnabled();
+    // Ticks a rollback simulates again stay silent (they were heard once).
+    return AudioManager::IsPlaybackEnabled() && !Netplay::Resimulating();
 }
 
 bool EnsureAudioInitialized() {
@@ -35,7 +37,7 @@ std::string JsonString(const std::string &text) {
 }
 
 void TracePlay(bool music, int channel, const std::string &clip_name, bool does_loop) {
-    if (!EventBus::IsPublishTracing()) return;
+    if (!EventBus::IsPublishTracing() || Netplay::Resimulating()) return;
     const bool found = music ? AudioManager::HasMusicTrack(clip_name) : AudioManager::HasAudioClip(clip_name);
     std::string payload = "{";
     if (!music) payload += "\"channel\":" + std::to_string(channel) + ",";

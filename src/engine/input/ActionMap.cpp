@@ -22,7 +22,7 @@ struct State {
     std::map<std::string, Value> agent;
     std::map<std::string, bool> held_at_frame_end;
     bool net_active = false;
-    std::map<std::string, Value> net;
+    std::map<std::string, Value> net, net_previous;
 };
 State &Current() { return World::Current().State<State>(); }
 
@@ -151,10 +151,11 @@ Value GetValue(const std::string &name) {
     return SampleLocal(name);
 }
 
-void SetNetValues(const std::map<std::string, Value> *values) {
+void SetNetValues(const std::map<std::string, Value> *values, const std::map<std::string, Value> *previous) {
     auto &state = Current();
     state.net_active = values != nullptr;
     if (values) state.net = *values; else state.net.clear();
+    if (values && previous) state.net_previous = *previous; else state.net_previous.clear();
 }
 
 bool HasNetValues() { return Current().net_active; }
@@ -186,17 +187,22 @@ Value SampleLocal(const std::string &name) {
 
 bool IsHeld(const std::string &name) { return Holds(Require(name).type, GetValue(name)); }
 
-bool WasPressed(const std::string &name) {
-    const bool held = IsHeld(name);
-    const auto previous = Current().held_at_frame_end.find(name);
-    return held && (previous == Current().held_at_frame_end.end() || !previous->second);
+namespace {
+// Held at the previous tick: the netplay inputs of the tick before, else the frame-end record.
+bool HeldBefore(const std::string &name) {
+    auto &state = Current();
+    if (state.net_active) {
+        const auto found = state.net_previous.find(name);
+        return found != state.net_previous.end() && Holds(Require(name).type, Clamp(Require(name).type, found->second));
+    }
+    const auto previous = state.held_at_frame_end.find(name);
+    return previous != state.held_at_frame_end.end() && previous->second;
 }
+} // namespace
 
-bool WasReleased(const std::string &name) {
-    const bool held = IsHeld(name);
-    const auto previous = Current().held_at_frame_end.find(name);
-    return !held && previous != Current().held_at_frame_end.end() && previous->second;
-}
+bool WasPressed(const std::string &name) { return IsHeld(name) && !HeldBefore(name); }
+
+bool WasReleased(const std::string &name) { return !IsHeld(name) && HeldBefore(name); }
 
 void EndFrame() {
     auto &state = Current();

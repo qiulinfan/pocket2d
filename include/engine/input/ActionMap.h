@@ -53,8 +53,10 @@ bool WasReleased(const std::string &name); // held at the previous frame end, no
 void EndFrame();
 
 // Netplay: while set, every action reads only these values (absent = released);
-// keys, mouse and agent values no longer reach gameplay. nullptr clears it.
-void SetNetValues(const std::map<std::string, Value> *values);
+// keys, mouse and agent values no longer reach gameplay, and pressed/released
+// edges compare with `previous` (the tick before), so a tick simulated again
+// sees the same edges. nullptr clears it.
+void SetNetValues(const std::map<std::string, Value> *values, const std::map<std::string, Value> *previous);
 bool HasNetValues();
 // Bound input and agent values, ignoring netplay: the local player's input.
 Value SampleLocal(const std::string &name);

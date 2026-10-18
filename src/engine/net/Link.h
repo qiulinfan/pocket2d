@@ -1,0 +1,72 @@
+#ifndef POCKET2D_NET_LINK_H
+#define POCKET2D_NET_LINK_H
+
+#include "net/UdpSocket.h"
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+// The link brings two peers to a datagram channel (Netplay.cpp runs the
+// session over it). Peer packets start with "PKN1" and a type byte; the link
+// handles punches itself and hands every other packet to the session.
+namespace Netplay::detail {
+
+constexpr std::uint8_t kMagic[4] = {'P', 'K', 'N', '1'};
+enum PacketType : std::uint8_t { kPunch = 1, kPunchAck = 2, kStart = 3, kStartAck = 4, kInput = 5, kBye = 6 };
+constexpr std::uint16_t kServerPort = 27777;
+constexpr std::uint16_t kDirectPort = 27778;
+
+std::uint64_t NowMs();
+std::vector<std::uint8_t> Header(PacketType type);
+void PutU32(std::vector<std::uint8_t> &b, std::uint32_t v);
+std::uint32_t GetU32(const std::uint8_t *p);
+
+enum class LinkState {
+    Opening,    // contacting the room server or the STUN servers
+    Waiting,    // a host without a peer yet
+    Connecting, // punching to a known peer
+    Connected,  // datagrams reach the peer (directly or relayed)
+    Failed,
+};
+
+// What a direct host tells LAN discovery.
+struct DiscoveryInfo {
+    int port = 27779;
+    std::string game, name, payload;
+};
+
+class Link {
+public:
+    virtual ~Link() = default;
+    // Receives and handles link traffic; session packets go to `received`.
+    virtual void Pump(std::uint64_t now, std::vector<std::vector<std::uint8_t>> &received) = 0;
+    virtual void Send(const std::vector<std::uint8_t> &packet) = 0;
+    // A timed punch: its answer is a round-trip sample.
+    virtual void Probe() = 0;
+    // Connection codes: the peer's code (the host gets it after creating its own).
+    virtual bool ConnectCode(const std::string &code) = 0;
+    // Tells the room server the room is closed.
+    virtual void Close() = 0;
+
+    LinkState state = LinkState::Opening;
+    std::string kind;             // "server", "direct", "code"
+    std::string error, room, code, nat = "unknown", peer_text, lan_text;
+    bool relay = false;
+    int best_rtt = -1;
+    int rtt_samples = 0;
+    std::uint64_t last_recv = 0;
+};
+
+// Each returns a link, or nullptr with the reason in `error`.
+std::unique_ptr<Link> ServerLink(const std::string &server, int side, const std::string &room, bool force_relay,
+                                 std::string &error);
+std::unique_ptr<Link> DirectHostLink(int port, const DiscoveryInfo &discovery, std::string &error);
+std::unique_ptr<Link> DirectJoinLink(const std::string &address, std::string &error);
+std::unique_ptr<Link> CodeLink(int side, const std::vector<std::string> &stun, const std::string &host_code,
+                               std::string &error);
+
+} // namespace Netplay::detail
+
+#endif

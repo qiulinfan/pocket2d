@@ -25,6 +25,16 @@ std::optional<Address> ParseAddress(const std::string &text, std::uint16_t defau
 // This machine's IPv4 address on the interface that routes to `to` (no packet is sent).
 std::optional<std::uint32_t> LocalIPv4ForRoute(const Address &to);
 
+// The machine's IPv4 interfaces that are up, without loopback.
+struct Interface {
+    std::string name;            // "en0", "utun4", "Ethernet", "ZeroTier One [...]"
+    std::uint32_t ip = 0;        // host order
+    std::uint32_t broadcast = 0; // the subnet's broadcast address
+    std::string kind;            // "lan", or a virtual LAN: "tailscale", "zerotier", "radmin"
+};
+std::vector<Interface> LocalInterfaces();
+std::string HostName();
+
 class UdpSocket {
 public:
     UdpSocket() = default;
@@ -32,8 +42,9 @@ public:
     UdpSocket(const UdpSocket &) = delete;
     UdpSocket &operator=(const UdpSocket &) = delete;
 
-    // Binds to all interfaces on `port` (0 = any free port).
-    bool Open(std::uint16_t port = 0);
+    // Binds to all interfaces on `port` (0 = any free port). Broadcasts may be
+    // sent. `shared` lets other sockets bind the same port (LAN discovery).
+    bool Open(std::uint16_t port = 0, bool shared = false);
     void Close();
     bool IsOpen() const { return handle_ >= 0; }
     std::uint16_t LocalPort() const { return local_port_; }

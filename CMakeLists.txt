@@ -106,6 +106,7 @@ target_link_libraries(
         game_engine_vendor_headers
         Threads::Threads
         $<$<PLATFORM_ID:Windows>:ws2_32>
+        $<$<PLATFORM_ID:Windows>:iphlpapi>
     PRIVATE
         lua_runtime
 )

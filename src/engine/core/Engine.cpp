@@ -347,23 +347,30 @@ void Engine::GameLoop() {
         Netplay::Pump();
         int ticks = 0;
         for (; lag >= kTickNs && IsRunning(); lag -= kTickNs, ++ticks) {
-            // Lockstep netplay: a tick runs only with both players' input for it.
-            if (Netplay::Running()) {
-                Netplay::Pump();
-                if (!Netplay::ReadyForTick()) {
-                    Netplay::NoteStall();
-                    lag = std::min(lag, kTickNs * 2);
-                    break;
-                }
-                Netplay::BeginTick();
-            }
             previous_camera = camera_position;
             previous_zoom = runtime_zoom_factor;
             const std::uint64_t scene_revision = scene_load_attempt_revision_;
-            advanceGameplay();
+            if (Netplay::Running()) {
+                // Netplay decides whether the tick runs (lockstep waits for the
+                // peer's input) and first resimulates corrected ticks (rollback),
+                // whose draws are dropped.
+                Netplay::Pump();
+                const bool ran = Netplay::Tick([&](bool resimulating) {
+                    advanceGameplay();
+                    if (scene_reset_required_) return;
+                    finishGameplayFrame();
+                    if (resimulating) Renderer::DiscardFrameRequests();
+                });
+                if (!ran) {
+                    lag = std::min(lag, kTickNs * 2);
+                    break;
+                }
+            } else {
+                advanceGameplay();
+                if (scene_reset_required_) break;
+                finishGameplayFrame();
+            }
             if (scene_reset_required_) break;
-            finishGameplayFrame();
-            Netplay::EndTick();
             // A new scene starts afresh instead of moving from the old one.
             const bool same_scene = scene_revision == scene_load_attempt_revision_;
             if (!same_scene) {
@@ -583,31 +590,31 @@ void Engine::StepSimulation() {
     // Draw requests from the previous tick stay queued until here so a
     // headless observer can render the frame it just observed.
     Renderer::DiscardFrameRequests();
-    // Headless lockstep: wait briefly for the peer's input for this tick. A
-    // stalled tick returns without advancing (well inside the agent's request
+    auto run_tick = [&](bool resimulating) {
+        advanceGameplay();
+        if (scene_reset_required_) return;
+        // The visible path resolves final transforms in render(). Headless observers
+        // need the same post-mutation world values even in scenes without physics.
+        ComponentManager::ResolveTransformHierarchy();
+        finishGameplayFrame();
+        if (resimulating) Renderer::DiscardFrameRequests();
+    };
+    // Headless netplay: wait briefly until the session can tick. A stalled
+    // tick returns without advancing (well inside the agent's request
     // deadline), so a peer that only pumps while it steps can catch up.
     Netplay::Pump();
     if (Netplay::Running()) {
         const Uint64 deadline = SDL_GetTicks() + 500;
-        while (Netplay::Running() && !Netplay::ReadyForTick() && SDL_GetTicks() < deadline) {
+        while (Netplay::Running() && !Netplay::CanTick() && SDL_GetTicks() < deadline) {
             SDL_Delay(1);
             Netplay::Pump();
         }
         if (Netplay::Running()) {
-            if (!Netplay::ReadyForTick()) {
-                Netplay::NoteStall();
-                return;
-            }
-            Netplay::BeginTick();
+            Netplay::Tick(run_tick);
+            return;
         }
     }
-    advanceGameplay();
-    if(scene_reset_required_)return;
-    // The visible path resolves final transforms in render(). Headless observers
-    // need the same post-mutation world values even in scenes without physics.
-    ComponentManager::ResolveTransformHierarchy();
-    finishGameplayFrame();
-    Netplay::EndTick();
+    run_tick(false);
 }
 
 

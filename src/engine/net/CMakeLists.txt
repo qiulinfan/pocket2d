@@ -3,6 +3,10 @@ target_sources(
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/UdpSocket.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Netplay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Link.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Link.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ConnectionCode.cpp"
+        "${PROJECT_SOURCE_DIR}/include/engine/net/ConnectionCode.h"
         "${PROJECT_SOURCE_DIR}/include/engine/net/UdpSocket.h"
         "${PROJECT_SOURCE_DIR}/include/engine/net/Netplay.h"
 )

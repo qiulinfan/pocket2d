@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Lockstep netplay: two headless runtimes, through a local room server (hole
-punching and forced relay) and directly, stay in step while each drives its own
-player with the same local bindings."""
+"""Netplay: two headless runtimes, each driving its own player with the same
+local bindings, must agree on every synced value, edge and shared action.
+
+Links: a local room server (hole punching and forced relay), direct
+connections found by LAN discovery, and connection codes through a local STUN
+server. Sync: lockstep, and rollback (with corrections counted). A sync test
+session must pass with all state tracked and catch state that is not."""
 import json
 from pathlib import Path
 import socket
@@ -20,15 +24,27 @@ ACTIONS = {"version": 1, "actions": {
     "confirm": {"type": "button", "keys": ["return"]}}}
 
 PROBE = '''NetProbe = {
-  x1 = 0, x2 = 0, hits1 = 0, hits2 = 0, confirms = 0, ran = 0, hash = 0,
+  x1 = 0, x2 = 0, hits1 = 0, hits2 = 0, confirms = 0, ran = 0, hash = 0, leaky = false,
   OnAgentCommand = function(self, name, args)
     if name == "start" then
-      Net.Configure{local_prefix = "p1_", sides = {"p1_", "p2_"}, shared = {"confirm"}, delay = 3,
-        force_relay = args.relay or false}
+      Net.Configure{local_prefix = "p1_", sides = {"p1_", "p2_"}, shared = {"confirm"},
+        mode = args.rollback and "rollback" or "lockstep", delay = args.delay or 3,
+        force_relay = args.relay or false, game = "netprobe", name = args.name,
+        discovery_port = args.dport, stun = args.stun}
+      self.leaky = args.leaky or false
+      Net.Track(self)
       if args.mode == "host" then return Net.Host(args.server, "payload-42")
       elseif args.mode == "join" then return Net.Join(args.server, args.room)
       elseif args.mode == "hostdirect" then return Net.HostDirect(args.port, "lan-payload")
-      else return Net.JoinDirect(args.address) end
+      elseif args.mode == "joindirect" then return Net.JoinDirect(args.address)
+      elseif args.mode == "codehost" then return Net.CodeHost("code-payload")
+      elseif args.mode == "codejoin" then return Net.CodeJoin(args.code)
+      elseif args.mode == "synctest" then return Net.SyncTest(args.frames or 7) end
+    elseif name == "codeconnect" then return Net.CodeConnect(args.code)
+    elseif name == "discover" then
+      Net.Configure{game = "netprobe", discovery_port = args.dport}
+      Net.Discover(true) return true
+    elseif name == "hosts" then return Net.Hosts()
     elseif name == "status" then return Net.Status()
     elseif name == "leave" then Net.Leave() return true end
   end,
@@ -41,8 +57,17 @@ PROBE = '''NetProbe = {
     if Input.GetActionDown("p2_attack") then self.hits2 = self.hits2 + 1 end
     if Input.GetAction("confirm") then self.confirms = self.confirms + 1 end
     self.hash = (self.hash * 31 + math.floor(self.x1 * 1000) + 7 * math.floor(self.x2 * 1000) + self.hits1 * 13 + self.hits2) % 2147483647
+    if self.leaky then
+      -- State the snapshots leave out (a table declared static, yet changed) that
+      -- feeds tracked state: a sync test must notice.
+      if not LEAK then LEAK = {n = 0}; Net.Static(LEAK) end
+      LEAK.n = LEAK.n + 1
+      self.hash = (self.hash + LEAK.n) % 2147483647
+    end
     if self.ran % 30 == 0 then Net.Checksum(self.ran, self.hash) end
   end }'''
+
+STUN_MAGIC = 0x2112A442
 
 
 def write_project(root):
@@ -76,7 +101,7 @@ def both(a, b, req_a, req_b):
 
 
 def wait_running(a, b):
-    for _ in range(200):
+    for _ in range(300):
         both(a, b, {"cmd": "step", "frames": 1}, {"cmd": "step", "frames": 1})
         sa, sb = call(a, "status"), call(b, "status")
         if sa["state"] == "running" and sb["state"] == "running":
@@ -86,7 +111,7 @@ def wait_running(a, b):
     raise AssertionError("peers never started: %s / %s" % (call(a, "status"), call(b, "status")))
 
 
-def play(a, b, label):
+def play(a, b, label, rollback=False):
     # The host holds right and taps attack; the guest holds its own left (its p1 bindings)
     # and taps attack: on both machines the guest's input drives p2.
     for i in range(6):
@@ -95,15 +120,20 @@ def play(a, b, label):
                       {"cmd": "step", "frames": 20, "actions": {"p1_move": -1, "p1_attack": i % 2 == 1}})
     for _ in range(3):
         ra, rb = both(a, b, {"cmd": "step", "frames": 5, "actions": {}}, {"cmd": "step", "frames": 5, "actions": {}})
-    # Lockstep lets one side run up to `delay` ticks ahead: compare at the same tick.
-    for _ in range(20):
-        fa, fb = call(a, "status")["frame"], call(b, "status")["frame"]
-        if fa == fb:
-            break
-        behind = a if fa < fb else b
-        r = successful(behind, {"cmd": "step", "actions": {}})
-        if behind is a: ra = r
-        else: rb = r
+    # One side may run ahead of the other: compare at the same tick, once its
+    # inputs are final everywhere (rollback corrects a few ticks back).
+    for _ in range(60):
+        sa, sb = call(a, "status"), call(b, "status")
+        if sa["frame"] == sb["frame"] and (not rollback or sa["frame"] > 0):
+            if not rollback:
+                break
+            both(a, b, {"cmd": "step", "frames": 1, "actions": {}}, {"cmd": "step", "frames": 1, "actions": {}})
+            sa2, sb2 = call(a, "status"), call(b, "status")
+            if sa2["frame"] == sb2["frame"]:
+                break
+            continue
+        behind = a if sa["frame"] < sb["frame"] else b
+        successful(behind, {"cmd": "step", "actions": {}})
     ra, rb = successful(a, {"cmd": "observe"}), successful(b, {"cmd": "observe"})
     pa, pb = props(ra), props(rb)
     keys = ("x1", "x2", "hits1", "hits2", "confirms", "hash", "ran")
@@ -111,8 +141,9 @@ def play(a, b, label):
     check(all(pa[k] == pb[k] for k in keys), label + ": both machines agree: %s / %s" % (pa, pb))
     check(pa["x1"] > 50 and pa["x2"] < -50, label + ": each player drives its own side: %s" % pa)
     check(pa["hits1"] == 3 and pa["hits2"] == 3 and pa["confirms"] > 0, label + ": edges and shared actions: %s" % pa)
-    check(not sa["desync"] and not sb["desync"], label + ": no desync reported")
+    check(not sa["desync"] and not sb["desync"], label + ": no desync reported: %s / %s" % (sa, sb))
     check(sa["payload"] == sb["payload"] and sa["seed"] == sb["seed"], label + ": payload and seed shared")
+    check(sa["mode"] == sb["mode"] == ("rollback" if rollback else "lockstep"), label + ": sync mode " + sa["mode"])
     return sa, sb
 
 
@@ -124,6 +155,153 @@ def free_port():
     return port
 
 
+class StunServer:
+    """Answers STUN binding requests with the sender's address."""
+
+    def __init__(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.settimeout(0.05)
+        self.port = self.sock.getsockname()[1]
+        self.running = True
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        while self.running:
+            try:
+                data, addr = self.sock.recvfrom(2048)
+            except socket.timeout:
+                continue
+            if len(data) < 20 or int.from_bytes(data[4:8], "big") != STUN_MAGIC:
+                continue
+            ip = int.from_bytes(socket.inet_aton(addr[0]), "big") ^ STUN_MAGIC
+            port = addr[1] ^ (STUN_MAGIC >> 16)
+            attr = bytes([0, 0x20, 0, 8, 0, 1]) + port.to_bytes(2, "big") + ip.to_bytes(4, "big")
+            self.sock.sendto(bytes([1, 1, 0, 12]) + data[4:20] + attr, addr)
+
+    def close(self):
+        self.running = False
+
+
+def pair(executable):
+    da, db = tempfile.mkdtemp(prefix="pocket-net-a-"), tempfile.mkdtemp(prefix="pocket-net-b-")
+    write_project(Path(da)); write_project(Path(db))
+    return Agent(executable, da), Agent(executable, db)
+
+
+def leave_and_check(a, b, label):
+    call(a, "leave")
+    for _ in range(20):
+        successful(b, {"cmd": "step"})
+        if call(b, "status")["state"] == "disconnected":
+            break
+        time.sleep(0.02)
+    check(call(b, "status")["state"] == "disconnected", label + ": the guest sees the host leave")
+
+
+def room_server(executable, server_port, relay, rollback):
+    label = ("relay" if relay else "punch") + (" rollback" if rollback else "")
+    a, b = pair(executable)
+    try:
+        srv = "127.0.0.1:%d" % server_port
+        check(call(a, "start", {"mode": "host", "server": srv, "relay": relay, "rollback": rollback, "delay": 2}), "host starts")
+        room = ""
+        for _ in range(100):
+            successful(a, {"cmd": "step"})
+            room = call(a, "status")["room"]
+            if room:
+                break
+            time.sleep(0.02)
+        check(len(room) == 4, label + ": room code issued")
+        check(call(b, "start", {"mode": "join", "server": srv, "room": room, "relay": relay}), "guest starts")
+        sa, sb = wait_running(a, b)
+        check(sa["side"] == 1 and sb["side"] == 2 and sb["payload"] == "payload-42", label + ": sides and payload")
+        sa, sb = play(a, b, label, rollback)
+        check(sa["relay"] == relay and sb["relay"] == relay, label + ": relay mode as requested")
+        if rollback:
+            check(sa["rollbacks"] + sb["rollbacks"] > 0, label + ": predictions were corrected (%d / %d rollbacks)"
+                  % (sa["rollbacks"], sb["rollbacks"]))
+        leave_and_check(a, b, label)
+    finally:
+        a.close(); b.close()
+
+
+def discovery(executable):
+    a, b = pair(executable)
+    try:
+        dport, port = free_port(), free_port()
+        check(call(a, "start", {"mode": "hostdirect", "port": port, "dport": dport, "name": "probe-host"}), "direct host listens")
+        lan = call(a, "status")["lan"]
+        check(lan.endswith(":%d" % port), "the direct host knows its LAN address: " + lan)
+        check(call(b, "discover", {"dport": dport}), "discovery starts")
+        hosts = []
+        for _ in range(100):
+            both(a, b, {"cmd": "step"}, {"cmd": "step"})
+            hosts = call(b, "hosts") or []
+            if hosts:
+                break
+            time.sleep(0.03)
+        check(len(hosts) >= 1 and hosts[0]["name"] == "probe-host" and hosts[0]["payload"] == "lan-payload",
+              "LAN discovery finds the host: %s" % hosts)
+        found = hosts[0]["address"]
+        check(found.endswith(":%d" % port), "the found address carries the game port: " + found)
+        check(call(b, "start", {"mode": "joindirect", "address": found}), "the guest joins the found host")
+        wait_running(a, b)
+        play(a, b, "direct")
+    finally:
+        a.close(); b.close()
+
+
+def codes(executable):
+    stun = StunServer()
+    a, b = pair(executable)
+    try:
+        servers = ["127.0.0.1:%d" % stun.port]
+        check(call(a, "start", {"mode": "codehost", "stun": servers, "rollback": True, "delay": 1}), "code host starts")
+        code = ""
+        for _ in range(100):
+            successful(a, {"cmd": "step"})
+            code = call(a, "status")["code"]
+            if code:
+                break
+            time.sleep(0.02)
+        check(len(code) == 23, "the host gets a connection code: " + code)
+        check(call(b, "start", {"mode": "codejoin", "code": code, "stun": servers}), "the guest uses the code")
+        guest_code = ""
+        for _ in range(100):
+            both(a, b, {"cmd": "step"}, {"cmd": "step"})
+            guest_code = call(b, "status")["code"]
+            if guest_code:
+                break
+            time.sleep(0.02)
+        check(len(guest_code) == 23, "the guest gets its own code: " + guest_code)
+        check(call(a, "codeconnect", {"code": guest_code}), "the host takes the guest's code")
+        sa, sb = wait_running(a, b)
+        check(sa["link"] == "code" and sa["nat"] == "unknown" or sa["nat"] in ("cone", "symmetric"), "link: %s" % sa)
+        play(a, b, "code rollback", rollback=True)
+    finally:
+        a.close(); b.close()
+        stun.close()
+
+
+def sync_test(executable, leaky):
+    a, _ = pair(executable)
+    try:
+        check(call(a, "start", {"mode": "synctest", "frames": 6, "leaky": leaky}), "sync test starts")
+        for i in range(10):
+            successful(a, {"cmd": "step", "frames": 10, "actions": {"p1_move": 1 if i % 2 else -1, "p1_attack": i % 3 == 0,
+                                                                     "p2_attack": i % 4 == 1}})
+        s = call(a, "status")
+        p = props(successful(a, {"cmd": "observe"}))
+        check(s["rollbacks"] > 50 and s["resimulated"] >= 6 * s["rollbacks"], "sync test resimulates: %s" % s)
+        if leaky:
+            check(s["desync"], "the sync test catches state outside the tracked roots")
+        else:
+            check(not s["desync"] and p["ran"] == 100 and p["hits1"] == 4, "the sync test passes: %s %s" % (s, p))
+    finally:
+        a.close()
+
+
 def run(executable):
     server_port = free_port()
     server = subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent.parent / "tools/room_server/room_server.py"),
@@ -131,47 +309,13 @@ def run(executable):
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.5)
     try:
-        for relay in (False, True):
-            label = "relay" if relay else "punch"
-            with tempfile.TemporaryDirectory(prefix="pocket-net-a-") as da, tempfile.TemporaryDirectory(prefix="pocket-net-b-") as db:
-                write_project(Path(da)); write_project(Path(db))
-                a, b = Agent(executable, da), Agent(executable, db)
-                try:
-                    srv = "127.0.0.1:%d" % server_port
-                    check(call(a, "start", {"mode": "host", "server": srv, "relay": relay}), "host starts")
-                    room = ""
-                    for _ in range(100):
-                        successful(a, {"cmd": "step"})
-                        room = call(a, "status")["room"]
-                        if room:
-                            break
-                        time.sleep(0.02)
-                    check(len(room) == 4, label + ": room code issued")
-                    check(call(b, "start", {"mode": "join", "server": srv, "room": room, "relay": relay}), "guest starts")
-                    sa, sb = wait_running(a, b)
-                    check(sa["side"] == 1 and sb["side"] == 2 and sb["payload"] == "payload-42", label + ": sides and payload")
-                    sa, sb = play(a, b, label)
-                    check(sa["relay"] == relay and sb["relay"] == relay, label + ": relay mode as requested")
-                    call(a, "leave")
-                    for _ in range(20):
-                        successful(b, {"cmd": "step"})
-                        if call(b, "status")["state"] == "disconnected":
-                            break
-                        time.sleep(0.02)
-                    check(call(b, "status")["state"] == "disconnected", label + ": the guest sees the host leave")
-                finally:
-                    a.close(); b.close()
-        with tempfile.TemporaryDirectory(prefix="pocket-net-a-") as da, tempfile.TemporaryDirectory(prefix="pocket-net-b-") as db:
-            write_project(Path(da)); write_project(Path(db))
-            a, b = Agent(executable, da), Agent(executable, db)
-            try:
-                port = free_port()
-                check(call(a, "start", {"mode": "hostdirect", "port": port}), "direct host listens")
-                check(call(b, "start", {"mode": "joindirect", "address": "127.0.0.1:%d" % port}), "direct guest connects")
-                wait_running(a, b)
-                play(a, b, "direct")
-            finally:
-                a.close(); b.close()
+        room_server(executable, server_port, relay=False, rollback=False)
+        room_server(executable, server_port, relay=True, rollback=False)
+        room_server(executable, server_port, relay=False, rollback=True)
+        discovery(executable)
+        codes(executable)
+        sync_test(executable, leaky=False)
+        sync_test(executable, leaky=True)
     finally:
         server.terminate()
         server.wait(timeout=10)

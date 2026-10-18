@@ -8,10 +8,13 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
 #else
 #include <arpa/inet.h>
 #include <cerrno>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -25,12 +28,26 @@ std::string Address::ToString() const {
            std::to_string((ip >> 8) & 255) + "." + std::to_string(ip & 255) + ":" + std::to_string(port);
 }
 
+namespace {
+// Virtual LANs by their address ranges and adapter names.
+std::string InterfaceKind(const std::string &name, std::uint32_t ip) {
+    std::string lower;
+    for (char c : name) lower += static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+    if ((ip & 0xFFC00000u) == 0x64400000u || lower.find("tailscale") != std::string::npos) return "tailscale"; // 100.64.0.0/10
+    if (lower.find("zerotier") != std::string::npos || lower.rfind("zt", 0) == 0 || lower.rfind("feth", 0) == 0) return "zerotier";
+    if ((ip >> 24) == 26u || lower.find("radmin") != std::string::npos) return "radmin"; // Radmin VPN: 26.0.0.0/8
+    return "lan";
+}
+} // namespace
+
 #ifdef POCKET_NET_NONE
 
 std::optional<Address> Resolve(const std::string &, std::uint16_t) { return std::nullopt; }
 std::optional<std::uint32_t> LocalIPv4ForRoute(const Address &) { return std::nullopt; }
+std::vector<Interface> LocalInterfaces() { return {}; }
+std::string HostName() { return "web"; }
 UdpSocket::~UdpSocket() = default;
-bool UdpSocket::Open(std::uint16_t) { error_ = "netplay is not available on this platform"; return false; }
+bool UdpSocket::Open(std::uint16_t, bool) { error_ = "netplay is not available on this platform"; return false; }
 void UdpSocket::Close() {}
 bool UdpSocket::Send(const Address &, const void *, std::size_t) { return false; }
 std::optional<std::vector<std::uint8_t>> UdpSocket::Receive(Address &) { return std::nullopt; }
@@ -103,9 +120,62 @@ std::optional<std::uint32_t> LocalIPv4ForRoute(const Address &to) {
     return ip;
 }
 
+std::vector<Interface> LocalInterfaces() {
+    std::vector<Interface> out;
+#ifdef _WIN32
+    if (!EnsureStartup()) return out;
+    ULONG size = 16384;
+    std::vector<unsigned char> buffer(size);
+    auto *list = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
+    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    ULONG result = GetAdaptersAddresses(AF_INET, flags, nullptr, list, &size);
+    if (result == ERROR_BUFFER_OVERFLOW) {
+        buffer.resize(size);
+        list = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
+        result = GetAdaptersAddresses(AF_INET, flags, nullptr, list, &size);
+    }
+    if (result != NO_ERROR) return out;
+    for (auto *a = list; a; a = a->Next) {
+        if (a->OperStatus != IfOperStatusUp || a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+        std::string name;
+        for (const wchar_t *w = a->FriendlyName; w && *w; ++w) name += *w < 128 ? static_cast<char>(*w) : '?';
+        for (auto *u = a->FirstUnicastAddress; u; u = u->Next) {
+            if (u->Address.lpSockaddr->sa_family != AF_INET) continue;
+            const std::uint32_t ip = ntohl(reinterpret_cast<sockaddr_in *>(u->Address.lpSockaddr)->sin_addr.s_addr);
+            const int prefix = u->OnLinkPrefixLength;
+            const std::uint32_t mask = prefix <= 0 ? 0 : (prefix >= 32 ? 0xFFFFFFFFu : ~((1u << (32 - prefix)) - 1));
+            out.push_back({name, ip, ip | ~mask, InterfaceKind(name, ip)});
+        }
+    }
+#else
+    ifaddrs *list = nullptr;
+    if (getifaddrs(&list) != 0) return out;
+    for (ifaddrs *a = list; a; a = a->ifa_next) {
+        if (!a->ifa_addr || a->ifa_addr->sa_family != AF_INET) continue;
+        if (!(a->ifa_flags & IFF_UP) || (a->ifa_flags & IFF_LOOPBACK)) continue;
+        const std::uint32_t ip = ntohl(reinterpret_cast<sockaddr_in *>(a->ifa_addr)->sin_addr.s_addr);
+        std::uint32_t broadcast = ip;
+        if (a->ifa_netmask) broadcast = ip | ~ntohl(reinterpret_cast<sockaddr_in *>(a->ifa_netmask)->sin_addr.s_addr);
+        out.push_back({a->ifa_name ? a->ifa_name : "", ip, broadcast, InterfaceKind(a->ifa_name ? a->ifa_name : "", ip)});
+    }
+    freeifaddrs(list);
+#endif
+    return out;
+}
+
+std::string HostName() {
+    if (!EnsureStartup()) return "player";
+    char name[256] = {};
+    if (gethostname(name, sizeof(name) - 1) != 0 || !name[0]) return "player";
+    std::string out = name;
+    const auto dot = out.find(".local");
+    if (dot != std::string::npos) out.resize(dot);
+    return out;
+}
+
 UdpSocket::~UdpSocket() { Close(); }
 
-bool UdpSocket::Open(std::uint16_t port) {
+bool UdpSocket::Open(std::uint16_t port, bool shared) {
     Close();
     if (!EnsureStartup()) { error_ = "socket startup failed"; return false; }
     const SocketHandle s = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -117,6 +187,14 @@ bool UdpSocket::Open(std::uint16_t port) {
     if (s < 0) { error_ = LastSocketError(); return false; }
     fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
 #endif
+    const int on = 1;
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char *>(&on), sizeof(on));
+    if (shared) {
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&on), sizeof(on));
+#ifdef SO_REUSEPORT
+        setsockopt(s, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<const char *>(&on), sizeof(on));
+#endif
+    }
     sockaddr_in sa{};
     sa.sin_family = AF_INET;
     sa.sin_addr.s_addr = htonl(INADDR_ANY);
