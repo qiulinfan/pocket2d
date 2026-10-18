@@ -1,6 +1,7 @@
-# Netplay over Epic Online Services (planned)
+# Netplay over Epic Online Services (not pursued)
 
-Status: designed, not built. The EOS SDK is downloaded from the Epic Developer
+Status: designed, not built. 2026-10-18: the owner chose connection codes
+instead; this stays as the design if EOS is wanted later. The EOS SDK is downloaded from the Epic Developer
 Portal with the owner's account and is under Epic's license, so it cannot be
 fetched by CMake or committed to this public repository. This page is the plan
 for when the owner provides the SDK and the product's credentials.
