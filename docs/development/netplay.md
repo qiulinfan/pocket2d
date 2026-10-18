@@ -16,7 +16,8 @@ each tick only the players' action values cross the network. Code:
 | Sync: when a tick runs | lockstep, rollback, sync test | `Netplay.cpp` |
 | Game state for rollback | Lua graph snapshots of tracked roots | `LuaSnapshot.cpp` |
 
-Any link works with either sync mode. The engine loop calls
+Any link works with either sync mode. An Epic Online Services link is
+designed but waits for the SDK and credentials ([netplay-eos.md](netplay-eos.md)). The engine loop calls
 `Netplay::Tick(run_tick)`, which decides whether the tick runs and first
 resimulates corrected ticks.
 
