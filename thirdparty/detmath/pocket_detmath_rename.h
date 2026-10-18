@@ -50,6 +50,9 @@
 #if defined(_MSC_VER) && !defined(__clang__)
 #define OPENLIBM_COMPLEX_H
 #define complex
+/* MSVC emits no symbol for an extern __inline function (C99 inline), but
+   s_sin/s_cos/s_tan call __ieee754_rem_pio2 as an ordinary function. */
+#define __inline
 #endif
 
 /* The aliases (sinl for sin, ldexp for scalbn...) are not wanted, and their
