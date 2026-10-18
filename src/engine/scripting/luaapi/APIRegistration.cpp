@@ -35,6 +35,7 @@ void Initialize(lua_State *lua_state) {
     RegisterBuiltinComponentAPI();
     RegisterSaveAPI();
     RegisterInventoryAPI();
+    RegisterNetAPI();
 }
 
 // update the current engine pointer used by Lua APIs

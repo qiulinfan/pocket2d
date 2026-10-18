@@ -23,6 +23,7 @@ void RegisterRigidbodyAPI();
 void RegisterParticleSystemAPI();
 void RegisterSaveAPI();
 void RegisterInventoryAPI();
+void RegisterNetAPI();
 
 } // namespace APIRegistrationDetail
 

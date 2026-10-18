@@ -18,6 +18,7 @@ classes.
 | Events | `Event.*` |
 | Inventory | [`Inventory.Open`, native containers](inventory.md) |
 | Gameplay saves | [`Save.Write`, `Save.Read`](savegame.md) |
+| Netplay | [`Net.Host`, `Net.Join`, lockstep sessions](netplay.md) |
 | Physics | `Physics.*`, `Vector2`, `Collision`, `HitResult` |
 | Built-in components | `Transform`, `SpriteRenderer`, `Rigidbody`, `ParticleSystem`, [Tilemap](tilemap.md), [SpriteAnimation](sprite-animation.md) |
 

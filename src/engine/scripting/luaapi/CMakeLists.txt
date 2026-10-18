@@ -15,5 +15,6 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/SceneAPI.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SaveAPI.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InventoryAPI.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/NetAPI.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegistrationDetail.h"
 )

@@ -21,6 +21,8 @@ struct State {
     std::map<std::string, Action> actions;
     std::map<std::string, Value> agent;
     std::map<std::string, bool> held_at_frame_end;
+    bool net_active = false;
+    std::map<std::string, Value> net;
 };
 State &Current() { return World::Current().State<State>(); }
 
@@ -141,6 +143,23 @@ void SetAgentValues(const std::map<std::string, Value> &values) {
 }
 
 Value GetValue(const std::string &name) {
+    if (Current().net_active) {
+        const Action &action = Require(name);
+        const auto found = Current().net.find(name);
+        return found == Current().net.end() ? Value{} : Clamp(action.type, found->second);
+    }
+    return SampleLocal(name);
+}
+
+void SetNetValues(const std::map<std::string, Value> *values) {
+    auto &state = Current();
+    state.net_active = values != nullptr;
+    if (values) state.net = *values; else state.net.clear();
+}
+
+bool HasNetValues() { return Current().net_active; }
+
+Value SampleLocal(const std::string &name) {
     const Action &action = Require(name);
     Value bound;
     switch (action.type) {

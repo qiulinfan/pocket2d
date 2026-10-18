@@ -52,6 +52,13 @@ bool WasReleased(const std::string &name); // held at the previous frame end, no
 // Records held state for the next frame's edges; called at frame end.
 void EndFrame();
 
+// Netplay: while set, every action reads only these values (absent = released);
+// keys, mouse and agent values no longer reach gameplay. nullptr clears it.
+void SetNetValues(const std::map<std::string, Value> *values);
+bool HasNetValues();
+// Bound input and agent values, ignoring netplay: the local player's input.
+Value SampleLocal(const std::string &name);
+
 } // namespace ActionMap
 
 #endif
