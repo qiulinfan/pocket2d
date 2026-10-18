@@ -153,13 +153,16 @@ the same bits.
 - **Formatting and parsing** (`tostring`, `string.format`, `tonumber`) use the
   C library's correctly rounded `printf`/`strtod` (Apple libc, glibc, the
   Windows UCRT).
-- `tests/determinism_test.py` (CTest `determinism`) hashes 41,100 results of
-  float math, formatting, table order and sorting and compares them with the
-  recorded digest. The macOS arm64 build and the Linux x86_64 runtime kit
-  (GCC 14, glibc, run under qemu) produce the same digest. The Windows x64
-  build has not been run here: Wine does not start under qemu user emulation,
-  and a Rosetta-backed VM needs Rosetta on the host. Running CTest on Windows
-  (or `tests/determinism_test.py` with the Windows runtime) checks it.
+- **`math.log`** is replaced at startup (`APIRegistration.cpp`): Lua's own
+  computes `math.log(x, 2)` with `log2`, except where `luaconf.h` declares the
+  platform C89 (Windows), where it divides two logarithms, which differs in
+  the last bits.
+- `tests/determinism_test.py` (CTest `determinism`) hashes 2000 rounds of
+  float math, formatting, table order and sorting, one hash per operation, and
+  compares each with the recorded value, so a failure names the operation.
+  macOS arm64, the Linux x86_64 runtime kit (GCC 14, glibc, under qemu) and
+  Windows x64 (MSVC and llvm-mingw) agree; Windows differed only in `log2`
+  before the `math.log` replacement.
 - Engine-side math (Box2D, particles) still uses the platform's libm; games
   that use rollback keep their simulation in Lua.
 

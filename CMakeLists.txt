@@ -119,6 +119,7 @@ target_link_libraries(
         $<$<PLATFORM_ID:Windows>:iphlpapi>
     PRIVATE
         lua_runtime
+        pocket_detmath
 )
 game_engine_apply_cxx_warnings(engine_runtime)
 if(POCKET_ENABLE_TRACY)
