@@ -34,6 +34,12 @@ Returns the absolute path of the loaded project's resource root (the folder
 holding `game.config`). Trusted gameplay scripts can combine it with `io` and
 `load` to read data files on demand instead of loading them all at startup.
 
+### `Application.GetClipboardText() -> string` / `Application.SetClipboardText(text) -> bool`
+
+Read and write the system clipboard (for example to copy a netplay connection
+code). Headless runs have no clipboard: they read `""` and writing returns
+false.
+
 ### `Application.OpenURL(url)`
 
 Asks the host OS to open a URL with the default browser/app.
