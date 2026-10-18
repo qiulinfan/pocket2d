@@ -29,6 +29,10 @@ set(SDLMIXER_FLAC_LIBFLAC OFF CACHE BOOL "" FORCE)
 set(SDLMIXER_MP3_MPG123 OFF CACHE BOOL "" FORCE)
 set(SDLMIXER_OPUS OFF CACHE BOOL "" FORCE)
 set(SDLMIXER_VORBIS_VORBISFILE OFF CACHE BOOL "" FORCE)
+set(SDLMIXER_WAVPACK OFF CACHE BOOL "" FORCE)
+# SDL_mixer defaults to vendored codec sources with MSVC, which its release
+# archives do not include; every codec left on is built in (WAV, stb_vorbis, dr_mp3).
+set(SDLMIXER_VENDORED OFF CACHE BOOL "" FORCE)
 
 # Distribution runtimes (tools/build_runtime.py, for `pocket package`) carry
 # no dependency on libraries a player may lack: SDL_ttf builds its own
