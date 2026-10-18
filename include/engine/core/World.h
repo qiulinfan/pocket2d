@@ -54,7 +54,11 @@ private:
     static std::size_t NextSlotIndex();
     // Assigned during static initialization, so lookups need no guard.
     template <class T> static inline const std::size_t slot_index_ = NextSlotIndex();
+#if defined(_MSC_VER) && !defined(__clang__)
+    template <class T> __declspec(noinline) T &CreateState();
+#else
     template <class T> [[gnu::noinline]] T &CreateState();
+#endif
 
     std::uint64_t id_;
     std::vector<std::unique_ptr<SlotBase>> slots_;

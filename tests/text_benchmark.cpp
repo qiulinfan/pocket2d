@@ -17,6 +17,8 @@
 #include <vector>
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#elif defined(_WIN32)
+#include <windows.h>
 #endif
 
 namespace {
@@ -32,6 +34,12 @@ double ThreadCpuMs() {
     mach_port_deallocate(mach_task_self(), thread);
     return info.user_time.seconds * 1000.0 + info.user_time.microseconds / 1000.0 +
            info.system_time.seconds * 1000.0 + info.system_time.microseconds / 1000.0;
+#elif defined(_WIN32)
+    FILETIME creation, exit, kernel, user;
+    GetThreadTimes(GetCurrentThread(), &creation, &exit, &kernel, &user);
+    const auto ticks = [](const FILETIME &time) {
+        return (static_cast<unsigned long long>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
+    return (ticks(kernel) + ticks(user)) / 1e4;
 #else
     timespec now{};
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);

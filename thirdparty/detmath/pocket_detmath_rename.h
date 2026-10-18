@@ -40,6 +40,13 @@
 #define floorl pocket_det_floorl
 #define copysignl pocket_det_copysignl
 
+/* MSVC's C compiler has no C99 complex type: skip openlibm's complex header
+   (only the real functions are built; their complex declarations go unused). */
+#if defined(_MSC_VER) && !defined(__clang__)
+#define OPENLIBM_COMPLEX_H
+#define complex
+#endif
+
 /* The aliases (sinl for sin, ldexp for scalbn...) are not wanted, and their
    names would be stringified before renaming: define them away, after the
    header that defines them (its include guard keeps this). */

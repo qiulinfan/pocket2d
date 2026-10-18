@@ -57,6 +57,13 @@ def build(source):
     return {"protocol": source["protocol"], "description": source["description"], "commands": commands}
 
 
+
+def raw_pieces(text, delimiter):
+    """Adjacent raw string literals of at most 8000 characters each: MSVC caps a
+    single literal piece at about 16 KB (the concatenation may be longer)."""
+    pieces = [text[i:i + 8000] for i in range(0, len(text), 8000)] or [""]
+    return "\n    ".join("R\"" + delimiter + "(" + piece + ")" + delimiter + "\"" for piece in pieces)
+
 def header(schema):
     encoded = json.dumps(schema, ensure_ascii=True, separators=(",", ":"))
     delimiter = "POCKET_AGENT"
@@ -67,7 +74,7 @@ def header(schema):
             "#include <array>\n#include <string_view>\nnamespace PocketAgentProtocol {\n"
             "inline constexpr int kVersion = " + str(schema["protocol"]) + ";\n"
             "inline constexpr std::array<std::string_view, " + str(len(schema["commands"])) + "> kCommands{" + names + "};\n"
-            "inline constexpr std::string_view kSchemaJson = R\"" + delimiter + "(" + encoded + ")" + delimiter + "\";\n"
+            "inline constexpr std::string_view kSchemaJson = " + raw_pieces(encoded, delimiter) + ";\n"
             "} // namespace PocketAgentProtocol\n#endif\n")
 
 
