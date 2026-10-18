@@ -9,6 +9,12 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # CMake knows no C++26 flag for MSVC; its newest mode is /std:c++latest.
+    set(CMAKE_CXX_STANDARD 23)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/std:c++latest> $<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>
+                        $<$<COMPILE_LANGUAGE:C,CXX>:/utf-8>)
+endif()
 if(EMSCRIPTEN)   # Emscripten's EM_ASM (SDL uses it) needs the GNU dialects
     set(CMAKE_C_EXTENSIONS ON)
     set(CMAKE_CXX_EXTENSIONS ON)
