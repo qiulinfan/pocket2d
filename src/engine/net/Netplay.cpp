@@ -75,6 +75,7 @@ struct Session {
     std::uint32_t rollbacks = 0, resimulated = 0;
     int max_rollback_seen = 0;
     double advantage = 0.0;      // ticks ahead of the peer (smoothed)
+    double peer_advantage = 0.0; // the peer's own estimate
     int ticks_since_wait = 0;
     bool resimulating = false;
 
@@ -284,10 +285,18 @@ void StartSession() {
                          std::to_string(s.config.delay) + ", input " + std::to_string(s.input_size) + " bytes");
 }
 
-// Ticks whose state no longer changes: simulated with every real input.
+// Ticks whose state no longer changes: simulated with every real input (and
+// not waiting to be simulated again after a wrong prediction).
 std::uint32_t FinalFrame() {
     auto &s = S();
-    return std::min(s.remote_contiguous, s.frame);
+    return std::min({s.remote_contiguous, s.frame, s.rollback_to});
+}
+
+// A checksum is final once its tick (or, for state hashes, the ticks before
+// it) ran with every real input; only final ones are sent or compared.
+bool SumIsFinal(std::uint32_t key) {
+    const std::uint32_t f = key & ~kEngineSum;
+    return (key & kEngineSum) ? f <= FinalFrame() : f < FinalFrame();
 }
 
 void SendInput() {
@@ -299,6 +308,7 @@ void SendInput() {
     PutU32(b, s.last_remote_stamp);
     PutU32(b, s.last_remote_stamp_at ? static_cast<std::uint32_t>(NowMs() - s.last_remote_stamp_at) : 0);
     PutU32(b, s.frame);
+    b.push_back(static_cast<std::uint8_t>(static_cast<std::int8_t>(std::clamp(std::lround(s.advantage * 8.0), -127L, 127L))));
     std::uint32_t first = s.remote_acked;
     std::uint32_t last = s.local.empty() ? first : s.local.rbegin()->first + 1;
     if (last > first + kMaxFramesPerPacket) last = first + kMaxFramesPerPacket;
@@ -312,12 +322,9 @@ void SendInput() {
         b.insert(b.end(), found->second.begin(), found->second.end());
     }
     // The latest few checksums of final ticks.
-    const std::uint32_t final_frame = FinalFrame();
     std::vector<std::pair<std::uint32_t, std::uint32_t>> sums;
-    for (auto it = s.local_sums.rbegin(); it != s.local_sums.rend() && sums.size() < 4; ++it) {
-        const std::uint32_t f = it->first & ~kEngineSum;
-        if ((it->first & kEngineSum) ? f <= final_frame : f < final_frame) sums.emplace_back(it->first, it->second);
-    }
+    for (auto it = s.local_sums.rbegin(); it != s.local_sums.rend() && sums.size() < 4; ++it)
+        if (SumIsFinal(it->first)) sums.emplace_back(it->first, it->second);
     b.push_back(static_cast<std::uint8_t>(sums.size()));
     for (const auto &[f, v] : sums) { PutU32(b, f); PutU32(b, v); }
     s.link->Send(b);
@@ -337,7 +344,7 @@ void CompareSums() {
     auto &s = S();
     for (auto it = s.remote_sums.begin(); it != s.remote_sums.end();) {
         const auto mine = s.local_sums.find(it->first);
-        if (mine == s.local_sums.end()) { ++it; continue; }
+        if (mine == s.local_sums.end() || !SumIsFinal(it->first)) { ++it; continue; }
         if (mine->second != it->second) NoteDesync(it->first);
         it = s.remote_sums.erase(it);
     }
@@ -347,7 +354,7 @@ void CompareSums() {
 
 void HandleInput(const std::uint8_t *p, std::size_t n) {
     auto &s = S();
-    if (s.state != State::Running || n < 5 + 4 * 6 + 2) return;
+    if (s.state != State::Running || n < 5 + 4 * 6 + 3) return;
     if (s.side == 1) s.start_acked = true;
     const std::uint8_t *q = p + 5;
     const std::uint32_t ack = GetU32(q); q += 4;
@@ -355,6 +362,7 @@ void HandleInput(const std::uint8_t *p, std::size_t n) {
     const std::uint32_t echo = GetU32(q); q += 4;
     const std::uint32_t held = GetU32(q); q += 4;
     const std::uint32_t peer_frame = GetU32(q); q += 4;
+    s.peer_advantage = static_cast<std::int8_t>(*q++) / 8.0;
     const std::uint32_t first = GetU32(q); q += 4;
     const std::uint8_t count = *q++;
     const std::uint8_t size = *q++;
@@ -624,6 +632,14 @@ std::vector<FoundHost> FoundHosts() {
         out.push_back(h);
         ++it;
     }
+    // A host on this machine answers on loopback and on its LAN address: keep the LAN one.
+    auto port_of = [](const std::string &a) { return a.substr(a.rfind(':')); };
+    std::erase_if(out, [&](const FoundHost &h) {
+        if (h.address.rfind("127.", 0) != 0) return false;
+        return std::any_of(out.begin(), out.end(), [&](const FoundHost &o) {
+            return &o != &h && o.address.rfind("127.", 0) != 0 && o.name == h.name && port_of(o.address) == port_of(h.address);
+        });
+    });
     return out;
 }
 
@@ -702,6 +718,7 @@ void FinishTick() {
     while (!s.local.empty() && s.local.begin()->first + 1 < keep) s.local.erase(s.local.begin());
     while (!s.remote.empty() && s.remote.begin()->first + 1 < std::min(FinalFrame(), s.remote_contiguous)) s.remote.erase(s.remote.begin());
     while (!s.used_remote.empty() && s.used_remote.begin()->first < FinalFrame()) s.used_remote.erase(s.used_remote.begin());
+    CompareSums(); // checksums that became final
     SendInput();
 }
 
@@ -783,12 +800,13 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
     const std::uint32_t final_frame = FinalFrame();
     const auto oldest = s.frame >= static_cast<std::uint32_t>(Slots()) ? s.frame - static_cast<std::uint32_t>(Slots()) + 1 : 0;
     for (std::uint32_t f = (s.hashed_upto / kHashEvery + 1) * kHashEvery; f <= final_frame && f < s.frame; f += kHashEvery) {
-        if (f >= oldest && Hooks().hash) s.local_sums[f | kEngineSum] = Hooks().hash(Slot(f));
+        if (f >= oldest && Hooks().hash && s.config.compare_state) s.local_sums[f | kEngineSum] = Hooks().hash(Slot(f));
         s.hashed_upto = f;
     }
     if (!CanTick()) { ++s.stalls; return false; }
-    // Time sync: the side that runs ahead waits a tick now and then.
-    if (++s.ticks_since_wait >= 8 && s.advantage > 1.5) {
+    // Time sync (as GGPO): the side that runs ahead of the peer, by both
+    // sides' estimates, waits a tick now and then.
+    if (++s.ticks_since_wait >= 8 && (s.advantage - s.peer_advantage) / 2.0 >= 1.0) {
         s.ticks_since_wait = 0;
         s.advantage -= 1.0;
         ++s.stalls;

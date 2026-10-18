@@ -31,7 +31,8 @@ std::uint32_t GetU32(const std::uint8_t *p) {
 
 namespace {
 
-constexpr std::uint32_t kPunchFallbackMs = 3000; // room server: then relay
+constexpr std::uint32_t kPunchFallbackMs = 3000; // room server: then relay...
+constexpr int kPunchFallbackTries = 20;          // ...once that many punches went out (a stalled game sent none)
 constexpr std::uint32_t kServerTimeoutMs = 8000;
 constexpr std::uint32_t kDirectTimeoutMs = 15000;
 constexpr std::uint32_t kCodeTimeoutMs = 20000;
@@ -58,6 +59,7 @@ public:
     bool force_relay = false;
     std::uint32_t nonce = 0;
     std::uint64_t started = 0, last_server_send = 0, last_punch_send = 0, punch_started = 0;
+    int punches = 0;
     // LAN discovery (direct host).
     Net::UdpSocket discovery;
     DiscoveryInfo info;
@@ -97,6 +99,7 @@ public:
         PutU32(b, static_cast<std::uint32_t>(NowMs()));
         Send(b);
         last_punch_send = NowMs();
+        ++punches;
     }
 
     void Close() override {
@@ -113,6 +116,7 @@ public:
     void StartConnecting() {
         state = LinkState::Connecting;
         punch_started = NowMs();
+        punches = 0;
     }
 
     void SetPeer(const Net::Address &address) {
@@ -274,7 +278,8 @@ public:
             if (mode == Mode::Server && now - last_server_send > 2000) SendServerText("PK2 KEEP " + room);
             break;
         case LinkState::Connecting:
-            if (mode == Mode::Server && !relay && (force_relay || now - punch_started > kPunchFallbackMs)) {
+            if (mode == Mode::Server && !relay &&
+                (force_relay || (now - punch_started > kPunchFallbackMs && punches >= kPunchFallbackTries))) {
                 relay = true;
                 state = LinkState::Connected;
                 Log::Info("netplay", "punching failed; relaying through the room server");

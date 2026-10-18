@@ -37,7 +37,8 @@ previous frame held), so a resimulated tick sees the same edges.
 - **Room server.** The host sends `PK2 HOST` and gets a four-character room
   code (no O/0/I/1). The guest sends `PK2 JOIN <code>`; the server sends each
   side the other's public and LAN addresses. Both punch to both addresses for
-  3 s; if no direct packet arrives, traffic is relayed through the server
+  3 s (and at least 20 punches, so a stalled game does not give up early); if
+  no direct packet arrives, traffic is relayed through the server
   (`PK2R` frames). `force_relay` skips punching. Rooms expire after two minutes
   without traffic; no answer from the server for 8 s fails.
 - **Direct.** `HostDirect(port)` listens (default 27778) and its status `lan`
@@ -88,11 +89,15 @@ connection; BYE ends the session. Different input layouts fail with
   `Tick` restores that tick's slot and simulates the ticks up to now again
   (`run_tick(true)`): their draws are discarded and the audio API stays silent.
   A side may run at most `max_rollback` ticks past the peer's last confirmed
-  input, then it waits. Time sync: from the peer's frame and the ping each side
-  estimates how far it runs ahead; above 1.5 ticks it skips a tick at most
-  every 8 ticks. Checksums are only sent for final ticks (all real inputs).
-  Every 60 ticks the engine also hashes the final state snapshot and compares
-  it with the peer's (`desync_frame` names the tick).
+  input, then it waits. Time sync (as GGPO): from the peer's frame and the ping each side
+  estimates how far it runs ahead and sends the estimate; when half the
+  difference of the two estimates reaches a tick, the side ahead skips a tick
+  (at most every 8 ticks). Checksums are only sent for final ticks (all real inputs).
+  With `compare_state`, every 60 ticks the engine also hashes the final state
+  snapshot and compares it with the peer's (`desync_frame` names the tick);
+  that only works when the tracked state holds nothing local (settings, the
+  player's side, save data), so it is off by default and games report their
+  own checksums of the shared state.
 - **Sync test.** `Net.SyncTest(n)` runs offline with the local actions as
   input. Every tick it saves and hashes the state, then restores the state of
   `n` ticks ago and simulates them again, comparing every tick's hash with the

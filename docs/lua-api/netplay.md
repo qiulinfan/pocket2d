@@ -16,7 +16,7 @@ Net.HostDirect(0, "mode=team")        -- LAN: other machines find it with Net.Di
 
 | Function | Meaning |
 | --- | --- |
-| `Net.Configure{...}` | `local_prefix`: the local player's bindings (default `"p1_"`). `sides`: the action prefixes of side 1 (host) and side 2 (guest). `shared`: full action names both players drive. `mode`: `"lockstep"` (default) or `"rollback"`. `delay`: input delay in ticks, 1..15, or 0 to pick it from the measured round trip. `max_rollback`: how far rollback may run ahead of the peer's input (default 8). `force_relay`: always relay through the room server. `game`: the id LAN discovery matches. `name`: the host's name in discovery (default: the computer's name). `stun`: STUN servers for connection codes. `discovery_port` (default 27779). |
+| `Net.Configure{...}` | `local_prefix`: the local player's bindings (default `"p1_"`). `sides`: the action prefixes of side 1 (host) and side 2 (guest). `shared`: full action names both players drive. `mode`: `"lockstep"` (default) or `"rollback"`. `delay`: input delay in ticks, 1..15, or 0 to pick it from the measured round trip. `max_rollback`: how far rollback may run ahead of the peer's input (default 8). `compare_state`: also compare hashes of the whole tracked state with the peer (only when it holds nothing machine-local). `force_relay`: always relay through the room server. `game`: the id LAN discovery matches. `name`: the host's name in discovery (default: the computer's name). `stun`: STUN servers for connection codes. `discovery_port` (default 27779). |
 | `Net.Host(server, payload)` | Opens a room on the room server (`"host[:port]"`, default port 27777). `payload` (up to 1000 bytes) reaches the guest with the session. |
 | `Net.Join(server, room)` | Joins the room with that code. |
 | `Net.HostDirect(port, payload)` | Listens for a direct connection (port 0: 27778) and answers LAN discovery. |
@@ -29,7 +29,7 @@ Net.HostDirect(0, "mode=team")        -- LAN: other machines find it with Net.Di
 | `Net.Running()` | True while the session runs. |
 | `Net.IsResimulating()` | True while rollback simulates a tick again (skip effects that should happen once). |
 | `Net.Status()` | A table: `state` (`idle`, `server`, `waiting`, `connecting`, `running`, `disconnected`, `error`), `side` (1 host, 2 guest), `link` (`server`, `direct`, `code`, `synctest`), `mode`, `room`, `code`, `nat` (`cone`, `symmetric`, `unknown`), `error`, `payload`, `seed`, `ping` (ms, -1 unknown), `delay`, `relay`, `frame` (the tick being simulated), `stalls`, `rollbacks`, `resimulated`, `max_rollback_seen`, `desync`, `desync_frame`, `peer`, `lan` (a direct host's address). |
-| `Net.Checksum(frame, value)` | Reports a 32-bit hash of the game state at a tick; a mismatch with the peer's sets `desync`. With rollback the engine also compares state hashes itself. |
+| `Net.Checksum(frame, value)` | Reports a 32-bit hash of the game state at a tick; a mismatch with the peer's sets `desync`. With rollback only final ticks are compared. |
 
 The functions return true when the request started; failures leave the reason
 in `Net.Status().error`.

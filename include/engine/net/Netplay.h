@@ -37,6 +37,8 @@ struct Config {
     SyncMode mode = SyncMode::Lockstep;
     int delay = 3;                                 // input delay in ticks (1..15); 0: from the round trip
     int max_rollback = 8;                          // rollback: ticks run ahead of the peer's confirmed input
+    bool compare_state = false;                    // rollback: also compare whole state hashes with the peer
+                                                   // (only when everything tracked is shared, nothing local)
     bool force_relay = false;                      // room server: skip hole punching
     std::string game;                              // LAN discovery: only games with the same id see each other
     std::string name;                              // LAN discovery: the host's name (default: the computer's)

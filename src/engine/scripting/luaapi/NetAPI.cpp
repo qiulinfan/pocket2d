@@ -40,7 +40,7 @@ int OptInt(lua_State *L, int index, const char *field, int fallback) {
 }
 
 // Net.Configure{local_prefix, sides, shared, mode = "lockstep" | "rollback", delay (0: automatic),
-//               max_rollback, force_relay, game, name, stun, discovery_port}
+//               max_rollback, compare_state, force_relay, game, name, stun, discovery_port}
 int Configure(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
     Netplay::Config c;
@@ -52,6 +52,9 @@ int Configure(lua_State *L) {
     c.max_rollback = OptInt(L, 1, "max_rollback", c.max_rollback);
     lua_getfield(L, 1, "force_relay");
     c.force_relay = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, 1, "compare_state");
+    c.compare_state = lua_toboolean(L, -1);
     lua_pop(L, 1);
     c.game = OptString(L, 1, "game", c.game);
     c.name = OptString(L, 1, "name", c.name);
