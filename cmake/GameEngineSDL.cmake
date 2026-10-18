@@ -33,10 +33,11 @@ set(SDLMIXER_VORBIS_VORBISFILE OFF CACHE BOOL "" FORCE)
 # Distribution runtimes (tools/build_runtime.py, for `pocket package`) carry
 # no dependency on libraries a player may lack: SDL_ttf builds its own
 # FreeType (without HarfBuzz) and SDL_image decodes with its built-in stb
-# loaders instead of system libpng and libwebp.
+# loaders instead of system libpng and libwebp. Windows builds always do so:
+# Windows has no system FreeType or image libraries to find.
 option(POCKET_DISTRIBUTION "Build a self-contained runtime for packaged games" OFF)
 set(sdl3_ttf_patch "")
-if(POCKET_DISTRIBUTION OR EMSCRIPTEN)
+if(POCKET_DISTRIBUTION OR EMSCRIPTEN OR WIN32)
     set(SDLTTF_VENDORED ON CACHE BOOL "" FORCE)
     set(SDLTTF_HARFBUZZ OFF CACHE BOOL "" FORCE)
     set(SDLIMAGE_VENDORED OFF CACHE BOOL "" FORCE)

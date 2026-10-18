@@ -5,10 +5,12 @@ The verified local toolchain is Apple Clang 21 and CMake 4.4. Unsupported C++26
 compilers should fail configuration rather than silently lowering the standard.
 
 SDL 3.4.18, SDL_image 3.4.8, SDL_ttf 3.2.2 and SDL_mixer 3.2.4 are fetched from
-pinned official release tags. Development builds discover FreeType, HarfBuzz
-and PNG development libraries on the host; `-DPOCKET_DISTRIBUTION=ON` (used for
-runtime kits, see [packaging.md](packaging.md)) builds FreeType from a pinned
-release and decodes images with SDL_image's stb loaders instead. Box2D 3.1.1 is
+pinned official release tags. Development builds on macOS and Linux discover
+FreeType, HarfBuzz and PNG development libraries on the host;
+`-DPOCKET_DISTRIBUTION=ON` (used for runtime kits, see
+[packaging.md](packaging.md)), web builds and every Windows build instead build
+FreeType from a pinned release and decode images with SDL_image's stb loaders,
+so a Windows checkout needs only a compiler, CMake and Ninja. Box2D 3.1.1 is
 fetched from its release tag and linked statically; its CMake compiles it with
 `-ffp-contract=off` for deterministic math. CMake's normal
 `FETCHCONTENT_SOURCE_DIR_SDL3`, `_SDL3_IMAGE`, `_SDL3_TTF`, `_SDL3_MIXER` and
