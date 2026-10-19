@@ -23,6 +23,7 @@ with pixel-art sampling.
 | `Image.Draw(image_name, x, y[, key])` | Draws a world image with default pivot/tint |
 | `Image.DrawEx(image_name, x, y, rotation_degrees, scale_x, scale_y, pivot_x, pivot_y, r, g, b, a, sorting_order[, key[, blend]])` | Full world-space image draw |
 | `Image.DrawPixel(x, y, r, g, b, a)` | Queues a pixel draw |
+| `Image.SetSmoothing(smooth)` / `Image.GetSmoothing()` | Image files drawn scaled sample nearest (pixel art, the default) or, when smooth, linearly between pixels; applies to images already loaded. Dynamic images keep their own style. |
 
 `key`, a number or a string, names something drawn at a new place each tick (a
 player, an enemy, a projectile, a sky drawn at the camera). The standalone

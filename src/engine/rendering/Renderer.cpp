@@ -488,8 +488,9 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
     }
 
     // SDL3 defaults to linear filtering. World/UI image assets retain the
-    // engine's pixel-art sampling contract; text keeps its separate filtering.
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+    // engine's pixel-art sampling contract unless a game asks for smooth
+    // images; text keeps its separate filtering.
+    SDL_SetTextureScaleMode(texture, smooth_images ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 
     float texture_width = 0;
     float texture_height = 0;
@@ -652,6 +653,17 @@ SDL_Texture *Renderer::LoadTexture(const std::string &image_name,
 }
 
 // resource loading and draw queue entry points
+void Renderer::SetSmoothImages(bool smooth) {
+    if (smooth_images == smooth) return;
+    smooth_images = smooth;
+    for (auto &[name, cached] : image_cache) {
+        if (cached.texture == nullptr || cached.dynamic || cached.missing || name == kDefaultParticleTextureName) continue;
+        SDL_SetTextureScaleMode(cached.texture, smooth ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+    }
+}
+
+bool Renderer::SmoothImages() { return smooth_images; }
+
 void Renderer::QueueSceneImageDraw(const ImageDrawRequest &request) {
     if (ShouldDiscardSceneRequest(request)) return;
     Queues().scene_draw_requests.push_back(request);

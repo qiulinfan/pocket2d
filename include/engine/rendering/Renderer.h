@@ -157,6 +157,11 @@ public:
     static void SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba);
     static void SetDynamicImage(const std::string &name, int width, int height, std::vector<std::uint8_t> rgba,
                                 DynamicImageStyle style);
+    // Sampling of image files drawn scaled: nearest (the pixel-art default) or,
+    // when smooth, linear between pixels (as a player smooths bitmaps). Applies
+    // to images already loaded too; dynamic images keep their own style.
+    static void SetSmoothImages(bool smooth);
+    static bool SmoothImages();
     static void QueueSceneImageDraw(const ImageDrawRequest &request);
     static void QueueSceneParticleBatch(const ParticleBatchRequest &request);
     static void QueueUIImageDraw(const ImageDrawRequest &request);
@@ -217,6 +222,7 @@ private:
     static inline bool initialized = false;
     static inline std::filesystem::path::string_type image_cache_resources_root;
     static inline std::unordered_map<std::string, CachedImageTexture> image_cache;
+    static inline bool smooth_images = false;
     // InternImage id -> image_cache entry, filled on first use; render thread only.
     static inline std::vector<CachedImageTexture *> image_cache_by_id;
     static inline std::unordered_map<std::string, std::unordered_map<int, TTF_Font *>>

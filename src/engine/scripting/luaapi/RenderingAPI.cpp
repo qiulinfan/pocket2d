@@ -165,6 +165,10 @@ void CppImageDrawPixel(float x, float y, float r, float g, float b, float a) {
     Renderer::QueuePixelDraw(request);
 }
 
+// Image.SetSmoothing(smooth): image files drawn scaled sample linearly instead of nearest.
+void CppImageSetSmoothing(bool smooth) { Renderer::SetSmoothImages(smooth); }
+bool CppImageGetSmoothing() { return Renderer::SmoothImages(); }
+
 void InjectImageAPI() {
     luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Image")
@@ -175,6 +179,8 @@ void InjectImageAPI() {
         .addFunction("Draw", &CppImageDraw)
         .addFunction("DrawEx", &CppImageDrawEx)
         .addFunction("DrawPixel", &CppImageDrawPixel)
+        .addFunction("SetSmoothing", &CppImageSetSmoothing)
+        .addFunction("GetSmoothing", &CppImageGetSmoothing)
         .endNamespace();
 }
 

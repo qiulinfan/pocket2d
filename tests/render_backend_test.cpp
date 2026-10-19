@@ -321,6 +321,26 @@ void TestRuntime(Engine &engine, const std::string &backend,
         Check(near_pixel(Pixel(rotated.get(), 56, 56), 240, 20, 30) && near_pixel(Pixel(rotated.get(), 32, 32), 240, 20, 30),
               "a rotated transparent multiplied draw changes nothing");
     }
+    // Image files sample nearest by default; smooth images blend neighbouring pixels.
+    {
+        const auto draw_checker = [&]() {
+            ImageDrawRequest c;
+            c.image_name = "checker";
+            c.scale_x = c.scale_y = 4.0f;
+            Renderer::QueueUIImageDraw(c);
+            engine.RunSingleFrame(false);
+            return ReadTarget(renderer, engine.GetRuntimeRenderTarget());
+        };
+        const auto grey = [](std::array<Uint8, 4> p) { return p[0] > 40 && p[0] < 215; };
+        Surface sharp = draw_checker();
+        Check(!grey(Pixel(sharp.get(), 4, 2)) && !grey(Pixel(sharp.get(), 3, 2)), "nearest sampling keeps the image's pixels");
+        Renderer::SetSmoothImages(true);
+        Surface smooth = draw_checker();
+        Renderer::SetSmoothImages(false);
+        Check(grey(Pixel(smooth.get(), 4, 2)), "smooth images blend neighbouring pixels");
+        Surface again = draw_checker();
+        Check(!grey(Pixel(again.get(), 4, 2)), "images loaded while smooth sample nearest again");
+    }
     // Lua names the blend with the optional last argument.
     lua_State *state = luaL_newstate();
     luaL_openlibs(state);
