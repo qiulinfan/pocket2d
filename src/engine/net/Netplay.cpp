@@ -241,23 +241,23 @@ int DelayForRtt(int rtt_ms, SyncMode mode) {
     if (rtt_ms < 0) return mode == SyncMode::Rollback ? 2 : 4;
     const int ticks = static_cast<int>(std::ceil((rtt_ms / 2.0) / (1000.0 / 60.0)));
     // Lockstep hides the whole trip; rollback hides part of it and predicts the rest.
-    if (mode == SyncMode::Rollback) return std::clamp((ticks + 1) / 2, 1, 3);
+    // Snapshots are cheap enough that two ticks of delay suit any trip.
+    if (mode == SyncMode::Rollback) return std::clamp((ticks + 1) / 2, 1, 2);
     return std::clamp(ticks + 1, 2, 10);
 }
 
 void SendStart() {
     auto &s = S();
-    if (s.config.delay <= 0) {
-        s.config.delay = DelayForRtt(s.link->best_rtt, s.config.mode);
-        // Rollback over a long trip predicts further ahead: the window covers the one-way trip
-        // beyond the delay plus some jitter (at least the configured window, at most 15 ticks).
-        if (s.config.mode == SyncMode::Rollback && s.link->best_rtt >= 0) {
-            const int one_way = static_cast<int>(std::ceil((s.link->best_rtt / 2.0) / (1000.0 / 60.0)));
-            s.config.max_rollback = std::max(s.config.max_rollback, std::clamp(one_way - s.config.delay + 4, 8, 15));
-        }
+    if (s.config.delay <= 0) s.config.delay = DelayForRtt(s.link->best_rtt, s.config.mode);
+    // Rollback over a long trip predicts further ahead: the window covers the one-way trip
+    // beyond the delay plus some jitter (at least the configured window, at most 15 ticks).
+    if (s.config.mode == SyncMode::Rollback && s.link->best_rtt >= 0) {
+        const int one_way = static_cast<int>(std::ceil((s.link->best_rtt / 2.0) / (1000.0 / 60.0)));
+        s.config.max_rollback = std::max(s.config.max_rollback, std::clamp(one_way - s.config.delay + 4, 8, 15));
+    }
+    if (s.start_sends == 0)
         Log::Info("netplay", "round trip " + std::to_string(s.link->best_rtt) + " ms: input delay " +
                              std::to_string(s.config.delay) + ", rollback window " + std::to_string(s.config.max_rollback));
-    }
     auto b = Header(kStart);
     PutU32(b, s.seed);
     b.push_back(static_cast<std::uint8_t>(s.config.delay));
@@ -670,9 +670,9 @@ void Pump() {
     switch (s.state) {
     case State::Connecting:
         if (s.side == 1 && s.link->state == LinkState::Connected) {
-            // With an automatic delay, first time a few round trips.
+            // With an automatic delay, or for the rollback window, first time a few round trips.
             if (!s.measure_started) s.measure_started = now;
-            const bool measuring = s.config.delay <= 0 && s.start_sends == 0 && now - s.measure_started < kMeasureMs &&
+            const bool measuring = (s.config.delay <= 0 || s.config.mode == SyncMode::Rollback) && s.start_sends == 0 && now - s.measure_started < kMeasureMs &&
                                    s.link->rtt_samples < kMeasureSamples;
             if (measuring) {
                 if (now - s.last_probe > 50) { s.link->Probe(); s.last_probe = now; }
