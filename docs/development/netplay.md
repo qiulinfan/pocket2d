@@ -118,21 +118,38 @@ connection; BYE ends the session. Different input layouts fail with
   first run's. A mismatch means some state that gameplay depends on is not in
   the snapshots (or is not deterministic); `desync_frame` is the first tick
   that differed.
-- **Desync recovery (not implemented).** A desync is detected and reported,
-  never repaired. The planned repair: the host is authoritative. When the
-  checksums of final tick F differ, both sides stop advancing past F (as they
-  wait for input today) and the host sends its saved state of F. The guest
-  loads it and both simulate from F to the present with the confirmed inputs
-  they already hold, then resume. Open points: a `LuaSnapshot` slot refers to
-  the process's own tables and closures, so the state needs a portable form
-  (tables numbered in walk order with type-tagged values; a closure named by
-  its prototype's source and line, rebuilt with its upvalues), which also has
-  to cope with a guest whose object graph already differs in shape; the
-  transfer (its size for a real game is not measured yet) goes in numbered chunks
-  over the session's resent messages; engine-side state is outside the
-  snapshot as it is for rollback; and a game hook rebuilds what is derived
-  from the state (draw caches, sounds in flight). Until then a desynced
-  session ends with the desync shown, as now.
+- **Desync recovery.** The host is authoritative. When it notices a desync,
+  or the guest reports one (`kResyncAsk`), it exports its state of the latest
+  final tick F (restored from F's slot when F is behind the present tick) and
+  sends it in 1000-byte chunks (`kResync`) that the guest acknowledges with a
+  bitmap (`kResyncAck`); unacknowledged chunks go again after 1.5 round trips,
+  16 per pump. Checksums of ticks before F are no longer compared on either
+  side. The guest, once it has the state and has reached tick F, restores its
+  own snapshot of F (so the tables it keeps are of F too), imports the state,
+  simulates from F to its present with the inputs it holds (a correction, so
+  sounds follow the ledger) and tells the host it is done. Inputs of the last
+  300 ticks are kept for that resimulation; a guest that gets that far ahead
+  of F waits. A resync that does not finish in 20 s is given up, and after
+  five in a session a desync stays shown. In BVN at 150 ms each way with 2%
+  loss a resync is about 96 KB and takes about a second (`net_desync_test.py`).
+
+  The portable state (`LuaSnapshotPortable.cpp`) names every object by the
+  first path that reached it, breadth first from the roots: a key of a table
+  (a scalar key, or a key object named before it), a metatable or a closure's
+  upvalue. The importer finds the object on the same path in its own graph
+  (of the same kind; a closure with the same code) and only creates tables and
+  closures that have no match, so other references to them stay valid; then
+  it clears and refills every table and sets every upvalue. Functions travel
+  as the hash of their stripped bytecode plus their shape (lines, upvalues,
+  parameters): the importer makes a missing closure from a function of its
+  own process with the same code, and asks the host for the code it has
+  nowhere (a closure made from code it never ran). Static tables (and their
+  parts, found by a search below the static tables reached) and `Net.Local`
+  tables are named but never written, nor are userdata and C functions; pairs
+  keyed by those engine values (the bindings' class registry) belong to the
+  process and are neither sent nor cleared. Iteration order is the host's
+  insertion order, so `pairs` over a resynced table may differ from the
+  host's (as it may anyway between two processes).
 
 ## Rollback state
 
@@ -254,6 +271,11 @@ through `POCKET_NET_SERVER` or their own configuration.
   direct host found by LAN discovery, connection codes through a local STUN
   server with rollback, and the sync test (passing with all state tracked,
   failing on state outside the snapshots); sounds are played once, late ones
-  and cancellations happen with rollback, and both machines keep the same.
+  and cancellations happen with rollback, and both machines keep the same;
+  desync recovery in rollback and lockstep (each machine's state changed
+  inside a tick in turn, a closure of code the guest never ran, a `Net.Local`
+  table kept by each machine).
 - Games test their own sessions; BleachVsNaruto's `tools/net_test.py` plays
-  whole sessions, also over a local UDP proxy with added latency and loss.
+  whole sessions, also over a local UDP proxy with added latency and loss,
+  `tools/net_pace_test.py` runs two real-time peers over a slow link and
+  `tools/net_desync_test.py` repairs desyncs in a battle.

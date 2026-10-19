@@ -15,7 +15,10 @@
 namespace Netplay::detail {
 
 constexpr std::uint8_t kMagic[4] = {'P', 'K', 'N', '1'};
-enum PacketType : std::uint8_t { kPunch = 1, kPunchAck = 2, kStart = 3, kStartAck = 4, kInput = 5, kBye = 6 };
+enum PacketType : std::uint8_t {
+    kPunch = 1, kPunchAck = 2, kStart = 3, kStartAck = 4, kInput = 5, kBye = 6,
+    kResync = 7, kResyncAck = 8, kResyncAsk = 9, // desync recovery (Netplay.cpp)
+};
 constexpr std::uint16_t kServerPort = 27777;
 constexpr std::uint16_t kDirectPort = 27778;
 

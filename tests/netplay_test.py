@@ -36,6 +36,12 @@ PROBE = '''NetProbe = {
         force_relay = args.relay or false, game = "netprobe", name = args.name,
         discovery_port = args.dport, stun = args.stun}
       self.leaky = args.leaky or false
+      -- This machine's own (a resync leaves it), and state that only a portable
+      -- export carries well: closures made at run time, a table keyed by a table.
+      self.mine = {side = args.mode, ticks = 0}
+      Net.Local(self.mine)
+      self.fns, self.by = {}, {}
+      self.key = {name = "key"}
       Net.Track(self)
       if args.mode == "host" then return Net.Host(args.server, "payload-42")
       elseif args.mode == "join" then return Net.Join(args.server, args.room)
@@ -50,6 +56,12 @@ PROBE = '''NetProbe = {
       Net.Discover(true) return true
     elseif name == "hosts" then return Net.Hosts()
     elseif name == "status" then return Net.Status()
+    elseif name == "perturb" then
+      -- Desync recovery: this machine's state changes inside tick `at` (each time it is simulated).
+      if not PERTURB then PERTURB = {}; Net.Static(PERTURB) end
+      PERTURB[self.ran + (args.after or 10)] = args.by or 1000
+      return true
+    elseif name == "mine" then return self.mine
     elseif name == "leave" then Net.Leave() return true end
   end,
   OnUpdate = function(self)
@@ -71,6 +83,23 @@ PROBE = '''NetProbe = {
       LEAK.n = LEAK.n + 1
       self.hash = (self.hash + LEAK.n) % 2147483647
     end
+    if PERTURB and PERTURB[self.ran] then
+      self.x1 = self.x1 + PERTURB[self.ran]
+      -- A closure of code the other machine never ran: a resync from here sends that code.
+      local n = PERTURB[self.ran]
+      self.extra = function() return n % 97 end
+    end
+    if self.extra then self.hash = (self.hash + self.extra()) % 2147483647 end
+    self.mine.ticks = self.mine.ticks + 1
+    if self.ran % 20 == 0 then
+      local k = self.ran
+      self.fns[#self.fns + 1] = function() return k end
+      if #self.fns > 5 then table.remove(self.fns, 1) end
+      self.by[self.key] = (self.by[self.key] or 0) + 1
+    end
+    local sum = 0
+    for _, f in ipairs(self.fns) do sum = sum + f() end
+    self.hash = (self.hash + sum + (self.by[self.key] or 0)) % 2147483647
     if self.ran % 30 == 0 then Net.Checksum(self.ran, self.hash) end
   end }'''
 
@@ -106,7 +135,8 @@ def stepped(agent, req):
         req = dict(req, events=SOUND_EVENTS)
     response = successful(agent, req)
     if not hasattr(agent, "sounds"):
-        agent.sounds = []
+        agent.sounds, agent.logs = [], []
+    agent.logs += [d.get("message", "") for d in response.get("diagnostics", [])]
     agent.sounds += [(e["type"], e["payload"]) for e in response.get("events", [])]
     return response
 
@@ -423,6 +453,54 @@ def codes(executable):
         stun.close()
 
 
+def resync(executable, rollback):
+    """A desync (one machine's state changes inside a tick) is caught and repaired: the
+    host's state reaches the guest, both agree afterwards, local tables stay each one's."""
+    label = "resync" + (" rollback" if rollback else "")
+    a, b = pair(executable)
+    try:
+        port = free_port()
+        check(call(a, "start", {"mode": "hostdirect", "port": port, "rollback": rollback, "delay": 2}), "direct host listens")
+        check(call(b, "start", {"mode": "joindirect", "address": "127.0.0.1:%d" % port, "rollback": rollback}), "guest joins")
+        wait_running(a, b)
+        for i in range(4):
+            both(a, b, {"cmd": "step", "frames": 15, "actions": {"p1_move": 1, "p1_attack": i % 2 == 0}},
+                 {"cmd": "step", "frames": 15, "actions": {"p1_move": -1}})
+        for who, name in ((a, "host"), (b, "guest")):
+            before = call(b, "status")["resyncs"]
+            check(call(who, "perturb", {"after": 5}), label + ": " + name + " perturbed")
+            seen = False
+            for _ in range(200):
+                both(a, b, {"cmd": "step", "frames": 2, "actions": {"p1_move": 1}}, {"cmd": "step", "frames": 2, "actions": {}})
+                sa, sb = call(a, "status"), call(b, "status")
+                seen = seen or sa["desync"] or sb["desync"]
+                if sb["resyncs"] > before and sa["resyncs"] > before and not sa["desync"] and not sb["desync"]:
+                    break
+                time.sleep(0.005)
+            check(seen, label + ": " + name + " changed: the desync is seen")
+            check(sb["resyncs"] > before and not sb["desync"] and not sb["resync_error"],
+                  label + ": " + name + " changed: the guest loaded the host's state (%s)" % sb)
+            for _ in range(5):
+                both(a, b, {"cmd": "step", "frames": 5, "actions": {}}, {"cmd": "step", "frames": 5, "actions": {}})
+            for _ in range(60):
+                sa, sb = call(a, "status"), call(b, "status")
+                if sa["frame"] == sb["frame"]:
+                    break
+                stepped(a if sa["frame"] < sb["frame"] else b, {"cmd": "step", "actions": {}})
+            pa, pb = props(successful(a, {"cmd": "observe"})), props(successful(b, {"cmd": "observe"}))
+            keys = ("x1", "x2", "hits1", "hits2", "hash", "ran")
+            check(all(pa[k] == pb[k] for k in keys), label + ": " + name + " changed: both agree afterwards: %s / %s" % (pa, pb))
+            ma, mb = call(a, "mine"), call(b, "mine")
+            check(ma["side"] == "hostdirect" and mb["side"] == "joindirect" and mb["ticks"] > 0,
+                  label + ": local tables stay each machine's own: %s / %s" % (ma, mb))
+            if name == "host":
+                # The host's state holds a closure of code the guest never ran: it asks for that code.
+                check(any("code the guest lacks" in m for m in a.logs), label + ": the guest got code it lacked")
+            print("%s: %s changed, tick %d resynced (%d bytes)" % (label, name, sb["resync_frame"], sb["resync_bytes"]))
+    finally:
+        a.close(); b.close()
+
+
 def sync_test(executable, leaky):
     a, _ = pair(executable)
     try:
@@ -457,6 +535,8 @@ def run(executable):
         relay_choice(executable, server_port)
         discovery(executable)
         codes(executable)
+        resync(executable, rollback=True)
+        resync(executable, rollback=False)
         sync_test(executable, leaky=False)
         sync_test(executable, leaky=True)
     finally:

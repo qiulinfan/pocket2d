@@ -1,5 +1,6 @@
 #include "RegistrationDetail.h"
 #include "LuaSnapshot.h"
+#include "core/Log.h"
 #include "net/Netplay.h"
 #include "net/UdpSocket.h"
 #include "lua.hpp"
@@ -107,7 +108,8 @@ void SetBool(lua_State *L, const char *field, bool value) {
 // Net.Status() -> {state, side, link, mode, room, code, nat, error, payload, seed, ping, delay, relay, loss,
 //                  direct_ms, relay_ms,
 //                  frame, stalls, waits, rollbacks, resimulated, max_rollback_seen, slowest_rollback_ms,
-//                  desync, desync_frame, peer, lan}
+//                  desync, desync_frame, resyncing, resyncs, resync_frame, resync_bytes,
+//                  resync_error, peer, lan}
 int Status(lua_State *L) {
     const Netplay::Status s = Netplay::GetStatus();
     lua_createtable(L, 0, 27);
@@ -138,6 +140,11 @@ int Status(lua_State *L) {
     lua_setfield(L, -2, "slowest_rollback_ms");
     SetBool(L, "desync", s.desync);
     SetInt(L, "desync_frame", s.desync_frame);
+    SetBool(L, "resyncing", s.resyncing);
+    SetInt(L, "resyncs", s.resyncs);
+    SetInt(L, "resync_frame", s.resync_frame);
+    SetInt(L, "resync_bytes", s.resync_bytes);
+    SetString(L, "resync_error", s.resync_error);
     SetString(L, "peer", s.peer);
     SetString(L, "lan", s.lan);
     return 1;
@@ -197,15 +204,50 @@ int Static(lua_State *L) {
     return 0;
 }
 
+// Net.Local(table, ...): tables that are this machine's own (settings, which
+// side is local); a resync from the peer leaves them as they are.
+int Local(lua_State *L) {
+    for (int i = 1; i <= lua_gettop(L); ++i) LuaSnapshot::MarkLocal(L, i);
+    return 0;
+}
+
 // Net.Snapshot(slot, "save" | "load" | "hash" | "objects"): the rollback state by hand (tests).
+// Net.Snapshot(0, "export") -> data; Net.Snapshot(0, "import", data) -> {objects, created, unresolved} or nil, error:
+// the portable state of a resync.
 int Snapshot(lua_State *L) {
     const int slot = static_cast<int>(luaL_checkinteger(L, 1));
     const std::string what = luaL_optstring(L, 2, "save");
+    if (what == "export") {
+        const std::string data = LuaSnapshot::Export();
+        lua_pushlstring(L, data.data(), data.size());
+        return 1;
+    }
+    if (what == "import") {
+        std::size_t n = 0;
+        const char *p = luaL_checklstring(L, 3, &n);
+        std::string error;
+        LuaSnapshot::ImportStats stats;
+        if (!LuaSnapshot::Import(std::string(p, n), nullptr, error, &stats)) {
+            lua_pushnil(L);
+            lua_pushstring(L, error.c_str());
+            return 2;
+        }
+        lua_createtable(L, 0, 3);
+        SetInt(L, "objects", stats.objects);
+        SetInt(L, "created", stats.created);
+        SetInt(L, "unresolved", stats.unresolved);
+        return 1;
+    }
     if (what == "save") LuaSnapshot::Save(slot);
     else if (what == "load") LuaSnapshot::Load(slot);
     else if (what == "hash") { lua_pushinteger(L, LuaSnapshot::Hash(slot)); return 1; }
     else if (what == "objects") { lua_pushinteger(L, LuaSnapshot::Objects(slot)); return 1; }
     return 0;
+}
+
+LuaSnapshot::Dumps &LastExportCode() {
+    static LuaSnapshot::Dumps code;
+    return code;
 }
 
 } // namespace
@@ -225,6 +267,30 @@ void RegisterNetAPI() {
         },
         [](int slot) { LuaSnapshot::Load(slot); },
         [](int slot) { return LuaSnapshot::Hash(slot); },
+        // Desync recovery: the code of the last export's functions stays until the next one.
+        []() {
+            if (!LuaSnapshot::HasRoots()) {
+                lua_State *L = LuaState();
+                lua_pushglobaltable(L);
+                LuaSnapshot::Track(L, lua_gettop(L), lua_gettop(L));
+                lua_pop(L, 1);
+            }
+            LastExportCode().clear();
+            return LuaSnapshot::Export(&LastExportCode());
+        },
+        [](const std::string &state) { return LuaSnapshot::MissingCode(state); },
+        [](std::uint64_t hash) {
+            const auto found = LastExportCode().find(hash);
+            return found == LastExportCode().end() ? std::string() : found->second;
+        },
+        [](const std::string &state, const Netplay::Code &code, std::string &error) {
+            LuaSnapshot::ImportStats stats;
+            const LuaSnapshot::Dumps dumps(code.begin(), code.end());
+            if (!LuaSnapshot::Import(state, &dumps, error, &stats)) return false;
+            Log::Info("netplay", "resync: " + std::to_string(stats.objects) + " objects written, " + std::to_string(stats.created) +
+                                 " new, " + std::to_string(stats.unresolved) + " not found");
+            return true;
+        },
     });
     luabridge::getGlobalNamespace(LuaState())
         .beginNamespace("Net")
@@ -247,6 +313,7 @@ void RegisterNetAPI() {
         .addFunction("LocalAddresses", &LocalAddresses)
         .addFunction("Track", &Track)
         .addFunction("Static", &Static)
+        .addFunction("Local", &Local)
         .addFunction("Snapshot", &Snapshot)
         .endNamespace();
 }

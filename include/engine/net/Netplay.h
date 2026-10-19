@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Two-player netplay on a deterministic simulation: each tick only the
@@ -75,6 +76,13 @@ struct Status {
     double slowest_rollback_ms = 0;    // rollback: the longest correction (restore and resimulation)
     bool desync = false;
     std::uint32_t desync_frame = 0;
+    // Desync recovery: the host sends its state of a final tick, the guest
+    // loads it and simulates again from there (StateHooks export / import).
+    bool resyncing = false;
+    std::uint32_t resyncs = 0;         // completed
+    std::uint32_t resync_frame = 0;    // the tick of the last one
+    std::uint32_t resync_bytes = 0;    // its size
+    std::string resync_error;
     std::string peer;          // peer address
     std::string lan;           // direct host: the address the guest enters
 };
@@ -131,10 +139,18 @@ bool Resimulating();
 double TickRate();
 
 // Rollback state: save to and restore from numbered slots, and hash a slot.
+// Desync recovery: the live state in a portable form (functions as hashes of
+// their code), the code hashes an importer lacks, the code of a hash (from the
+// last export), and loading a portable state with the code it lacked.
+using Code = std::unordered_map<std::uint64_t, std::string>;
 struct StateHooks {
     std::function<void(int slot)> save;
     std::function<void(int slot)> load;
     std::function<std::uint32_t(int slot)> hash;
+    std::function<std::string()> export_state;
+    std::function<std::vector<std::uint64_t>(const std::string &state)> missing_code;
+    std::function<std::string(std::uint64_t hash)> code;
+    std::function<bool(const std::string &state, const Code &code, std::string &error)> import_state;
 };
 void SetStateHooks(StateHooks hooks);
 

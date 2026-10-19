@@ -9,6 +9,7 @@ Net.Configure{local_prefix = "p1_", sides = {"p1_", "p2_"}, shared = {"confirm",
               mode = "rollback", delay = 0, game = "my_game"}
 Net.Track(self)                       -- rollback: the state to save (default: the global table)
 Net.Static(LEVEL_DATA)                -- data that never changes, left out of snapshots
+Net.Local(SETTINGS)                   -- this machine's own: a resync from the host leaves it
 Net.HostDirect(0, "mode=team")        -- LAN: other machines find it with Net.Discover
 ```
 
@@ -28,8 +29,8 @@ Net.HostDirect(0, "mode=team")        -- LAN: other machines find it with Net.Di
 | `Net.Leave()` | Ends the session or leaves the room; the peer sees `disconnected`. |
 | `Net.Running()` | True while the session runs. |
 | `Net.IsResimulating()` | True while rollback simulates a tick again (skip effects that should happen once). |
-| `Net.Status()` | A table: `state` (`idle`, `server`, `waiting`, `connecting`, `running`, `disconnected`, `error`), `side` (1 host, 2 guest), `link` (`server`, `direct`, `code`, `synctest`), `mode`, `room`, `code`, `nat` (`cone`, `symmetric`, `unknown`), `error`, `payload`, `seed`, `ping` (ms, -1 unknown; before the session starts, the best probe's), `loss` (share of recent probes lost, 0..1, -1 until measured), `direct_ms` and `relay_ms` (the best round trip of each path, -1 unmeasured; the relay only with a room server), `delay`, `relay`, `frame` (the tick being simulated), `stalls`, `waits` (rollback time sync), `rollbacks`, `resimulated`, `max_rollback_seen`, `slowest_rollback_ms`, `desync`, `desync_frame`, `peer`, `lan` (a direct host's address). |
-| `Net.Checksum(frame, value)` | Reports a 32-bit hash of the game state at a tick; a mismatch with the peer's sets `desync`. With rollback only final ticks are compared. |
+| `Net.Status()` | A table: `state` (`idle`, `server`, `waiting`, `connecting`, `running`, `disconnected`, `error`), `side` (1 host, 2 guest), `link` (`server`, `direct`, `code`, `synctest`), `mode`, `room`, `code`, `nat` (`cone`, `symmetric`, `unknown`), `error`, `payload`, `seed`, `ping` (ms, -1 unknown; before the session starts, the best probe's), `loss` (share of recent probes lost, 0..1, -1 until measured), `direct_ms` and `relay_ms` (the best round trip of each path, -1 unmeasured; the relay only with a room server), `delay`, `relay`, `frame` (the tick being simulated), `stalls`, `waits` (rollback time sync), `rollbacks`, `resimulated`, `max_rollback_seen`, `slowest_rollback_ms`, `desync`, `desync_frame`, `resyncing`, `resyncs` (desyncs repaired), `resync_frame` and `resync_bytes` (of the latest), `resync_error`, `peer`, `lan` (a direct host's address). |
+| `Net.Checksum(frame, value)` | Reports a 32-bit hash of the game state at a tick; a mismatch with the peer's sets `desync`. With rollback only final ticks are compared. A desync is repaired at once: the host sends its tracked state of a final tick, the guest loads it and simulates again to the present, and `desync` clears (`resyncs` counts; after five in a session it stays shown). |
 
 The functions return true when the request started; failures leave the reason
 in `Net.Status().error`.
@@ -47,8 +48,9 @@ in `Net.Status().error`.
 | Function | Meaning |
 | --- | --- |
 | `Net.Track(root, ...)` | The roots of the rollback state: everything reachable from them is saved before each tick and restored in place when a prediction was wrong. Without arguments: the global table. |
-| `Net.Static(table, ...)` | Tables that never change (game data). They are left out of snapshots; changing one breaks rollback. |
-| `Net.Snapshot(slot, what)` | By hand (tests): `"save"`, `"load"`, `"hash"` or `"objects"`. |
+| `Net.Static(table, ...)` | Tables that never change (game data). They are left out of snapshots; changing one breaks rollback. Their parts count as static too. |
+| `Net.Local(table, ...)` | Tables that are this machine's own (options, which side is local, save data). Rolled back like the rest, but a resync from the host leaves them as they are (at the resynced tick). Mark them before the session starts. |
+| `Net.Snapshot(slot, what)` | By hand (tests): `"save"`, `"load"`, `"hash"` or `"objects"`; `Net.Snapshot(0, "export")` returns the tracked state in the portable form a resync sends, and `Net.Snapshot(0, "import", data)` loads it (`{objects, created, unresolved}`, or nil and an error). |
 
 While `Net.Running()` is true, `Input.GetAction*` for the synced actions return
 the session's values on both machines (side prefix + the player's input), and
