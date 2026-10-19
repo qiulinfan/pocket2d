@@ -49,7 +49,7 @@ std::string ToSDLNameCandidate(const std::string &value) {
 }
 
 bool ShouldLogInputDiagnostics() {
-    return std::getenv("ENGINE_LOG_INPUT") != nullptr;
+    return SDL_getenv("ENGINE_LOG_INPUT") != nullptr;
 }
 
 void LogKeyboardEvent(const SDL_KeyboardEvent &event, SDL_Scancode resolved_key) {

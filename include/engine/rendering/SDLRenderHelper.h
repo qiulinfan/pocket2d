@@ -106,7 +106,7 @@ inline static RenderLoggerStatus render_logger_mode_ = RenderLoggerStatus::NotIn
     inline static std::ofstream render_logging_file_;
 
     static bool IsEnvVariableSet(const char *name) {
-        const char *value = std::getenv(name);
+        const char *value = SDL_getenv(name);
         return value != nullptr;
     }
 

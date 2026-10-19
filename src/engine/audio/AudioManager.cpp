@@ -33,7 +33,7 @@ bool StartTrack(MIX_Track *track, MIX_Audio *audio, int loops) {
 }
 
 bool ShouldLogAudioDiagnostics() {
-    return std::getenv("ENGINE_LOG_AUDIO") != nullptr;
+    return SDL_getenv("ENGINE_LOG_AUDIO") != nullptr;
 }
 
 void LogPlaybackFailure(const char *kind, const std::string &audio_name,

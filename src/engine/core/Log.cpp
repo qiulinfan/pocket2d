@@ -1,5 +1,6 @@
 #include "core/Log.h"
 #include "core/World.h"
+#include "SDL3/SDL_stdinc.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,7 +16,7 @@ struct LogState {
 
 bool JsonLines() {
     static const bool enabled = [] {
-        const char *format = std::getenv("POCKET_LOG_FORMAT");
+        const char *format = SDL_getenv("POCKET_LOG_FORMAT");
         return format != nullptr && std::strcmp(format, "jsonl") == 0;
     }();
     return enabled;

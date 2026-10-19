@@ -101,15 +101,15 @@ bool PrepareScene(const SceneFormat::SceneAsset &asset,
 }
 
 bool ShouldLogSceneDiagnostics() {
-    return std::getenv("ENGINE_LOG_SCENE_STATS") != nullptr;
+    return SDL_getenv("ENGINE_LOG_SCENE_STATS") != nullptr;
 }
 
 bool ShouldLogPerformanceDiagnostics() {
-    return std::getenv("ENGINE_LOG_PERF") != nullptr;
+    return SDL_getenv("ENGINE_LOG_PERF") != nullptr;
 }
 
 bool ShouldLogRendererDiagnostics() {
-    return std::getenv("ENGINE_LOG_RENDERER") != nullptr;
+    return SDL_getenv("ENGINE_LOG_RENDERER") != nullptr;
 }
 
 std::string ToLowerASCII(std::string value) {
@@ -119,7 +119,7 @@ std::string ToLowerASCII(std::string value) {
 }
 
 std::string ReadEnvironmentString(const char *name) {
-    const char *value = std::getenv(name);
+    const char *value = SDL_getenv(name);
     return value == nullptr ? "" : value;
 }
 
