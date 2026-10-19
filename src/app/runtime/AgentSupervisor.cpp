@@ -280,7 +280,7 @@ public:
                         throw WorkerFailure("worker_exit", "worker exited or closed its command pipe");
                 }
             }
-            Pump();
+            const bool received = Pump();
             const auto newline = buffer_.find('\n');
             if (newline != std::string::npos) {
                 std::string response = buffer_.substr(0, newline);
@@ -313,7 +313,9 @@ public:
                 throw WorkerFailure("worker_exit", "worker exited before responding (exit " +
                                       std::to_string(exit_code) + ")");
             }
-            SDL_Delay(1);
+            // Sleep only while the worker is quiet: on Windows a sleep lasts a
+            // whole timer tick, which would throttle draining a large response.
+            if (!received) SDL_Delay(1);
         }
     }
 
@@ -348,9 +350,11 @@ public:
     }
 
 private:
-    void Pump() {
-        if (output_ == nullptr) return;
+    // Returns whether any worker output arrived.
+    bool Pump() {
+        if (output_ == nullptr) return false;
         char chunk[8192];
+        bool received = false;
         // A noisy child cannot keep this loop running past the outer deadline.
         for (int iteration = 0; iteration < 8; ++iteration) {
             const std::size_t count = SDL_ReadIO(output_, chunk, sizeof(chunk));
@@ -358,12 +362,14 @@ private:
                 const SDL_IOStatus status = SDL_GetIOStatus(output_);
                 if (status == SDL_IO_STATUS_ERROR)
                     throw WorkerFailure("worker_io_error", "failed to read worker output");
-                return;
+                return received;
             }
             if (count > response_limit_ - std::min(response_limit_, buffer_.size()))
                 throw WorkerFailure("worker_response_limit", "worker response exceeded its size limit");
             buffer_.append(chunk, count);
+            received = true;
         }
+        return received;
     }
 
     SDL_Process *process_ = nullptr;
