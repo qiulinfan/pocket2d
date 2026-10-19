@@ -118,6 +118,21 @@ connection; BYE ends the session. Different input layouts fail with
   first run's. A mismatch means some state that gameplay depends on is not in
   the snapshots (or is not deterministic); `desync_frame` is the first tick
   that differed.
+- **Desync recovery (not implemented).** A desync is detected and reported,
+  never repaired. The planned repair: the host is authoritative. When the
+  checksums of final tick F differ, both sides stop advancing past F (as they
+  wait for input today) and the host sends its saved state of F. The guest
+  loads it and both simulate from F to the present with the confirmed inputs
+  they already hold, then resume. Open points: a `LuaSnapshot` slot refers to
+  the process's own tables and closures, so the state needs a portable form
+  (tables numbered in walk order with type-tagged values; a closure named by
+  its prototype's source and line, rebuilt with its upvalues), which also has
+  to cope with a guest whose object graph already differs in shape; the
+  transfer (its size for a real game is not measured yet) goes in numbered chunks
+  over the session's resent messages; engine-side state is outside the
+  snapshot as it is for rollback; and a game hook rebuilds what is derived
+  from the state (draw caches, sounds in flight). Until then a desynced
+  session ends with the desync shown, as now.
 
 ## Rollback state
 
