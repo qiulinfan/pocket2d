@@ -116,8 +116,9 @@ bool Running();
 bool CanTick();
 // Runs the session's next tick through `run_tick(resimulating)`, first
 // resimulating corrected ticks (rollback). Returns false when the tick has to
-// wait (counted as a stall). Draws and sounds of resimulated ticks are the
-// caller's and the audio API's to drop.
+// wait (counted as a stall). Draws of resimulated ticks are the caller's to
+// drop; the audio API follows the ticks (SetTickObserver) to play each sound
+// once.
 bool Tick(const std::function<void(bool resimulating)> &run_tick);
 bool Resimulating();
 // Rollback time sync for a caller that runs ticks on a real-time clock: the
@@ -133,6 +134,17 @@ struct StateHooks {
     std::function<std::uint32_t(int slot)> hash;
 };
 void SetStateHooks(StateHooks hooks);
+
+// Effects outside the rolled-back state (sounds) follow the ticks: told when
+// each session tick starts and finishes (resimulated or not), and around a
+// correction that simulates ticks [from, to) again (`to` is the present tick).
+struct TickObserver {
+    std::function<void(std::uint32_t frame, bool resimulating)> tick_started;
+    std::function<void()> tick_finished;
+    std::function<void(std::uint32_t from, std::uint32_t to)> correction_started;
+    std::function<void()> correction_finished;
+};
+void SetTickObserver(TickObserver observer);
 
 // Game state hashes compared between the peers (desync detection).
 void ReportChecksum(std::uint32_t frame, std::uint32_t value);

@@ -3,6 +3,7 @@
 
 #include <SDL3_mixer/SDL_mixer.h>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 
@@ -25,6 +26,14 @@ public:
 
     static void PlayAudioClip(const std::string &audio_name, int channel,
                               int loops);
+    // A voice: the clip on a free channel (`channel` when free), at a gain
+    // (0..1), from `start_ms` in. The handle names this playback only, so
+    // stopping it later leaves a newer sound on the channel alone. -1 when
+    // nothing plays.
+    static std::int64_t PlayVoice(const std::string &audio_name, int channel, int loops, float gain, int start_ms);
+    static void StopVoice(std::int64_t voice, int fade_ms);
+    static bool IsVoicePlaying(std::int64_t voice);
+    static void SetVoiceGain(std::int64_t voice, float gain);
     static void PlayMusicTrack(const std::string &audio_name, int loops);
     static void HaltChannel(int channel);
     static void SetVolume(int channel, int volume);
@@ -59,7 +68,10 @@ private:
 
     static inline bool mixer_library_initialized = false;
     static inline MIX_Mixer *mixer = nullptr;
+    static MIX_Track *VoiceTrack(std::int64_t voice);
+
     static inline std::array<MIX_Track *, 64> channels{};
+    static inline std::array<std::uint32_t, 64> channel_serials{}; // playbacks started per channel
     static inline MIX_Track *music_track = nullptr;
 
     // loaded audio cache

@@ -88,7 +88,8 @@ connection; BYE ends the session. Different input layouts fail with
   `max_rollback + 2` slots (with the world frame number). When the peer's real
   input for an already simulated tick differs from the prediction, the next
   `Tick` restores that tick's slot and simulates the ticks up to now again
-  (`run_tick(true)`): their draws are discarded and the audio API stays silent.
+  (`run_tick(true)`): their draws are discarded and their sounds go through the
+  sound ledger (below).
   A side may run at most `max_rollback` ticks past the peer's last confirmed
   input, then it waits. Time sync (as GGPO): from the peer's frame and the ping each side
   estimates how far it runs ahead and sends the estimate; when half the
@@ -128,6 +129,32 @@ in the status is the longest correction (restore plus resimulation). Not covered
 engine-side state (actors, physics bodies, event subscriptions, particles),
 userdata contents (kept as values) and coroutines. Games that use rollback
 keep their simulation in Lua and check it with the sync test.
+
+## Sounds across corrections
+
+Session ticks play sound effects through a `SoundLedger`
+(`src/engine/audio/SoundLedger.cpp`), told by `Netplay::SetTickObserver` when
+each tick starts and finishes and around each correction. As in GGPO games,
+every request is keyed by its tick, its clip and how many requests of that clip
+came before it in the tick:
+
+- a resimulated tick that asks for a sound it already played does not play it
+  again;
+- a sound that first appears in a correction (the prediction missed the hit)
+  plays at once, from its start while it is at most 6 ticks late, and that far
+  into the clip after that, so long sounds stay in time with the picture;
+- a sound of a corrected tick that the correction did not ask for again was
+  mispredicted: it fades out over 40 ms.
+
+Effects then play as voices on a free mixer channel (the asked one when it is
+free), so a late sound cannot cut off one already playing; the game's channel
+numbers keep their gain (`Audio.SetVolume`) and name their latest voice for
+`Audio.Halt`, `Audio.IsPlaying` and later gain changes. A halt in a resimulated
+tick is ignored. Music is level triggered: a correction's last `Music.Play` /
+`Music.Halt` is applied when it ends. Requests older than 64 ticks are
+forgotten. Agents see `audio.play` events with `tick`, `nth` and `late`, and
+`audio.cancel` for mispredicted sounds; `tests/netplay_test.py` checks that both
+machines end up with the same sounds, each played once.
 
 ## Determinism requirements
 
@@ -195,12 +222,13 @@ through `POCKET_NET_SERVER` or their own configuration.
 ## Tests
 
 - `tests/netplay_unit_test.cpp` (CTest `netplay_unit`): connection codes
-  (round trip, typos), STUN messages, and Lua snapshots (in-place restore,
-  identity, upvalues, static tables, hashes).
+  (round trip, typos), STUN messages, Lua snapshots (in-place restore,
+  identity, upvalues, static tables, hashes) and the sound ledger.
 - `tests/netplay_test.py` (CTest `netplay`): two headless runtimes through a
   local room server (punching, forced relay, rollback with corrections), a
   direct host found by LAN discovery, connection codes through a local STUN
   server with rollback, and the sync test (passing with all state tracked,
-  failing on state outside the snapshots).
+  failing on state outside the snapshots); sounds are played once, late ones
+  and cancellations happen with rollback, and both machines keep the same.
 - Games test their own sessions; BleachVsNaruto's `tools/net_test.py` plays
   whole sessions, also over a local UDP proxy with added latency and loss.

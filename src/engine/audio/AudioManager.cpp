@@ -21,11 +21,12 @@ std::unordered_set<std::string> g_audio_warning_keys;
 int g_audio_resource_warning_count = 0;
 std::string g_audio_last_resource_warning;
 
-bool StartTrack(MIX_Track *track, MIX_Audio *audio, int loops) {
+bool StartTrack(MIX_Track *track, MIX_Audio *audio, int loops, int start_ms = 0) {
     const SDL_PropertiesID options = SDL_CreateProperties();
     if (options == 0) return false;
     const bool configured = SDL_SetNumberProperty(
-        options, MIX_PROP_PLAY_LOOPS_NUMBER, loops < 0 ? -1 : loops);
+        options, MIX_PROP_PLAY_LOOPS_NUMBER, loops < 0 ? -1 : loops) &&
+        (start_ms <= 0 || SDL_SetNumberProperty(options, MIX_PROP_PLAY_START_MILLISECOND_NUMBER, start_ms));
     const bool started = configured && MIX_SetTrackAudio(track, audio) &&
                          MIX_PlayTrack(track, options);
     SDL_DestroyProperties(options);
@@ -285,14 +286,66 @@ void AudioManager::PlayAudioClip(const std::string &audio_name, int channel,
     if (channel == -1) {
         const auto free_channel = std::find_if(channels.begin(), channels.end(),
             [](MIX_Track *candidate) { return !MIX_TrackPlaying(candidate); });
-        if (free_channel != channels.end()) track = *free_channel;
-    } else if (channel >= 0 && channel < static_cast<int>(channels.size())) {
+        if (free_channel != channels.end()) channel = static_cast<int>(free_channel - channels.begin());
+    }
+    if (channel >= 0 && channel < static_cast<int>(channels.size())) {
         track = channels[static_cast<std::size_t>(channel)];
+        ++channel_serials[static_cast<std::size_t>(channel)]; // ends the channel's voice
     }
     if (track != nullptr && StartTrack(track, chunk, loops)) return;
     if (track == nullptr) SDL_SetError("No available audio channel");
     ++audio_play_failure_count;
     LogPlaybackFailure("audio", audio_name, audio_play_failure_count);
+}
+
+// A voice handle is the channel and its start serial: it names one playback,
+// which a newer sound on the same channel ends.
+std::int64_t AudioManager::PlayVoice(const std::string &audio_name, int channel, int loops, float gain, int start_ms) {
+    if (!UsesAudioOutput()) return -1;
+    if (!initialized || !playback_enabled) return -1;
+    MIX_Audio *chunk = LoadAudioClip(audio_name);
+    if (chunk == nullptr) {
+        ++audio_play_failure_count;
+        return -1;
+    }
+    const auto count = static_cast<int>(channels.size());
+    int index = channel >= 0 && channel < count && !MIX_TrackPlaying(channels[static_cast<std::size_t>(channel)]) ? channel : -1;
+    for (int i = 0; i < count && index < 0; ++i)
+        if (!MIX_TrackPlaying(channels[static_cast<std::size_t>(i)])) index = i;
+    if (index < 0) index = channel >= 0 && channel < count ? channel : 0; // all busy: as Play, take the asked channel
+    const auto i = static_cast<std::size_t>(index);
+    const std::uint32_t serial = ++channel_serials[i];
+    MIX_SetTrackGain(channels[i], std::clamp(gain, 0.0f, 1.0f));
+    if (!StartTrack(channels[i], chunk, loops, start_ms)) {
+        ++audio_play_failure_count;
+        LogPlaybackFailure("audio", audio_name, audio_play_failure_count);
+        return -1;
+    }
+    return static_cast<std::int64_t>(serial) << 8 | index;
+}
+
+MIX_Track *AudioManager::VoiceTrack(std::int64_t voice) {
+    if (!initialized || voice < 0) return nullptr;
+    const auto index = static_cast<std::size_t>(voice & 0xff);
+    if (index >= channels.size() || channel_serials[index] != static_cast<std::uint32_t>(voice >> 8)) return nullptr;
+    return channels[index];
+}
+
+void AudioManager::StopVoice(std::int64_t voice, int fade_ms) {
+    if (!UsesAudioOutput()) return;
+    if (MIX_Track *track = VoiceTrack(voice))
+        MIX_StopTrack(track, fade_ms > 0 ? MIX_TrackMSToFrames(track, fade_ms) : 0);
+}
+
+bool AudioManager::IsVoicePlaying(std::int64_t voice) {
+    if (!UsesAudioOutput()) return false;
+    MIX_Track *track = VoiceTrack(voice);
+    return track != nullptr && MIX_TrackPlaying(track);
+}
+
+void AudioManager::SetVoiceGain(std::int64_t voice, float gain) {
+    if (!UsesAudioOutput()) return;
+    if (MIX_Track *track = VoiceTrack(voice)) MIX_SetTrackGain(track, std::clamp(gain, 0.0f, 1.0f));
 }
 
 void AudioManager::PlayMusicTrack(const std::string &audio_name, int loops) {

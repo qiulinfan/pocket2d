@@ -5,7 +5,10 @@ local bindings, must agree on every synced value, edge and shared action.
 Links: a local room server (hole punching and forced relay), direct
 connections found by LAN discovery, and connection codes through a local STUN
 server. Sync: lockstep, and rollback (with corrections counted). A sync test
-session must pass with all state tracked and catch state that is not."""
+session must pass with all state tracked and catch state that is not. Sounds
+across corrections: each is played once, those a correction reveals are played
+late, mispredicted ones are cancelled, and both machines end up with the same
+sounds."""
 import json
 from pathlib import Path
 import socket
@@ -53,8 +56,11 @@ PROBE = '''NetProbe = {
     self.ran = self.ran + 1
     self.x1 = self.x1 + Input.GetActionValue("p1_move")
     self.x2 = self.x2 + Input.GetActionValue("p2_move")
-    if Input.GetActionDown("p1_attack") then self.hits1 = self.hits1 + 1 end
-    if Input.GetActionDown("p2_attack") then self.hits2 = self.hits2 + 1 end
+    if Input.GetActionDown("p1_attack") then self.hits1 = self.hits1 + 1; Audio.Play(1, "hit1", false) end
+    if Input.GetActionDown("p2_attack") then self.hits2 = self.hits2 + 1; Audio.Play(2, "hit2", false) end
+    -- While attack is held: a prediction that holds it too long plays sounds a correction takes back.
+    if self.ran % 4 == 0 and Input.GetAction("p1_attack") then Audio.Play(3, "buzz1", false) end
+    if self.ran % 4 == 0 and Input.GetAction("p2_attack") then Audio.Play(4, "buzz2", false) end
     if Input.GetAction("confirm") then self.confirms = self.confirms + 1 end
     self.hash = (self.hash * 31 + math.floor(self.x1 * 1000) + 7 * math.floor(self.x2 * 1000) + self.hits1 * 13 + self.hits2) % 2147483647
     if self.leaky then
@@ -90,10 +96,41 @@ def props(response):
     return actor["components"][0]["properties"]
 
 
+SOUND_EVENTS = ["audio.play", "audio.cancel"]
+
+
+def stepped(agent, req):
+    """A request whose step reports the sounds; the agent keeps them in `sounds`."""
+    if req.get("cmd") == "step":
+        req = dict(req, events=SOUND_EVENTS)
+    response = successful(agent, req)
+    if not hasattr(agent, "sounds"):
+        agent.sounds = []
+    agent.sounds += [(e["type"], e["payload"]) for e in response.get("events", [])]
+    return response
+
+
+def final_sounds(agent, label, before):
+    """The sounds of ticks before `before` that stayed: played and not cancelled, each once."""
+    plays, cancels = {}, set()
+    for kind, p in getattr(agent, "sounds", []):
+        key = (p["tick"], p["clip"], p["nth"])
+        if kind == "audio.play":
+            check(key not in plays or key in cancels, label + ": a sound is played once: %s" % (key,))
+            cancels.discard(key)
+            plays[key] = p
+        else:
+            check(key in plays, label + ": only played sounds are cancelled: %s" % (key,))
+            cancels.add(key)
+    kept = {k for k in plays if k not in cancels and k[0] < before}
+    late = sum(1 for k, p in plays.items() if p["late"] > 0)
+    return kept, late, len(cancels)
+
+
 def both(a, b, req_a, req_b):
     out = [None, None]
     def go(i, agent, req):
-        out[i] = successful(agent, req)
+        out[i] = stepped(agent, req)
     ta = threading.Thread(target=go, args=(0, a, req_a))
     tb = threading.Thread(target=go, args=(1, b, req_b))
     ta.start(); tb.start(); ta.join(); tb.join()
@@ -133,7 +170,7 @@ def play(a, b, label, rollback=False):
                 break
             continue
         behind = a if sa["frame"] < sb["frame"] else b
-        successful(behind, {"cmd": "step", "actions": {}})
+        stepped(behind, {"cmd": "step", "actions": {}})
     ra, rb = successful(a, {"cmd": "observe"}), successful(b, {"cmd": "observe"})
     pa, pb = props(ra), props(rb)
     keys = ("x1", "x2", "hits1", "hits2", "confirms", "hash", "ran")
@@ -144,6 +181,16 @@ def play(a, b, label, rollback=False):
     check(not sa["desync"] and not sb["desync"], label + ": no desync reported: %s / %s" % (sa, sb))
     check(sa["payload"] == sb["payload"] and sa["seed"] == sb["seed"], label + ": payload and seed shared")
     check(sa["mode"] == sb["mode"] == ("rollback" if rollback else "lockstep"), label + ": sync mode " + sa["mode"])
+    # Sounds of the ticks both have simulated with the real inputs.
+    kept_a, late_a, cancels_a = final_sounds(a, label + " host", sa["frame"] - 1)
+    kept_b, late_b, cancels_b = final_sounds(b, label + " guest", sa["frame"] - 1)
+    hits = {"hit1": 0, "hit2": 0}
+    for _, clip, _ in kept_a:
+        hits[clip] = hits.get(clip, 0) + 1
+    check(kept_a == kept_b and hits["hit1"] == pa["hits1"] and hits["hit2"] == pa["hits2"],
+          label + ": both machines heard the same sounds (%d; %s)" % (len(kept_a), hits))
+    if rollback:
+        print("%s: sounds played late %d / %d, cancelled %d / %d" % (label, late_a, late_b, cancels_a, cancels_b))
     return sa, sb
 
 
@@ -289,11 +336,14 @@ def sync_test(executable, leaky):
     try:
         check(call(a, "start", {"mode": "synctest", "frames": 6, "leaky": leaky}), "sync test starts")
         for i in range(10):
-            successful(a, {"cmd": "step", "frames": 10, "actions": {"p1_move": 1 if i % 2 else -1, "p1_attack": i % 3 == 0,
-                                                                     "p2_attack": i % 4 == 1}})
+            stepped(a, {"cmd": "step", "frames": 10, "actions": {"p1_move": 1 if i % 2 else -1, "p1_attack": i % 3 == 0,
+                                                                  "p2_attack": i % 4 == 1}})
         s = call(a, "status")
         p = props(successful(a, {"cmd": "observe"}))
         check(s["rollbacks"] > 50 and s["resimulated"] >= 6 * s["rollbacks"], "sync test resimulates: %s" % s)
+        kept, late, cancels = final_sounds(a, "sync test", s["frame"])
+        check(late == 0 and cancels == 0 and sum(1 for k in kept if k[1] == "hit1") == p["hits1"],
+              "resimulated ticks neither repeat nor take back sounds (%d)" % len(kept))
         if leaky:
             check(s["desync"], "the sync test catches state outside the tracked roots")
         else:

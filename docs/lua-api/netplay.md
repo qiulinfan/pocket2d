@@ -57,5 +57,7 @@ every other action reads as released. The first update that sees
 random numbers with `Net.Status().seed`. Gameplay must stay deterministic (no
 raw keys, mouse, wall-clock time or `math.random`). With rollback, keep the
 simulation in Lua tables reachable from the tracked roots, and run
-`Net.SyncTest` to check it; sounds played during resimulated ticks are
-dropped by the engine.
+`Net.SyncTest` to check it. Call `Audio.Play` from the simulation as usual:
+a resimulated tick does not repeat a sound it already played, a sound that
+first appears in a correction plays late, and a mispredicted one fades out
+(see the development notes on netplay).

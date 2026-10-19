@@ -105,6 +105,11 @@ StateHooks &Hooks() {
     return hooks;
 }
 
+TickObserver &Observer() {
+    static TickObserver observer;
+    return observer;
+}
+
 bool Rollback() { return S().config.mode == SyncMode::Rollback; }
 // Rollback time sync: how many ticks this side runs ahead of the peer, by both sides' estimates.
 double Excess() { return (S().advantage - S().peer_advantage) / 2.0; }
@@ -723,8 +728,19 @@ void RunTick(const std::function<void(bool)> &run_tick, std::uint32_t frame, boo
     auto &s = S();
     s.sim_frame = frame;
     s.resimulating = resim;
+    const TickObserver &observer = Observer();
+    if (observer.tick_started) observer.tick_started(frame, resim);
     run_tick(resim);
+    if (observer.tick_finished) observer.tick_finished();
     s.resimulating = false;
+}
+
+void BeginCorrection(std::uint32_t from, std::uint32_t to) {
+    if (Observer().correction_started) Observer().correction_started(from, to);
+}
+
+void EndCorrection() {
+    if (Observer().correction_finished) Observer().correction_finished();
 }
 
 void FinishTick() {
@@ -771,12 +787,14 @@ bool SyncTestTick(const std::function<void(bool)> &run_tick) {
     const auto n = static_cast<std::uint32_t>(s.synctest_frames);
     if (s.frame > n) {
         const std::uint32_t target = s.frame - n;
+        BeginCorrection(target, s.frame);
         LoadSlot(target);
         for (std::uint32_t g = target; g < s.frame; ++g) {
             if (g > target) { SaveSlot(g); check(g); }
             apply(g);
             RunTick(run_tick, g, true);
         }
+        EndCorrection();
         SaveSlot(s.frame);
         check(s.frame);
         s.resimulated += n;
@@ -805,6 +823,7 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
     if (s.rollback_to < s.frame) {
         const auto started = std::chrono::steady_clock::now();
         const std::uint32_t from = s.rollback_to;
+        BeginCorrection(from, s.frame);
         LoadSlot(from);
         for (std::uint32_t f = from; f < s.frame; ++f) {
             if (f > from) SaveSlot(f);
@@ -812,6 +831,7 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
             s.used_remote[f] = RemoteFor(f);
             RunTick(run_tick, f, true);
         }
+        EndCorrection();
         ++s.rollbacks;
         s.resimulated += s.frame - from;
         s.max_rollback_seen = std::max(s.max_rollback_seen, static_cast<int>(s.frame - from));
@@ -846,6 +866,7 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
 }
 
 void SetStateHooks(StateHooks hooks) { Hooks() = std::move(hooks); }
+void SetTickObserver(TickObserver observer) { Observer() = std::move(observer); }
 
 void ReportChecksum(std::uint32_t frame, std::uint32_t value) {
     auto &s = S();
