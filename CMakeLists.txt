@@ -61,21 +61,25 @@ target_include_directories(
         "${PROJECT_SOURCE_DIR}/thirdparty/Lua"
 )
 
+# game and pocket build into the same folder, so one target stages it for both:
+# separate per-executable copies collide when the two link in parallel.
 function(game_engine_stage_resources target)
     if(GAME_ENGINE_STAGE_RESOURCES)
-        add_custom_command(
-            TARGET ${target}
-            POST_BUILD
-            COMMAND
-                ${CMAKE_COMMAND} -E copy_directory
-                "${PROJECT_SOURCE_DIR}/.engine/system"
-                "$<TARGET_FILE_DIR:${target}>/.engine/system"
-            COMMAND
-                ${CMAKE_COMMAND} -E copy_directory
-                "${PROJECT_SOURCE_DIR}/.engine/templates"
-                "$<TARGET_FILE_DIR:${target}>/.engine/templates"
-            COMMENT "Staging engine resources and project templates for ${target}"
-        )
+        if(NOT TARGET game_engine_resources)
+            add_custom_target(
+                game_engine_resources
+                COMMAND
+                    ${CMAKE_COMMAND} -E copy_directory_if_different
+                    "${PROJECT_SOURCE_DIR}/.engine/system"
+                    "$<TARGET_FILE_DIR:${target}>/.engine/system"
+                COMMAND
+                    ${CMAKE_COMMAND} -E copy_directory_if_different
+                    "${PROJECT_SOURCE_DIR}/.engine/templates"
+                    "$<TARGET_FILE_DIR:${target}>/.engine/templates"
+                COMMENT "Staging engine resources and project templates"
+            )
+        endif()
+        add_dependencies(${target} game_engine_resources)
     endif()
 endfunction()
 
