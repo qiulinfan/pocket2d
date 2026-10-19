@@ -79,6 +79,16 @@ private:
     SDL_Texture *scene_preview_render_target_ = nullptr;
     int scene_preview_render_target_width_ = 0;
     int scene_preview_render_target_height_ = 0;
+    // The standalone window keeps the configured aspect ratio: when its shape
+    // differs, the frame is drawn into this texture and centered with black
+    // bars. game_viewport_ is where the frame lands, in output pixels.
+    SDL_Texture *letterbox_target_ = nullptr;
+    int letterbox_target_width_ = 0;
+    int letterbox_target_height_ = 0;
+    struct GameViewport { float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f; } game_viewport_;
+    // The scancode of a fullscreen shortcut whose release gameplay must not
+    // see (0, SDL_SCANCODE_UNKNOWN, when none).
+    int swallowed_key_up_ = 0;
     Actor::UID next_runtime_generated_actor_uid_ =
         Actor::kRuntimeGeneratedUIDStart;
     std::unordered_map<Actor::UID, Actor *> runtime_actor_by_uid_;
@@ -110,6 +120,9 @@ private:
     void ensureRuntimeRenderTarget();
     void destroyScenePreviewRenderTarget();
     void ensureScenePreviewRenderTarget(int width, int height);
+    bool beginLetterboxedFrame();
+    void destroyLetterboxTarget();
+    void processWindowEvent(SDL_Event event, bool &quit_requested_this_frame);
     void invalidateRuntimePhysicsHierarchyCache();
     void rebuildRuntimePhysicsHierarchyCache() const;
     void rebuildRuntimeActorUIDMap();

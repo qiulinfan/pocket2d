@@ -146,6 +146,26 @@ SDL_DisplayID ChooseWindowDisplay() {
     return chosen != 0 ? chosen : primary;
 }
 
+// Windows and X11 measure windows in physical pixels, so at 200% display
+// scaling a window of the configured size looks half as big as intended. Grow
+// it by the display's content scale (1 where window coordinates already scale,
+// as on macOS), as far as the display's usable area allows; never shrink it
+// below the configured size.
+void FitWindowToDisplayScale(SDL_Window *window, SDL_DisplayID display, int width, int height) {
+    const float density = SDL_GetWindowPixelDensity(window);
+    float scale = density > 0.0f ? SDL_GetWindowDisplayScale(window) / density : 0.0f;
+    if (scale <= 0.0f) scale = SDL_GetDisplayContentScale(display);
+    SDL_Rect usable{};
+    if (SDL_GetDisplayUsableBounds(display, &usable) && usable.w > 0 && usable.h > 0) {
+        // Leave room for the title bar and window frame.
+        scale = std::min({scale, usable.w * 0.95f / static_cast<float>(width),
+                          usable.h * 0.9f / static_cast<float>(height)});
+    }
+    if (scale <= 1.0f) return;
+    SDL_SetWindowSize(window, static_cast<int>(std::lround(width * scale)),
+                      static_cast<int>(std::lround(height * scale)));
+}
+
 SDL_Renderer *CreateConfiguredRenderer(SDL_Window *window) {
     const std::string requested_driver =
         ToLowerASCII(ReadEnvironmentString("POCKET_RENDER_DRIVER"));
@@ -343,7 +363,7 @@ void Engine::GameLoop() {
 
         bool quit_requested = false;
         SDL_Event event;
-        while (SDLEventHelper::SDL_PollEvent(&event)) ProcessSDLEvent(event, quit_requested);
+        while (SDLEventHelper::SDL_PollEvent(&event)) processWindowEvent(event, quit_requested);
         Netplay::Pump();
         int ticks = 0;
         for (; lag >= kTickNs && IsRunning(); lag -= kTickNs, ++ticks) {
@@ -489,6 +509,7 @@ void Engine::ShutdownRuntime() {
 
     destroyRuntimeRenderTarget();
     destroyScenePreviewRenderTarget();
+    destroyLetterboxTarget();
     runtime_actor_by_uid_.clear();
     ComponentManager::ClearPreparedTilemapAssets();
     ComponentManager::ClearPreparedSpriteAnimationAssets();
@@ -544,7 +565,7 @@ void Engine::RunSingleFrame() {
     SDL_Event event;
     /* Check whether this frame requests a runtime quit. */
     while (SDLEventHelper::SDL_PollEvent(&event)) {
-        ProcessSDLEvent(event, quit_requested_this_frame);
+        processWindowEvent(event, quit_requested_this_frame);
     }
     RunSingleFrame(quit_requested_this_frame);
 }
@@ -686,6 +707,47 @@ void Engine::ProcessSDLEvent(const SDL_Event &event,
     if (event.type == SDL_EVENT_QUIT) {
         quit_requested_this_frame = true;
     }
+}
+
+/*
+Events polled from the standalone window. F11 and Alt+Enter toggle
+fullscreen and are not gameplay input; mouse positions arrive in window
+coordinates and are mapped into the configured resolution inside the
+letterbox. The editor and agent sessions call ProcessSDLEvent directly with
+events already in game coordinates.
+*/
+void Engine::processWindowEvent(SDL_Event event, bool &quit_requested_this_frame) {
+    if (window != nullptr && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+        (event.key.scancode == SDL_SCANCODE_F11 ||
+         (event.key.scancode == SDL_SCANCODE_RETURN && (event.key.mod & SDL_KMOD_ALT) != 0))) {
+        SDL_SetWindowFullscreen(window, (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) == 0);
+        swallowed_key_up_ = event.key.scancode;
+        return;
+    }
+    if (event.type == SDL_EVENT_KEY_UP && swallowed_key_up_ != SDL_SCANCODE_UNKNOWN &&
+        event.key.scancode == swallowed_key_up_) {
+        swallowed_key_up_ = SDL_SCANCODE_UNKNOWN;
+        return;
+    }
+    if (window != nullptr && game_viewport_.w > 0.0f && game_viewport_.h > 0.0f) {
+        const float density = SDL_GetWindowPixelDensity(window);
+        const float scale_x = static_cast<float>(config_.window_width) / game_viewport_.w;
+        const float scale_y = static_cast<float>(config_.window_height) / game_viewport_.h;
+        const auto map = [&](float &x, float &y) {
+            x = (x * density - game_viewport_.x) * scale_x;
+            y = (y * density - game_viewport_.y) * scale_y;
+        };
+        if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            map(event.motion.x, event.motion.y);
+            event.motion.xrel *= density * scale_x;
+            event.motion.yrel *= density * scale_y;
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            map(event.button.x, event.button.y);
+        } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            map(event.wheel.mouse_x, event.wheel.mouse_y);
+        }
+    }
+    ProcessSDLEvent(event, quit_requested_this_frame);
 }
 
 /* Present the current backbuffer to the window once drawing is complete. */
@@ -1053,11 +1115,13 @@ void Engine::initialize() {
 
     window = SDLRenderHelper::SDL_CreateWindow(
         config_.game_title.c_str(), config_.window_width, config_.window_height,
-        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
     if (window == nullptr) {
         throw std::runtime_error(std::string("window creation failed: ") + SDL_GetError());
     }
     const SDL_DisplayID display = ChooseWindowDisplay();
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display));
+    FitWindowToDisplayScale(window, display, config_.window_width, config_.window_height);
     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display));
     SDL_ShowWindow(window);
     if (!background) SDL_RaiseWindow(window);
@@ -1422,6 +1486,56 @@ void Engine::destroyRuntimeRenderTarget() {
     }
     runtime_render_target_width_ = 0;
     runtime_render_target_height_ = 0;
+}
+
+void Engine::destroyLetterboxTarget() {
+    if (letterbox_target_ != nullptr) {
+        SDL_DestroyTexture(letterbox_target_);
+        letterbox_target_ = nullptr;
+    }
+    letterbox_target_width_ = 0;
+    letterbox_target_height_ = 0;
+}
+
+/*
+Fit the configured resolution into the standalone window with one scale for
+both axes, record where it lands (game_viewport_), and when that leaves bars
+render into a texture of exactly the fitted size. Returns whether the frame
+goes to that texture; otherwise it fills the window as before.
+*/
+bool Engine::beginLetterboxedFrame() {
+    if (window == nullptr || renderer == nullptr) return false;
+    const int render_width = std::max(1, config_.window_width);
+    const int render_height = std::max(1, config_.window_height);
+    int output_width = render_width;
+    int output_height = render_height;
+    SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
+    output_width = std::max(1, output_width);
+    output_height = std::max(1, output_height);
+    const float scale = std::min(static_cast<float>(output_width) / render_width,
+                                 static_cast<float>(output_height) / render_height);
+    const int fitted_width = std::clamp(static_cast<int>(std::lround(render_width * scale)), 1, output_width);
+    const int fitted_height = std::clamp(static_cast<int>(std::lround(render_height * scale)), 1, output_height);
+    game_viewport_ = {static_cast<float>((output_width - fitted_width) / 2),
+                      static_cast<float>((output_height - fitted_height) / 2),
+                      static_cast<float>(fitted_width), static_cast<float>(fitted_height)};
+    if (fitted_width == output_width && fitted_height == output_height) return false;
+
+    if (letterbox_target_ == nullptr || letterbox_target_width_ != fitted_width ||
+        letterbox_target_height_ != fitted_height) {
+        destroyLetterboxTarget();
+        letterbox_target_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                              SDL_TEXTUREACCESS_TARGET, fitted_width, fitted_height);
+        if (letterbox_target_ == nullptr) {   // stretch over the window instead
+            game_viewport_ = {0.0f, 0.0f, static_cast<float>(output_width), static_cast<float>(output_height)};
+            return false;
+        }
+        SDL_SetTextureBlendMode(letterbox_target_, SDL_BLENDMODE_NONE);
+        letterbox_target_width_ = fitted_width;
+        letterbox_target_height_ = fitted_height;
+    }
+    SDL_SetRenderTarget(renderer, letterbox_target_);
+    return true;
 }
 
 /*

@@ -1083,11 +1083,13 @@ void Engine::render(glm::vec2 camera, float zoom, bool queue_builtin_renderers) 
     // loop so runtime-only and editor-driven execution share one path.
     // 现在: render 只填充 backbuffer, PresentFrame 负责交换前后缓冲. 
     // 这样 runtime-only 和 editor-driven 执行就共用一套渲染流程了.
+    bool letterboxed = false;
     if (render_runtime_to_texture_) {
         ensureRuntimeRenderTarget();
         SDL_SetRenderTarget(renderer, runtime_render_target_);
     } else {
         SDL_SetRenderTarget(renderer, nullptr);
+        letterboxed = beginLetterboxedFrame();
     }
     SDL_SetRenderViewport(renderer, nullptr);
     clearFrame();
@@ -1104,7 +1106,10 @@ void Engine::render(glm::vec2 camera, float zoom, bool queue_builtin_renderers) 
     const int render_height = std::max(1, config_.window_height);
     int output_width = runtime_render_target_width_;
     int output_height = runtime_render_target_height_;
-    if (!render_runtime_to_texture_ || runtime_render_target_ == nullptr) {
+    if (letterboxed) {
+        output_width = letterbox_target_width_;
+        output_height = letterbox_target_height_;
+    } else if (!render_runtime_to_texture_ || runtime_render_target_ == nullptr) {
         output_width = render_width;
         output_height = render_height;
         SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
@@ -1126,6 +1131,15 @@ void Engine::render(glm::vec2 camera, float zoom, bool queue_builtin_renderers) 
                           output_scale_x, output_scale_y);
     RecordRuntimeRenderFrame();
 
+    if (letterboxed) {
+        SDL_SetRenderTarget(renderer, nullptr);
+        SDL_SetRenderViewport(renderer, nullptr);
+        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+        const SDL_FRect destination{game_viewport_.x, game_viewport_.y, game_viewport_.w, game_viewport_.h};
+        SDL_RenderTexture(renderer, letterbox_target_, nullptr, &destination);
+    }
     if (render_runtime_to_texture_) {
         SDL_SetRenderTarget(renderer, nullptr);
         SDL_SetRenderViewport(renderer, nullptr);
