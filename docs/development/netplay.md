@@ -40,8 +40,13 @@ previous frame held), so a resimulated tick sees the same edges.
   side the other's public and LAN addresses. Both punch to both addresses for
   3 s (and at least 20 punches, so a stalled game does not give up early); if
   no direct packet arrives, traffic is relayed through the server
-  (`PK2R` frames). `force_relay` skips punching. Rooms expire after two minutes
-  without traffic; no answer from the server for 8 s fails.
+  (`PK2R` frames). `force_relay` skips punching. While punching, each side
+  also times the relay (punches through the server, answered the same way, the
+  stamp's top bit set); before START the host compares the best round trip of
+  each path and plays over the relay when it is faster by a fifth and 10 ms
+  (`direct_ms`, `relay_ms` in the status), and START tells the guest to relay
+  too. Rooms expire after two minutes without traffic; no answer from the
+  server for 8 s fails.
 - **Direct.** `HostDirect(port)` listens (default 27778) and its status `lan`
   is the address to type; `JoinDirect("ip[:port]")` connects. This is also the
   virtual LAN path: with Tailscale, ZeroTier or Radmin VPN both machines are on
@@ -74,7 +79,11 @@ guest adopts them. With `delay = 0` the host first times five punch round
 trips (at most 0.5 s): lockstep uses one-way ticks + 1 (2..10), rollback half
 that (1..2), and rollback (automatic delay or not) widens its window to the one-way trip beyond the delay plus 4 ticks (8..15). Input packets carry every unacknowledged frame (up to 32), the
 acknowledgement, a ping stamp, the sender's frame (time sync) and the latest
-checksums; they are resent every 30 ms. No packet for 6 s is a lost
+checksums; they are resent every 30 ms. While playing, a timed punch goes out
+every 250 ms: `loss` in the status is the share of the last 40 that got no
+answer within 1.5 s (-1 until 8 are that old), and before the session `ping` is
+the best punch round trip, so a game can show the connection's quality before
+the match. No packet for 6 s is a lost
 connection; BYE ends the session. Different input layouts fail with
 "different game version".
 
@@ -88,7 +97,8 @@ connection; BYE ends the session. Different input layouts fail with
   `max_rollback + 2` slots (with the world frame number). When the peer's real
   input for an already simulated tick differs from the prediction, the next
   `Tick` restores that tick's slot and simulates the ticks up to now again
-  (`run_tick(true)`): their draws are discarded and the audio API stays silent.
+  (`run_tick(true)`): their draws are discarded and their sounds go through the
+  sound ledger (below).
   A side may run at most `max_rollback` ticks past the peer's last confirmed
   input, then it waits. Time sync (as GGPO): from the peer's frame and the ping each side
   estimates how far it runs ahead and sends the estimate; when half the
@@ -108,6 +118,38 @@ connection; BYE ends the session. Different input layouts fail with
   first run's. A mismatch means some state that gameplay depends on is not in
   the snapshots (or is not deterministic); `desync_frame` is the first tick
   that differed.
+- **Desync recovery.** The host is authoritative. When it notices a desync,
+  or the guest reports one (`kResyncAsk`), it exports its state of the latest
+  final tick F (restored from F's slot when F is behind the present tick) and
+  sends it in 1000-byte chunks (`kResync`) that the guest acknowledges with a
+  bitmap (`kResyncAck`); unacknowledged chunks go again after 1.5 round trips,
+  16 per pump. Checksums of ticks before F are no longer compared on either
+  side. The guest, once it has the state and has reached tick F, restores its
+  own snapshot of F (so the tables it keeps are of F too), imports the state,
+  simulates from F to its present with the inputs it holds (a correction, so
+  sounds follow the ledger) and tells the host it is done. Inputs of the last
+  300 ticks are kept for that resimulation; a guest that gets that far ahead
+  of F waits. A resync that does not finish in 20 s is given up, and after
+  five in a session a desync stays shown. In BVN at 150 ms each way with 2%
+  loss a resync is about 96 KB and takes about a second (`net_desync_test.py`).
+
+  The portable state (`LuaSnapshotPortable.cpp`) names every object by the
+  first path that reached it, breadth first from the roots: a key of a table
+  (a scalar key, or a key object named before it), a metatable or a closure's
+  upvalue. The importer finds the object on the same path in its own graph
+  (of the same kind; a closure with the same code) and only creates tables and
+  closures that have no match, so other references to them stay valid; then
+  it clears and refills every table and sets every upvalue. Functions travel
+  as the hash of their stripped bytecode plus their shape (lines, upvalues,
+  parameters): the importer makes a missing closure from a function of its
+  own process with the same code, and asks the host for the code it has
+  nowhere (a closure made from code it never ran). Static tables (and their
+  parts, found by a search below the static tables reached) and `Net.Local`
+  tables are named but never written, nor are userdata and C functions; pairs
+  keyed by those engine values (the bindings' class registry) belong to the
+  process and are neither sent nor cleared. Iteration order is the host's
+  insertion order, so `pairs` over a resynced table may differ from the
+  host's (as it may anyway between two processes).
 
 ## Rollback state
 
@@ -128,6 +170,32 @@ in the status is the longest correction (restore plus resimulation). Not covered
 engine-side state (actors, physics bodies, event subscriptions, particles),
 userdata contents (kept as values) and coroutines. Games that use rollback
 keep their simulation in Lua and check it with the sync test.
+
+## Sounds across corrections
+
+Session ticks play sound effects through a `SoundLedger`
+(`src/engine/audio/SoundLedger.cpp`), told by `Netplay::SetTickObserver` when
+each tick starts and finishes and around each correction. As in GGPO games,
+every request is keyed by its tick, its clip and how many requests of that clip
+came before it in the tick:
+
+- a resimulated tick that asks for a sound it already played does not play it
+  again;
+- a sound that first appears in a correction (the prediction missed the hit)
+  plays at once, from its start while it is at most 6 ticks late, and that far
+  into the clip after that, so long sounds stay in time with the picture;
+- a sound of a corrected tick that the correction did not ask for again was
+  mispredicted: it fades out over 40 ms.
+
+Effects then play as voices on a free mixer channel (the asked one when it is
+free), so a late sound cannot cut off one already playing; the game's channel
+numbers keep their gain (`Audio.SetVolume`) and name their latest voice for
+`Audio.Halt`, `Audio.IsPlaying` and later gain changes. A halt in a resimulated
+tick is ignored. Music is level triggered: a correction's last `Music.Play` /
+`Music.Halt` is applied when it ends. Requests older than 64 ticks are
+forgotten. Agents see `audio.play` events with `tick`, `nth` and `late`, and
+`audio.cancel` for mispredicted sounds; `tests/netplay_test.py` checks that both
+machines end up with the same sounds, each played once.
 
 ## Determinism requirements
 
@@ -195,12 +263,19 @@ through `POCKET_NET_SERVER` or their own configuration.
 ## Tests
 
 - `tests/netplay_unit_test.cpp` (CTest `netplay_unit`): connection codes
-  (round trip, typos), STUN messages, and Lua snapshots (in-place restore,
-  identity, upvalues, static tables, hashes).
+  (round trip, typos), STUN messages, Lua snapshots (in-place restore,
+  identity, upvalues, static tables, hashes) and the sound ledger.
 - `tests/netplay_test.py` (CTest `netplay`): two headless runtimes through a
-  local room server (punching, forced relay, rollback with corrections), a
+  local room server (punching, forced relay, rollback with corrections, the
+  relay chosen over a slow direct path behind a NAT-like proxy), a
   direct host found by LAN discovery, connection codes through a local STUN
   server with rollback, and the sync test (passing with all state tracked,
-  failing on state outside the snapshots).
+  failing on state outside the snapshots); sounds are played once, late ones
+  and cancellations happen with rollback, and both machines keep the same;
+  desync recovery in rollback and lockstep (each machine's state changed
+  inside a tick in turn, a closure of code the guest never ran, a `Net.Local`
+  table kept by each machine).
 - Games test their own sessions; BleachVsNaruto's `tools/net_test.py` plays
-  whole sessions, also over a local UDP proxy with added latency and loss.
+  whole sessions, also over a local UDP proxy with added latency and loss,
+  `tools/net_pace_test.py` runs two real-time peers over a slow link and
+  `tools/net_desync_test.py` repairs desyncs in a battle.

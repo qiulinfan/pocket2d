@@ -66,6 +66,8 @@ struct State {
     int roots = 0;
     int static_ref = LUA_NOREF; // keeps static tables alive (their addresses stay theirs)
     std::unordered_set<const void *> statics;
+    int local_ref = LUA_NOREF;  // ...and local ones
+    std::unordered_set<const void *> locals;
     std::vector<Slot> slots;
     PointerSet visited;
     int work_ref = LUA_NOREF;
@@ -157,7 +159,31 @@ void MarkStatic(lua_State *L, int index) {
     s.statics.insert(lua_topointer(L, index));
 }
 
+void MarkLocal(lua_State *L, int index) {
+    if (lua_type(L, index) != LUA_TTABLE) return;
+    State &s = Current();
+    index = lua_absindex(L, index);
+    const int keep = RegistryTable(L, s.local_ref);
+    lua_pushvalue(L, index);
+    lua_pushboolean(L, 1);
+    lua_rawset(L, keep);
+    lua_pop(L, 1);
+    s.locals.insert(lua_topointer(L, index));
+}
+
 bool HasRoots() { return Current().roots > 0; }
+
+namespace detail {
+lua_State *Lua() { return Current().L; }
+int PushRoots() {
+    State &s = Current();
+    if (s.roots_ref == LUA_NOREF) lua_newtable(s.L);
+    else lua_rawgeti(s.L, LUA_REGISTRYINDEX, s.roots_ref);
+    return s.roots;
+}
+bool IsStatic(const void *p) { return Current().statics.count(p) > 0; }
+bool IsLocal(const void *p) { return Current().locals.count(p) > 0; }
+} // namespace detail
 
 void Save(int slot) {
     State &s = Current();

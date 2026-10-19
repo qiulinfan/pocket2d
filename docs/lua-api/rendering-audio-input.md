@@ -23,6 +23,7 @@ with pixel-art sampling.
 | `Image.Draw(image_name, x, y[, key])` | Draws a world image with default pivot/tint |
 | `Image.DrawEx(image_name, x, y, rotation_degrees, scale_x, scale_y, pivot_x, pivot_y, r, g, b, a, sorting_order[, key[, blend]])` | Full world-space image draw |
 | `Image.DrawPixel(x, y, r, g, b, a)` | Queues a pixel draw |
+| `Image.SetSmoothing(smooth)` / `Image.GetSmoothing()` | Image files drawn scaled sample nearest (pixel art, the default) or, when smooth, linearly between pixels; applies to images already loaded. Dynamic images keep their own style. |
 
 `key`, a number or a string, names something drawn at a new place each tick (a
 player, an enemy, a projectile, a sky drawn at the camera). The standalone
@@ -36,9 +37,13 @@ fixed to the world, show the latest tick. See
 `blend` says how the image combines with what is already drawn. `nil` or
 `"normal"` alpha blends; `"add"` adds the image's colour, scaled by its alpha
 and tint, to what is under it, so dark pixels leave the picture unchanged and
-bright ones glow (hit sparks, flashes, Flash `BlendMode.ADD`). Additive draws
-keep their place in the sorting order. To give a blend without a key, pass
-`nil` as the key. Any other name is an error. Every renderer backend (Metal,
+bright ones glow (hit sparks, flashes, Flash `BlendMode.ADD`); `"multiply"`
+multiplies what is under it by the image's colour and lets its alpha through
+(under × colour + under × (1 − alpha)): for an image whose colour is
+premultiplied by its alpha, white and transparent pixels leave the picture
+unchanged and dark ones darken it (shadows, tints, Flash `BlendMode.MULTIPLY`;
+an inverted image approximates `SUBTRACT`). Scale a tint by the same alpha. Blended draws keep their place in the sorting order. To give a
+blend without a key, pass `nil` as the key. Any other name is an error. Every renderer backend (Metal,
 OpenGL, SDL GPU and the software renderer of agent images) draws it the same
 way.
 

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Two-player netplay on a deterministic simulation: each tick only the
@@ -60,7 +61,10 @@ struct Status {
     std::string error;
     std::string payload;       // the host's session payload (both sides)
     std::uint32_t seed = 0;    // shared session seed
-    int ping_ms = -1;
+    int ping_ms = -1;          // round trip (before the session: the best probe's)
+    double loss = -1;          // share of recent probes lost (0..1; -1 until measured)
+    int direct_ms = -1;        // best round trip of the direct path (-1: not measured)
+    int relay_ms = -1;         // room server: of the relay path
     int delay = 0;             // input delay in ticks (0 until chosen)
     bool relay = false;        // traffic goes through the room server
     std::uint32_t frame = 0;   // the tick being (or next to be) simulated
@@ -72,6 +76,13 @@ struct Status {
     double slowest_rollback_ms = 0;    // rollback: the longest correction (restore and resimulation)
     bool desync = false;
     std::uint32_t desync_frame = 0;
+    // Desync recovery: the host sends its state of a final tick, the guest
+    // loads it and simulates again from there (StateHooks export / import).
+    bool resyncing = false;
+    std::uint32_t resyncs = 0;         // completed
+    std::uint32_t resync_frame = 0;    // the tick of the last one
+    std::uint32_t resync_bytes = 0;    // its size
+    std::string resync_error;
     std::string peer;          // peer address
     std::string lan;           // direct host: the address the guest enters
 };
@@ -116,8 +127,9 @@ bool Running();
 bool CanTick();
 // Runs the session's next tick through `run_tick(resimulating)`, first
 // resimulating corrected ticks (rollback). Returns false when the tick has to
-// wait (counted as a stall). Draws and sounds of resimulated ticks are the
-// caller's and the audio API's to drop.
+// wait (counted as a stall). Draws of resimulated ticks are the caller's to
+// drop; the audio API follows the ticks (SetTickObserver) to play each sound
+// once.
 bool Tick(const std::function<void(bool resimulating)> &run_tick);
 bool Resimulating();
 // Rollback time sync for a caller that runs ticks on a real-time clock: the
@@ -127,12 +139,31 @@ bool Resimulating();
 double TickRate();
 
 // Rollback state: save to and restore from numbered slots, and hash a slot.
+// Desync recovery: the live state in a portable form (functions as hashes of
+// their code), the code hashes an importer lacks, the code of a hash (from the
+// last export), and loading a portable state with the code it lacked.
+using Code = std::unordered_map<std::uint64_t, std::string>;
 struct StateHooks {
     std::function<void(int slot)> save;
     std::function<void(int slot)> load;
     std::function<std::uint32_t(int slot)> hash;
+    std::function<std::string()> export_state;
+    std::function<std::vector<std::uint64_t>(const std::string &state)> missing_code;
+    std::function<std::string(std::uint64_t hash)> code;
+    std::function<bool(const std::string &state, const Code &code, std::string &error)> import_state;
 };
 void SetStateHooks(StateHooks hooks);
+
+// Effects outside the rolled-back state (sounds) follow the ticks: told when
+// each session tick starts and finishes (resimulated or not), and around a
+// correction that simulates ticks [from, to) again (`to` is the present tick).
+struct TickObserver {
+    std::function<void(std::uint32_t frame, bool resimulating)> tick_started;
+    std::function<void()> tick_finished;
+    std::function<void(std::uint32_t from, std::uint32_t to)> correction_started;
+    std::function<void()> correction_finished;
+};
+void SetTickObserver(TickObserver observer);
 
 // Game state hashes compared between the peers (desync detection).
 void ReportChecksum(std::uint32_t frame, std::uint32_t value);

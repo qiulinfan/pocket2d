@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 #include <deque>
 #include <filesystem>
@@ -137,7 +138,45 @@ SDL_BlendMode BeginRequestBlend(SDL_Texture *texture, ImageBlend blend) {
     SDL_BlendMode own = SDL_BLENDMODE_BLEND;
     SDL_GetTextureBlendMode(texture, &own);
     if (blend == ImageBlend::Add) SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_ADD);
+    else if (blend == ImageBlend::Multiply) SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_MUL);
     return own;
+}
+
+// SDL's software renderer rotates a texture drawn with SDL_BLENDMODE_MUL onto a
+// white, alpha-0 background that its MUL blit does not leave out, so the corners
+// of the rotated rectangle double what is under them. A rotated multiplied draw
+// goes through geometry there instead (two triangles, the same pixels elsewhere).
+bool RendersRotatedMultiplyAsGeometry(SDL_Renderer *renderer, const ImageDrawRequest &request) {
+    if (request.blend != ImageBlend::Multiply || request.rotation_degrees == 0.0f) return false;
+    const char *name = SDL_GetRendererName(renderer);
+    return name != nullptr && std::strcmp(name, SDL_SOFTWARE_RENDERER) == 0;
+}
+
+void RenderRotatedGeometry(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_FRect *source,
+                           float texture_w, float texture_h, const SDL_FRect &dst, double degrees,
+                           SDL_FPoint pivot, SDL_FlipMode flip, const ImageDrawRequest &request) {
+    const SDL_FRect src = source ? *source : SDL_FRect{0.0f, 0.0f, texture_w, texture_h};
+    float u0 = src.x / texture_w, u1 = (src.x + src.w) / texture_w;
+    float v0 = src.y / texture_h, v1 = (src.y + src.h) / texture_h;
+    if (flip & SDL_FLIP_HORIZONTAL) std::swap(u0, u1);
+    if (flip & SDL_FLIP_VERTICAL) std::swap(v0, v1);
+    const double radians = degrees * 3.14159265358979323846 / 180.0;
+    const float c = static_cast<float>(std::cos(radians)), sn = static_cast<float>(std::sin(radians));
+    const float cx = dst.x + pivot.x, cy = dst.y + pivot.y;
+    const SDL_FColor color = {static_cast<float>(ClampByte(request.r)) / 255.0f, static_cast<float>(ClampByte(request.g)) / 255.0f,
+                              static_cast<float>(ClampByte(request.b)) / 255.0f, static_cast<float>(ClampByte(request.a)) / 255.0f};
+    SDL_Vertex v[4];
+    const float xs[4] = {dst.x, dst.x + dst.w, dst.x + dst.w, dst.x};
+    const float ys[4] = {dst.y, dst.y, dst.y + dst.h, dst.y + dst.h};
+    const float us[4] = {u0, u1, u1, u0}, vs[4] = {v0, v0, v1, v1};
+    for (int i = 0; i < 4; ++i) {
+        const float dx = xs[i] - cx, dy = ys[i] - cy;
+        v[i].position = {cx + dx * c - dy * sn, cy + dx * sn + dy * c};
+        v[i].color = color;
+        v[i].tex_coord = {us[i], vs[i]};
+    }
+    const int indices[6] = {0, 1, 2, 0, 2, 3};
+    SDL_RenderGeometry(renderer, texture, v, 4, indices, 6);
 }
 
 bool ShouldDiscardSceneRequest(const ImageDrawRequest &request) {
@@ -449,8 +488,9 @@ Renderer::CachedImageTexture *Renderer::LoadTextureResource(
     }
 
     // SDL3 defaults to linear filtering. World/UI image assets retain the
-    // engine's pixel-art sampling contract; text keeps its separate filtering.
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+    // engine's pixel-art sampling contract unless a game asks for smooth
+    // images; text keeps its separate filtering.
+    SDL_SetTextureScaleMode(texture, smooth_images ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 
     float texture_width = 0;
     float texture_height = 0;
@@ -613,6 +653,17 @@ SDL_Texture *Renderer::LoadTexture(const std::string &image_name,
 }
 
 // resource loading and draw queue entry points
+void Renderer::SetSmoothImages(bool smooth) {
+    if (smooth_images == smooth) return;
+    smooth_images = smooth;
+    for (auto &[name, cached] : image_cache) {
+        if (cached.texture == nullptr || cached.dynamic || cached.missing || name == kDefaultParticleTextureName) continue;
+        SDL_SetTextureScaleMode(cached.texture, smooth ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+    }
+}
+
+bool Renderer::SmoothImages() { return smooth_images; }
+
 void Renderer::QueueSceneImageDraw(const ImageDrawRequest &request) {
     if (ShouldDiscardSceneRequest(request)) return;
     Queues().scene_draw_requests.push_back(request);
@@ -874,10 +925,15 @@ void Renderer::RenderAndClearAllImages(SDL_Renderer *renderer, float camera_x,
         SDL_SetTextureAlphaMod(texture, static_cast<Uint8>(ClampByte(request.a)));
         const SDL_BlendMode texture_blend = BeginRequestBlend(texture, request.blend);
 
-        SDLRenderHelper::SDL_RenderTextureRotated(
-            Actor::kInvalidUID, "", renderer, texture, source_rect_ptr, &dst,
-            request.rotation_degrees,
-            &pivot, flip);
+        if (RendersRotatedMultiplyAsGeometry(renderer, request)) {
+            RenderRotatedGeometry(renderer, texture, source_rect_ptr, texture_w, texture_h, dst,
+                                  request.rotation_degrees, pivot, flip, request);
+        } else {
+            SDLRenderHelper::SDL_RenderTextureRotated(
+                Actor::kInvalidUID, "", renderer, texture, source_rect_ptr, &dst,
+                request.rotation_degrees,
+                &pivot, flip);
+        }
 
         SDL_SetTextureColorMod(texture, 255, 255, 255);
         SDL_SetTextureAlphaMod(texture, 255);

@@ -19,5 +19,6 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/UpdateAPI.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LuaSnapshot.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LuaSnapshot.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LuaSnapshotPortable.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegistrationDetail.h"
 )

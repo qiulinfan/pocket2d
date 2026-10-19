@@ -27,9 +27,17 @@ constexpr std::uint32_t kTimeoutMs = 6000;
 constexpr int kMaxFramesPerPacket = 32;
 constexpr std::uint32_t kMeasureMs = 500;    // the host measures the round trip before START
 constexpr int kMeasureSamples = 5;
+constexpr int kRelaySamples = 3;               // ...and the relay's, when a room server could relay
+constexpr std::uint32_t kProbeEveryMs = 250;   // while playing: probes for the loss
 constexpr std::uint32_t kEngineSum = 0x80000000u; // checksum keys of engine state hashes
 constexpr std::uint32_t kHashEvery = 60;
 constexpr std::uint32_t kNone = UINT32_MAX;
+constexpr std::size_t kChunk = 1000;           // desync recovery: state bytes per packet
+constexpr std::uint32_t kMaxChunks = 8192;
+constexpr int kChunksPerPump = 16;
+constexpr std::uint32_t kInputHistory = 300;   // ticks of inputs kept for a resync's resimulation
+constexpr int kMaxResyncs = 5;                 // per session; a desync that keeps coming back stays shown
+constexpr std::uint32_t kResyncTimeoutMs = 20000;
 
 using Bytes = std::vector<std::uint8_t>;
 using Values = std::map<std::string, ActionMap::Value>;
@@ -82,6 +90,36 @@ struct Session {
     double slowest_rollback_ms = 0.0;
     bool resimulating = false;
 
+    // Desync recovery: one transfer at a time (part 0 the state, part 1 code
+    // the guest lacked), numbered by the host's resync number.
+    struct Transfer {
+        std::uint32_t id = 0;
+        std::uint8_t part = 0;
+        std::uint32_t frame = 0;
+        std::string data;
+        std::vector<std::uint8_t> got;   // per chunk: received (guest), acknowledged (host)
+        std::vector<std::uint64_t> sent; // host: when each chunk last went out
+        std::uint32_t received = 0;
+        bool complete = false;
+    };
+    Transfer transfer;
+    bool resync_active = false;      // host: sending; guest: receiving or waiting to apply
+    bool resync_wanted = false;      // host: the guest asked
+    std::uint32_t resync_id = 0;     // the latest resync (both sides)
+    std::uint32_t resync_done = 0;   // guest: the latest applied
+    std::uint32_t resync_loaded_at = 0; // guest: the tick it was applied at
+    std::uint32_t resync_target = 0; // guest: the tick the state is of
+    std::string resync_state;        // guest: kept while the code it lacks comes
+    std::vector<std::uint64_t> resync_missing;
+    Code resync_code;
+    bool resync_ready = false;       // guest: applied when its tick comes
+    std::uint32_t resync_floor = 0;  // checksums of earlier ticks predate the last resync
+    std::uint32_t resyncs = 0, resync_frame = 0, resync_bytes = 0;
+    int resync_attempts = 0, done_sends = 0;
+    std::uint64_t resync_started = 0, resync_asked = 0, last_ack = 0;
+    bool ack_dirty = false;
+    std::string resync_error;
+
     // Sync test.
     int synctest_frames = 0;
     std::map<std::uint32_t, Values> synctest_inputs;
@@ -103,6 +141,11 @@ Config &Requested() {
 StateHooks &Hooks() {
     static StateHooks hooks;
     return hooks;
+}
+
+TickObserver &Observer() {
+    static TickObserver observer;
+    return observer;
 }
 
 bool Rollback() { return S().config.mode == SyncMode::Rollback; }
@@ -246,8 +289,20 @@ int DelayForRtt(int rtt_ms, SyncMode mode) {
     return std::clamp(ticks + 1, 2, 10);
 }
 
+// Room server: the relay instead of the direct path when it is clearly faster
+// (a fifth and 10 ms), decided by the host once before START.
+void ChoosePath() {
+    auto &s = S();
+    Link &l = *s.link;
+    if (s.start_sends == 0 && l.CanRelay() && !l.relay && l.direct_rtt >= 0 && l.relay_rtt >= 0 &&
+        l.relay_rtt + 10 < l.direct_rtt * 4 / 5)
+        l.UseRelay();
+    l.probe_relay = false;
+}
+
 void SendStart() {
     auto &s = S();
+    ChoosePath();
     if (s.config.delay <= 0) s.config.delay = DelayForRtt(s.link->best_rtt, s.config.mode);
     // Rollback over a long trip predicts further ahead: the window covers the one-way trip
     // beyond the delay plus some jitter (at least the configured window, at most 15 ticks).
@@ -267,6 +322,7 @@ void SendStart() {
     b.push_back(static_cast<std::uint8_t>(n & 255));
     b.push_back(static_cast<std::uint8_t>(n >> 8));
     b.insert(b.end(), s.payload.begin(), s.payload.begin() + static_cast<std::ptrdiff_t>(n));
+    b.push_back(static_cast<std::uint8_t>(s.link->relay ? 1 : 0)); // the guest relays too
     s.link->Send(b);
     s.last_start_send = NowMs();
     ++s.start_sends;
@@ -308,6 +364,7 @@ std::uint32_t FinalFrame() {
 // it) ran with every real input; only final ones are sent or compared.
 bool SumIsFinal(std::uint32_t key) {
     const std::uint32_t f = key & ~kEngineSum;
+    if (f < S().resync_floor) return false;
     return (key & kEngineSum) ? f <= FinalFrame() : f < FinalFrame();
 }
 
@@ -355,6 +412,7 @@ void NoteDesync(std::uint32_t frame) {
 void CompareSums() {
     auto &s = S();
     for (auto it = s.remote_sums.begin(); it != s.remote_sums.end();) {
+        if ((it->first & ~kEngineSum) < s.resync_floor) { it = s.remote_sums.erase(it); continue; }
         const auto mine = s.local_sums.find(it->first);
         if (mine == s.local_sums.end() || !SumIsFinal(it->first)) { ++it; continue; }
         if (mine->second != it->second) NoteDesync(it->first);
@@ -410,6 +468,289 @@ void HandleInput(const std::uint8_t *p, std::size_t n) {
     }
 }
 
+// Desync recovery -------------------------------------------------------------
+//
+// The host, on a desync it noticed or the guest reported, sends its state of
+// the latest final tick F (the state at the start of F). The guest asks for
+// the code of functions it lacks, if any, then (at tick F or later) loads the
+// state and simulates again from F to its present with the inputs it holds,
+// as a rollback correction, and tells the host it is done. Checksums of ticks
+// before F are no longer compared.
+
+void PutU16(Bytes &b, std::uint32_t v) {
+    b.push_back(static_cast<std::uint8_t>(v & 255));
+    b.push_back(static_cast<std::uint8_t>((v >> 8) & 255));
+}
+std::uint32_t GetU16(const std::uint8_t *p) { return static_cast<std::uint32_t>(p[0]) | (static_cast<std::uint32_t>(p[1]) << 8); }
+
+void BeginTransfer(std::uint32_t id, std::uint8_t part, std::uint32_t frame, std::string data) {
+    auto &t = S().transfer;
+    t = Session::Transfer{};
+    t.id = id;
+    t.part = part;
+    t.frame = frame;
+    t.data = std::move(data);
+    const std::size_t chunks = std::max<std::size_t>(1, (t.data.size() + kChunk - 1) / kChunk);
+    t.got.assign(chunks, 0);
+    t.sent.assign(chunks, 0);
+}
+
+void StartResync() {
+    auto &s = S();
+    if (s.side != 1 || s.synctest || s.resync_active || !Hooks().export_state) return;
+    if (s.resync_attempts >= kMaxResyncs) return;
+    ++s.resync_attempts;
+    s.resync_wanted = false;
+    // The state at the start of the latest final tick: the live one when that is
+    // the present tick, else restored from its slot for the export.
+    std::uint32_t f = Rollback() ? FinalFrame() : s.frame;
+    std::string state;
+    if (f >= s.frame) {
+        f = s.frame;
+        state = Hooks().export_state();
+    } else {
+        const int scratch = Slots();
+        Hooks().save(scratch);
+        Hooks().load(Slot(f));
+        state = Hooks().export_state();
+        Hooks().load(scratch);
+    }
+    if (state.size() > kMaxChunks * kChunk) {
+        s.resync_error = "the state is too large to send";
+        Log::Warning("netplay", s.resync_error);
+        return;
+    }
+    s.resync_active = true;
+    s.resync_started = NowMs();
+    ++s.resync_id;
+    s.resync_floor = std::max(s.resync_floor, f);
+    s.resync_frame = f;
+    s.resync_bytes = static_cast<std::uint32_t>(state.size());
+    Log::Info("netplay", "desync: sending the state of tick " + std::to_string(f) + " (" + std::to_string(state.size()) + " bytes)");
+    BeginTransfer(s.resync_id, 0, f, std::move(state));
+}
+
+// Host: chunks not acknowledged yet, again after a while (a few per pump).
+void SendChunks() {
+    auto &s = S();
+    auto &t = s.transfer;
+    const std::uint64_t now = NowMs();
+    const std::uint64_t again = static_cast<std::uint64_t>(std::max(150, s.ping_ms > 0 ? s.ping_ms * 3 / 2 : 300));
+    int budget = kChunksPerPump;
+    const auto count = static_cast<std::uint32_t>(t.got.size());
+    for (std::uint32_t i = 0; i < count && budget > 0; ++i) {
+        if (t.got[i] || (t.sent[i] && now - t.sent[i] < again)) continue;
+        auto b = Header(kResync);
+        PutU32(b, t.id);
+        b.push_back(t.part);
+        PutU32(b, t.frame);
+        PutU32(b, static_cast<std::uint32_t>(t.data.size()));
+        PutU16(b, i);
+        PutU16(b, count);
+        const std::size_t at = static_cast<std::size_t>(i) * kChunk;
+        const std::size_t len = std::min(kChunk, t.data.size() - std::min(at, t.data.size()));
+        b.insert(b.end(), t.data.begin() + static_cast<std::ptrdiff_t>(at), t.data.begin() + static_cast<std::ptrdiff_t>(at + len));
+        s.link->Send(b);
+        t.sent[i] = now;
+        --budget;
+    }
+}
+
+void SendResyncAck() {
+    auto &s = S();
+    const auto &t = s.transfer;
+    auto b = Header(kResyncAck);
+    PutU32(b, t.id);
+    b.push_back(t.part);
+    b.push_back(static_cast<std::uint8_t>(s.resync_done == t.id && t.id ? 1 : 0));
+    PutU32(b, s.resync_loaded_at);
+    PutU16(b, static_cast<std::uint32_t>(t.got.size()));
+    for (std::size_t i = 0; i < t.got.size(); i += 8) {
+        std::uint8_t bits = 0;
+        for (std::size_t k = 0; k < 8 && i + k < t.got.size(); ++k)
+            if (t.got[i + k]) bits |= static_cast<std::uint8_t>(1u << k);
+        b.push_back(bits);
+    }
+    s.link->Send(b);
+    s.last_ack = NowMs();
+    s.ack_dirty = false;
+}
+
+// Guest: what = 0 asks for a resync (it saw the desync), 1 for the code it lacks.
+void SendResyncAsk(std::uint8_t what) {
+    auto &s = S();
+    auto b = Header(kResyncAsk);
+    PutU32(b, what == 0 ? s.resync_done : s.transfer.id);
+    b.push_back(what);
+    const std::size_t n = what == 1 ? std::min<std::size_t>(s.resync_missing.size(), 120) : 0;
+    PutU16(b, static_cast<std::uint32_t>(n));
+    for (std::size_t i = 0; i < n; ++i) {
+        PutU32(b, static_cast<std::uint32_t>(s.resync_missing[i]));
+        PutU32(b, static_cast<std::uint32_t>(s.resync_missing[i] >> 32));
+    }
+    s.link->Send(b);
+    s.resync_asked = NowMs();
+}
+
+// Guest: a whole part arrived.
+void TransferComplete() {
+    auto &s = S();
+    auto &t = s.transfer;
+    if (t.part == 0) {
+        s.resync_state = t.data;
+        s.resync_target = t.frame;
+        s.resync_code.clear();
+        s.resync_missing = Hooks().missing_code ? Hooks().missing_code(s.resync_state) : std::vector<std::uint64_t>{};
+        if (s.resync_missing.empty()) s.resync_ready = true;
+        else SendResyncAsk(1);
+        return;
+    }
+    // Code: hash, length, code ...
+    const auto *p = reinterpret_cast<const std::uint8_t *>(t.data.data());
+    const auto *end = p + t.data.size();
+    while (end - p >= 12) {
+        const std::uint64_t hash = GetU32(p) | (static_cast<std::uint64_t>(GetU32(p + 4)) << 32);
+        const std::uint32_t len = GetU32(p + 8);
+        p += 12;
+        if (static_cast<std::size_t>(end - p) < len) break;
+        s.resync_code[hash].assign(reinterpret_cast<const char *>(p), len);
+        p += len;
+    }
+    s.resync_missing.clear();
+    s.resync_ready = true;
+}
+
+void HandleResync(const std::uint8_t *p, std::size_t n) {
+    auto &s = S();
+    if (s.side != 2 || s.state != State::Running || n < 5 + 4 + 1 + 4 + 4 + 2 + 2) return;
+    const std::uint8_t *q = p + 5;
+    const std::uint32_t id = GetU32(q); q += 4;
+    const std::uint8_t part = *q++;
+    const std::uint32_t frame = GetU32(q); q += 4;
+    const std::uint32_t size = GetU32(q); q += 4;
+    const std::uint32_t index = GetU16(q); q += 2;
+    const std::uint32_t count = GetU16(q); q += 2;
+    if (count == 0 || count > kMaxChunks || size > static_cast<std::size_t>(count) * kChunk || index >= count) return;
+    if (id < s.resync_id || id <= s.resync_done) { s.ack_dirty = true; return; } // an old one: acknowledge (done)
+    auto &t = s.transfer;
+    if (id > s.resync_id || t.id != id || part > t.part) {
+        if (id > s.resync_id) {
+            s.resync_id = id;
+            s.resync_ready = false;
+            s.resync_state.clear();
+            s.resync_code.clear();
+            s.resync_missing.clear();
+        }
+        t = Session::Transfer{};
+        t.id = id;
+        t.part = part;
+        t.frame = frame;
+        t.data.assign(size, '\0');
+        t.got.assign(count, 0);
+        s.resync_active = true;
+        s.resync_started = NowMs();
+    }
+    if (part != t.part || size != t.data.size() || count != t.got.size()) return;
+    s.ack_dirty = true;
+    if (t.complete) return;
+    const std::size_t at = static_cast<std::size_t>(index) * kChunk;
+    const std::size_t len = std::min(kChunk, static_cast<std::size_t>(size) - std::min<std::size_t>(at, size));
+    if (static_cast<std::size_t>(p + n - q) != len) return;
+    if (!t.got[index]) {
+        std::memcpy(t.data.data() + at, q, len);
+        t.got[index] = 1;
+        ++t.received;
+    }
+    if (t.received == count) {
+        t.complete = true;
+        TransferComplete();
+    }
+}
+
+void HandleResyncAck(const std::uint8_t *p, std::size_t n) {
+    auto &s = S();
+    if (s.side != 1 || n < 5 + 4 + 1 + 1 + 4 + 2) return;
+    const std::uint8_t *q = p + 5;
+    const std::uint32_t id = GetU32(q); q += 4;
+    const std::uint8_t part = *q++;
+    const bool done = *q++ != 0;
+    const std::uint32_t loaded_at = GetU32(q); q += 4;
+    const std::uint32_t count = GetU16(q); q += 2;
+    auto &t = s.transfer;
+    if (!s.resync_active || id != s.resync_id) return;
+    if (done) {
+        // The guest's checksums of ticks before it loaded the state may still be on the way.
+        s.resync_floor = std::max(s.resync_floor, loaded_at);
+        s.resync_active = false;
+        s.desync = false;
+        ++s.resyncs;
+        s.resync_error.clear();
+        t = Session::Transfer{};
+        Log::Info("netplay", "desync: the guest loaded the state of tick " + std::to_string(s.resync_frame));
+        return;
+    }
+    if (part != t.part || count != t.got.size()) return;
+    for (std::uint32_t i = 0; i < count && q + i / 8 < p + n; ++i)
+        if (q[i / 8] & (1u << (i % 8))) t.got[i] = 1;
+}
+
+void HandleResyncAsk(const std::uint8_t *p, std::size_t n) {
+    auto &s = S();
+    if (s.side != 1 || n < 5 + 4 + 1 + 2) return;
+    const std::uint8_t *q = p + 5;
+    const std::uint32_t id = GetU32(q); q += 4;
+    const std::uint8_t what = *q++;
+    const std::uint32_t count = GetU16(q); q += 2;
+    if (what == 0) {
+        // The guest saw a desync after the latest resync it loaded.
+        if (!s.resync_active && id == s.resync_id) s.resync_wanted = true;
+        return;
+    }
+    auto &t = s.transfer;
+    if (!s.resync_active || id != s.resync_id || t.part != 0 || !Hooks().code) return;
+    std::string bundle;
+    for (std::uint32_t i = 0; i < count && q + 8 <= p + n; ++i, q += 8) {
+        const std::uint64_t hash = GetU32(q) | (static_cast<std::uint64_t>(GetU32(q + 4)) << 32);
+        const std::string code = Hooks().code(hash);
+        Bytes head;
+        PutU32(head, static_cast<std::uint32_t>(hash));
+        PutU32(head, static_cast<std::uint32_t>(hash >> 32));
+        PutU32(head, static_cast<std::uint32_t>(code.size()));
+        bundle.append(reinterpret_cast<const char *>(head.data()), head.size());
+        bundle += code;
+    }
+    Log::Info("netplay", "desync: sending code the guest lacks (" + std::to_string(count) + " functions)");
+    BeginTransfer(s.resync_id, 1, t.frame, std::move(bundle));
+}
+
+void PumpResync() {
+    auto &s = S();
+    const std::uint64_t now = NowMs();
+    if (s.side == 1) {
+        if (!s.resync_active) return;
+        if (now - s.resync_started > kResyncTimeoutMs) {
+            s.resync_active = false;
+            s.resync_error = "the guest did not load the state in time";
+            Log::Warning("netplay", "desync: " + s.resync_error);
+            return;
+        }
+        SendChunks();
+        return;
+    }
+    if (s.ack_dirty && now - s.last_ack >= 15) SendResyncAck();
+    if (s.done_sends > 0 && now - s.last_ack >= 100) {
+        SendResyncAck();
+        --s.done_sends;
+    }
+    if (s.desync && !s.resync_active && now - s.resync_asked > 500 && s.resync_attempts < kMaxResyncs) SendResyncAsk(0);
+    if (s.resync_active && !s.resync_missing.empty() && s.transfer.part == 0 && now - s.resync_asked > 400) SendResyncAsk(1);
+    if (s.resync_active && !s.resync_ready && now - s.resync_started > kResyncTimeoutMs) {
+        s.resync_active = false;
+        s.resync_error = "the host's state did not arrive in time";
+        Log::Warning("netplay", "desync: " + s.resync_error);
+    }
+}
+
 void HandleSessionPacket(const Bytes &packet) {
     auto &s = S();
     const std::uint8_t *p = packet.data();
@@ -425,6 +766,8 @@ void HandleSessionPacket(const Bytes &packet) {
                 s.config.max_rollback = std::clamp<int>(p[11], 1, 30);
                 const std::size_t len = static_cast<std::size_t>(p[12]) | (static_cast<std::size_t>(p[13]) << 8);
                 if (14 + len <= n) s.payload.assign(reinterpret_cast<const char *>(p + 14), len);
+                if (14 + len < n && p[14 + len] != 0) s.link->UseRelay();
+                s.link->probe_relay = false;
                 StartSession();
             }
             s.link->Send(Header(kStartAck));
@@ -438,6 +781,15 @@ void HandleSessionPacket(const Bytes &packet) {
         break;
     case kInput:
         HandleInput(p, n);
+        break;
+    case kResync:
+        HandleResync(p, n);
+        break;
+    case kResyncAck:
+        HandleResyncAck(p, n);
+        break;
+    case kResyncAsk:
+        HandleResyncAsk(p, n);
         break;
     case kBye:
         if (s.state == State::Running || s.state == State::Connecting || s.state == State::Waiting) {
@@ -672,8 +1024,10 @@ void Pump() {
         if (s.side == 1 && s.link->state == LinkState::Connected) {
             // With an automatic delay, or for the rollback window, first time a few round trips.
             if (!s.measure_started) s.measure_started = now;
-            const bool measuring = (s.config.delay <= 0 || s.config.mode == SyncMode::Rollback) && s.start_sends == 0 && now - s.measure_started < kMeasureMs &&
-                                   s.link->rtt_samples < kMeasureSamples;
+            const bool measuring = (s.config.delay <= 0 || s.config.mode == SyncMode::Rollback || s.link->probe_relay) &&
+                                   s.start_sends == 0 && now - s.measure_started < kMeasureMs &&
+                                   (s.link->rtt_samples < kMeasureSamples ||
+                                    (s.link->probe_relay && s.link->relay_samples < kRelaySamples));
             if (measuring) {
                 if (now - s.last_probe > 50) { s.link->Probe(); s.last_probe = now; }
             } else if (now - s.last_start_send > 100) {
@@ -684,6 +1038,8 @@ void Pump() {
     case State::Running:
         if (s.side == 1 && !s.start_acked && now - s.last_start_send > 100) SendStart();
         if (now - s.last_send > 30) SendInput();
+        if (now - s.last_probe > kProbeEveryMs) { s.link->Probe(); s.last_probe = now; }
+        PumpResync();
         if (now - s.last_peer_recv > kTimeoutMs) {
             s.state = State::Disconnected;
             s.error = "connection lost";
@@ -703,6 +1059,8 @@ bool CanTick() {
     if (s.state != State::Running) return false;
     if (s.synctest) return true;
     if (!s.local.count(s.frame)) return false;
+    // A guest loading a resync stays within the inputs it keeps for the resimulation.
+    if (s.side == 2 && s.resync_active && s.transfer.id && s.frame + 30 > s.transfer.frame + kInputHistory) return false;
     if (Rollback()) return s.frame < s.remote_contiguous + static_cast<std::uint32_t>(s.config.max_rollback);
     return s.remote.count(s.frame) > 0;
 }
@@ -723,8 +1081,19 @@ void RunTick(const std::function<void(bool)> &run_tick, std::uint32_t frame, boo
     auto &s = S();
     s.sim_frame = frame;
     s.resimulating = resim;
+    const TickObserver &observer = Observer();
+    if (observer.tick_started) observer.tick_started(frame, resim);
     run_tick(resim);
+    if (observer.tick_finished) observer.tick_finished();
     s.resimulating = false;
+}
+
+void BeginCorrection(std::uint32_t from, std::uint32_t to) {
+    if (Observer().correction_started) Observer().correction_started(from, to);
+}
+
+void EndCorrection() {
+    if (Observer().correction_finished) Observer().correction_finished();
 }
 
 void FinishTick() {
@@ -734,12 +1103,63 @@ void FinishTick() {
     s.sim_frame = s.frame;
     // Inputs still needed: unacknowledged ones (resent), and those of ticks
     // that may be simulated again (and the tick before them, for edges).
-    const std::uint32_t keep = std::min({FinalFrame(), s.remote_acked, s.remote_contiguous});
+    // A history of inputs stays for a resync's resimulation.
+    const std::uint32_t history = s.frame > kInputHistory ? s.frame - kInputHistory : 0;
+    const std::uint32_t keep = std::min({FinalFrame(), s.remote_acked, s.remote_contiguous, history});
     while (!s.local.empty() && s.local.begin()->first + 1 < keep) s.local.erase(s.local.begin());
-    while (!s.remote.empty() && s.remote.begin()->first + 1 < std::min(FinalFrame(), s.remote_contiguous)) s.remote.erase(s.remote.begin());
+    while (!s.remote.empty() && s.remote.begin()->first + 1 < std::min({FinalFrame(), s.remote_contiguous, history}))
+        s.remote.erase(s.remote.begin());
     while (!s.used_remote.empty() && s.used_remote.begin()->first < FinalFrame()) s.used_remote.erase(s.used_remote.begin());
     CompareSums(); // checksums that became final
     SendInput();
+}
+
+// Guest: loads the host's state of tick F once this side has reached F and
+// simulates again from there to the present (a correction).
+void ApplyResync(const std::function<void(bool)> &run_tick) {
+    auto &s = S();
+    if (!s.resync_ready || s.frame < s.resync_target) return;
+    const std::uint32_t from = s.resync_target;
+    std::string error;
+    BeginCorrection(from, s.frame);
+    // This side's own state of tick F first, so what the import leaves alone
+    // (tables the game marked local) is of tick F as well.
+    if (Rollback() && from < s.frame && s.frame - from < static_cast<std::uint32_t>(Slots())) LoadSlot(from);
+    const bool ok = Hooks().import_state && Hooks().import_state(s.resync_state, s.resync_code, error);
+    if (ok) {
+        s.rollback_to = kNone;
+        for (std::uint32_t f = from; f < s.frame; ++f) {
+            if (Rollback()) {
+                SaveSlot(f);
+                s.used_remote[f] = RemoteFor(f);
+            }
+            ApplyInputs(f);
+            RunTick(run_tick, f, true);
+        }
+    }
+    EndCorrection();
+    s.resync_bytes = static_cast<std::uint32_t>(s.resync_state.size());
+    s.resync_ready = false;
+    s.resync_active = false;
+    s.resync_state.clear();
+    s.resync_code.clear();
+    s.resync_done = s.transfer.id;
+    s.resync_loaded_at = s.frame;
+    ++s.resync_attempts;
+    if (ok) {
+        ++s.resyncs;
+        s.resync_frame = from;
+        s.resync_floor = std::max(s.resync_floor, from);
+        s.desync = false;
+        s.resync_error.clear();
+        s.done_sends = 5;
+        Log::Info("netplay", "desync: loaded the host's state of tick " + std::to_string(from) + ", simulated " +
+                             std::to_string(s.frame - from) + " ticks again");
+    } else {
+        s.resync_error = error;
+        Log::Warning("netplay", "desync: the host's state does not load: " + error);
+    }
+    SendResyncAck();
 }
 
 bool SyncTestTick(const std::function<void(bool)> &run_tick) {
@@ -771,12 +1191,14 @@ bool SyncTestTick(const std::function<void(bool)> &run_tick) {
     const auto n = static_cast<std::uint32_t>(s.synctest_frames);
     if (s.frame > n) {
         const std::uint32_t target = s.frame - n;
+        BeginCorrection(target, s.frame);
         LoadSlot(target);
         for (std::uint32_t g = target; g < s.frame; ++g) {
             if (g > target) { SaveSlot(g); check(g); }
             apply(g);
             RunTick(run_tick, g, true);
         }
+        EndCorrection();
         SaveSlot(s.frame);
         check(s.frame);
         s.resimulated += n;
@@ -794,6 +1216,8 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
     auto &s = S();
     if (s.state != State::Running) { run_tick(false); return true; }
     if (s.synctest) return SyncTestTick(run_tick);
+    if (s.side == 1 && (s.desync || s.resync_wanted) && !s.resync_active) StartResync();
+    if (s.side == 2) ApplyResync(run_tick);
     if (!Rollback()) {
         if (!CanTick()) { ++s.stalls; return false; }
         ApplyInputs(s.frame);
@@ -805,6 +1229,7 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
     if (s.rollback_to < s.frame) {
         const auto started = std::chrono::steady_clock::now();
         const std::uint32_t from = s.rollback_to;
+        BeginCorrection(from, s.frame);
         LoadSlot(from);
         for (std::uint32_t f = from; f < s.frame; ++f) {
             if (f > from) SaveSlot(f);
@@ -812,6 +1237,7 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
             s.used_remote[f] = RemoteFor(f);
             RunTick(run_tick, f, true);
         }
+        EndCorrection();
         ++s.rollbacks;
         s.resimulated += s.frame - from;
         s.max_rollback_seen = std::max(s.max_rollback_seen, static_cast<int>(s.frame - from));
@@ -846,6 +1272,7 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
 }
 
 void SetStateHooks(StateHooks hooks) { Hooks() = std::move(hooks); }
+void SetTickObserver(TickObserver observer) { Observer() = std::move(observer); }
 
 void ReportChecksum(std::uint32_t frame, std::uint32_t value) {
     auto &s = S();
@@ -864,7 +1291,7 @@ Status GetStatus() {
     st.error = s.error;
     st.payload = s.payload;
     st.seed = s.seed;
-    st.ping_ms = s.ping_ms;
+    st.ping_ms = s.ping_ms >= 0 || !s.link ? s.ping_ms : s.link->best_rtt;
     st.delay = s.config.delay;
     st.frame = s.sim_frame;
     st.stalls = s.stalls;
@@ -875,11 +1302,19 @@ Status GetStatus() {
     st.slowest_rollback_ms = s.slowest_rollback_ms;
     st.desync = s.desync;
     st.desync_frame = s.desync_frame;
+    st.resyncing = s.resync_active;
+    st.resyncs = s.resyncs;
+    st.resync_frame = s.resync_frame;
+    st.resync_bytes = s.resync_bytes;
+    st.resync_error = s.resync_error;
     if (s.link) {
         st.room = s.link->room;
         st.code = s.link->code;
         st.nat = s.link->nat;
         st.relay = s.link->relay;
+        st.loss = s.link->Loss(NowMs());
+        st.direct_ms = s.link->direct_rtt;
+        st.relay_ms = s.link->relay_rtt;
         st.peer = s.link->peer_text;
         st.lan = s.link->lan_text;
     }
