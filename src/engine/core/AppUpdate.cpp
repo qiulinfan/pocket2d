@@ -242,9 +242,17 @@ bool StartBackground(const std::vector<std::string> &args, std::string &error) {
 void InstallWorker(fs::path zip, std::string latest, fs::path root) {
     auto fail = [](const std::string &message) { Finish("error", message); };
     std::error_code ec;
-    const fs::path staging = WorkDir() / ("unpacked-" + latest);
+    // Unpacked beside the package, so that swapping the two is a rename on one volume
+    // (the temporary folder when that one cannot be written).
+    fs::path staging = root;
+    staging += ".update-new";
     fs::remove_all(staging, ec);
-    fs::create_directories(staging, ec);
+    ec.clear();
+    if (!fs::create_directories(staging, ec) || ec) {
+        staging = WorkDir() / ("unpacked-" + latest);
+        fs::remove_all(staging, ec);
+        fs::create_directories(staging, ec);
+    }
     std::string error;
 #if defined(__APPLE__)
     const bool unpacked = Run({"ditto", "-x", "-k", U8(zip), U8(staging)}, nullptr, error);
@@ -267,7 +275,9 @@ void InstallWorker(fs::path zip, std::string latest, fs::path root) {
     wchar_t module[MAX_PATH];
     const DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
     const std::string exe = U8(fs::path(std::wstring(module, length)).filename());
-    // Wait for this process, copy the new package over the old one, start it.
+    // Wait for this process, swap the folders (renames; the old one goes back if the new
+    // one cannot move in; retried while something still holds a file), start the game.
+    // Only when no rename works (another volume) are the files copied over the old ones.
     auto quote = [](std::string s) {
         std::string out = "'";
         for (char c : s) out += c == '\'' ? std::string("''") : std::string(1, c);
@@ -277,11 +287,23 @@ void InstallWorker(fs::path zip, std::string latest, fs::path root) {
     {
         std::ofstream out(script, std::ios::binary);
         out << "\xEF\xBB\xBF"
+            << "$old = " << quote(U8(root)) << "\r\n$new = " << quote(U8(fresh)) << "\r\n$stage = " << quote(U8(staging))
+            << "\r\n$bak = $old + '.update-old'\r\n"
             << "try { Wait-Process -Id " << pid << " -ErrorAction SilentlyContinue } catch {}\r\n"
             << "Start-Sleep -Milliseconds 300\r\n"
-            << "Copy-Item -Path (Join-Path " << quote(U8(fresh)) << " '*') -Destination " << quote(U8(root))
-            << " -Recurse -Force\r\n"
-            << "Start-Process -FilePath (Join-Path " << quote(U8(root)) << " " << quote(exe) << ")\r\n";
+            << "$swapped = $false\r\n"
+            << "for ($i = 0; $i -lt 20 -and -not $swapped; $i++) {\r\n"
+            << "  try {\r\n"
+            << "    if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Recurse -Force -ErrorAction Stop }\r\n"
+            << "    Rename-Item -LiteralPath $old -NewName (Split-Path $bak -Leaf) -ErrorAction Stop\r\n"
+            << "    try { Move-Item -LiteralPath $new -Destination $old -ErrorAction Stop; $swapped = $true }\r\n"
+            << "    catch { Rename-Item -LiteralPath $bak -NewName (Split-Path $old -Leaf); throw }\r\n"
+            << "  } catch { Start-Sleep -Milliseconds 500 }\r\n"
+            << "}\r\n"
+            << "if ($swapped) { Remove-Item -LiteralPath $bak -Recurse -Force -ErrorAction SilentlyContinue }\r\n"
+            << "else { Copy-Item -Path (Join-Path $new '*') -Destination $old -Recurse -Force }\r\n"
+            << "Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue\r\n"
+            << "Start-Process -FilePath (Join-Path $old " << quote(exe) << ")\r\n";
     }
     if (!StartBackground({"powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File",
                           U8(script)},
@@ -300,9 +322,11 @@ void InstallWorker(fs::path zip, std::string latest, fs::path root) {
     // Wait for this process, swap the packages (putting the old one back if the
     // new one cannot move in), start the game.
     const std::string script = "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; rm -rf \"$4\"; "
-                               "if mv \"$2\" \"$4\"; then if mv \"$3\" \"$2\"; then rm -rf \"$4\"; else mv \"$4\" \"$2\"; fi; fi; " +
+                               "if mv \"$2\" \"$4\"; then if mv \"$3\" \"$2\"; then rm -rf \"$4\"; else mv \"$4\" \"$2\"; fi; fi; "
+                               "rm -rf \"$5\"; " +
                                relaunch;
-    if (!StartBackground({"/bin/sh", "-c", script, "sh", pid, U8(root), U8(fresh), U8(backup)}, error))
+    // $5, the unpacking folder, is gone once the package moved out of it (or is the package itself).
+    if (!StartBackground({"/bin/sh", "-c", script, "sh", pid, U8(root), U8(fresh), U8(backup), U8(staging)}, error))
         return fail(error);
 #endif
     Log::Info("update", "installing " + latest + " into " + U8(root) + " once the game has quit");
