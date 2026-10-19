@@ -30,6 +30,7 @@ EM_ASYNC_JS(void, WaitForAnimationFrame, (), { await new Promise(resolve => requ
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -329,6 +330,41 @@ Engine::~Engine() {
     ShutdownRuntime();
 }
 
+namespace {
+// Netplay waiting on the other player for more than a second: a panel over
+// the frozen frame says so and how to leave (Esc), so a vanished peer does not
+// look like a hung game until the connection times out.
+void DrawNetplayWait(SDL_Renderer *renderer, Uint64 waited_ns) {
+    if (renderer == nullptr) return;
+    char line[96];
+    std::snprintf(line, sizeof line, "Waiting for the other player... %llu s   Esc: leave",
+                  static_cast<unsigned long long>(waited_ns / 1000000000ULL));
+    SDL_Texture *target = SDL_GetRenderTarget(renderer);
+    SDL_Rect viewport;
+    SDL_GetRenderViewport(renderer, &viewport);
+    float scale_x = 1.0f, scale_y = 1.0f;
+    SDL_GetRenderScale(renderer, &scale_x, &scale_y);
+    SDL_SetRenderTarget(renderer, nullptr);
+    SDL_SetRenderViewport(renderer, nullptr);
+    int out_w = 0, out_h = 0;
+    SDL_GetCurrentRenderOutputSize(renderer, &out_w, &out_h);
+    const float scale = static_cast<float>(std::max(2, out_h / 360));
+    SDL_SetRenderScale(renderer, scale, scale);
+    const float glyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+    const float width = static_cast<float>(SDL_strlen(line)) * glyph + 16.0f, height = glyph + 16.0f;
+    const float x = (out_w / scale - width) * 0.5f, y = (out_h / scale - height) * 0.5f;
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
+    const SDL_FRect panel{x, y, width, height};
+    SDL_RenderFillRect(renderer, &panel);
+    SDL_SetRenderDrawColor(renderer, 255, 230, 120, 255);
+    SDL_RenderDebugText(renderer, x + 8.0f, y + 8.0f, line);
+    SDL_SetRenderScale(renderer, scale_x, scale_y);
+    SDL_SetRenderTarget(renderer, target);
+    SDL_SetRenderViewport(renderer, &viewport);
+}
+} // namespace
+
 void Engine::GameLoop() {
     WorldScope world_scope(world_);
     InitializeRuntime();
@@ -356,6 +392,7 @@ void Engine::GameLoop() {
     float previous_zoom = runtime_zoom_factor;
     Uint64 previous = SDL_GetTicksNS();
     Uint64 lag = kTickNs;   // tick at once, so the first frame has something to draw
+    Uint64 netplay_stall_since = 0; // a netplay session has been waiting for the peer since
     while (IsRunning()) {
         const Uint64 frame_start = SDL_GetTicksNS();
         lag = std::min(lag + (frame_start - previous), kTickNs * kMaxTicksPerFrame);
@@ -382,9 +419,11 @@ void Engine::GameLoop() {
                     if (resimulating) Renderer::DiscardFrameRequests();
                 });
                 if (!ran) {
+                    if (netplay_stall_since == 0) netplay_stall_since = frame_start;
                     lag = std::min(lag, kTickNs * 2);
                     break;
                 }
+                netplay_stall_since = 0;
             } else {
                 advanceGameplay();
                 if (scene_reset_required_) break;
@@ -425,6 +464,17 @@ void Engine::GameLoop() {
         const Uint64 work_end = SDL_GetTicksNS();
         frame_rate_overlay_.RecordFrame(work_end - frame_start, ticks, work_end);
         frame_rate_overlay_.Draw(renderer);
+        if (!Netplay::Running()) netplay_stall_since = 0;
+        if (netplay_stall_since != 0 && work_end - netplay_stall_since > 1000000000ULL) {
+            DrawNetplayWait(renderer, work_end - netplay_stall_since);
+            // The player may give up waiting: leaving ends the session here, and the game
+            // sees it end (as when the peer leaves).
+            if (::Input::GetKey("escape")) {
+                Log::Info("netplay", "left while waiting for the other player");
+                Netplay::Leave();
+                netplay_stall_since = 0;
+            }
+        }
         PresentFrame();
 #ifdef __EMSCRIPTEN__
         // The browser shows a frame per display refresh: yield until the next

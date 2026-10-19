@@ -72,7 +72,7 @@ The host's START carries the seed (`std::random_device`), the sync mode, the
 delay, the rollback window and the game's payload (up to 1000 bytes); the
 guest adopts them. With `delay = 0` the host first times five punch round
 trips (at most 0.5 s): lockstep uses one-way ticks + 1 (2..10), rollback half
-that (1..3). Input packets carry every unacknowledged frame (up to 32), the
+that (1..3), and rollback widens its window to the one-way trip beyond the delay plus 4 ticks (8..15). Input packets carry every unacknowledged frame (up to 32), the
 acknowledgement, a ping stamp, the sender's frame (time sync) and the latest
 checksums; they are resent every 30 ms. No packet for 6 s is a lost
 connection; BYE ends the session. Different input layouts fail with

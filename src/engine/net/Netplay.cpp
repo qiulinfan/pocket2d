@@ -244,7 +244,14 @@ void SendStart() {
     auto &s = S();
     if (s.config.delay <= 0) {
         s.config.delay = DelayForRtt(s.link->best_rtt, s.config.mode);
-        Log::Info("netplay", "round trip " + std::to_string(s.link->best_rtt) + " ms: input delay " + std::to_string(s.config.delay));
+        // Rollback over a long trip predicts further ahead: the window covers the one-way trip
+        // beyond the delay plus some jitter (at least the configured window, at most 15 ticks).
+        if (s.config.mode == SyncMode::Rollback && s.link->best_rtt >= 0) {
+            const int one_way = static_cast<int>(std::ceil((s.link->best_rtt / 2.0) / (1000.0 / 60.0)));
+            s.config.max_rollback = std::max(s.config.max_rollback, std::clamp(one_way - s.config.delay + 4, 8, 15));
+        }
+        Log::Info("netplay", "round trip " + std::to_string(s.link->best_rtt) + " ms: input delay " +
+                             std::to_string(s.config.delay) + ", rollback window " + std::to_string(s.config.max_rollback));
     }
     auto b = Header(kStart);
     PutU32(b, s.seed);
