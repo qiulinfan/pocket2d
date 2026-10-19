@@ -57,6 +57,10 @@ struct ProjectFixture {
         }
         Check(SDL_SaveBMP(pixels.get(), (path / "images/checker.bmp").string().c_str()),
               "write checker texture");
+        // Fully transparent: a multiplied draw of it must leave the picture alone.
+        Check(SDL_FillSurfaceRect(pixels.get(), nullptr, SDL_MapSurfaceRGBA(pixels.get(), 0, 0, 0, 0)),
+              "clear hole texture");
+        Check(SDL_SaveBMP(pixels.get(), (path / "images/hole.bmp").string().c_str()), "write hole texture");
         ResourcePath::SetResourcesRootPath(path);
     }
 
@@ -286,6 +290,7 @@ void TestRuntime(Engine &engine, const std::string &backend,
     ui_draw(10.0f, 255, ImageBlend::Multiply, 1, 40.0f);
     ui_draw(30.0f, 255, ImageBlend::Normal, 0, 40.0f);
     ui_draw(30.0f, 128, ImageBlend::Multiply, 1, 40.0f);
+
     engine.RunSingleFrame(false);
     Surface added = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
     const auto near_pixel = [&](std::array<Uint8, 4> pixel, int r, int g, int b) {
@@ -296,6 +301,26 @@ void TestRuntime(Engine &engine, const std::string &backend,
     Check(near_pixel(Pixel(added.get(), 52, 22), 121, 13, 20), "a normal draw after an additive one alpha blends");
     Check(near_pixel(Pixel(added.get(), 12, 42), 226, 2, 4), "a multiplied draw scales the sprite under it by its colour");
     Check(near_pixel(Pixel(added.get(), 32, 42), 255, 11, 17), "a multiplied draw lets its alpha through");
+
+    // Rotated, a transparent multiplied image changes nothing, also where SDL's
+    // software renderer would fill the rotated rectangle's corners.
+    {
+        ImageDrawRequest under;
+        under.image_name = "red";
+        under.scale_x = under.scale_y = 8.0f;
+        Renderer::QueueSceneImageDraw(under);
+        ImageDrawRequest hole;
+        hole.image_name = "hole";
+        hole.scale_x = -4.0f; hole.scale_y = 4.0f; hole.rotation_degrees = 30.0f;
+        hole.blend = ImageBlend::Multiply; hole.sorting_order = 1;
+        Renderer::QueueSceneImageDraw(hole);
+        engine.SetCameraZoom(1.7f); // the software renderer's bug needs a render scale
+        engine.RunSingleFrame(false);
+        engine.SetCameraZoom(1.0f);
+        Surface rotated = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
+        Check(near_pixel(Pixel(rotated.get(), 56, 56), 240, 20, 30) && near_pixel(Pixel(rotated.get(), 32, 32), 240, 20, 30),
+              "a rotated transparent multiplied draw changes nothing");
+    }
     // Lua names the blend with the optional last argument.
     lua_State *state = luaL_newstate();
     luaL_openlibs(state);
