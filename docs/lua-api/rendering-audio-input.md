@@ -86,6 +86,7 @@ compete with normal SFX channels.
 | `Input.GetKeyDown(keycode)` | Key pressed this frame |
 | `Input.GetKeyUp(keycode)` | Key released this frame |
 | `Input.GetAnyKeyDown()` | Any key or mouse button pressed this frame |
+| `Input.GetKeyDownName()` | The name of a key pressed this frame (as `GetKey` takes it), or `""` |
 
 A key tapped and released within one frame still reads as pressed that frame.
 Modifier names: `left ctrl` / `right ctrl` (`lctrl`, `rctrl`), `left alt` /
@@ -118,6 +119,8 @@ project startup. Unknown action names raise a Lua error.
 | `Input.GetActionUp(name)` | Held at the previous frame end but not now |
 | `Input.GetActionValue(name)` | Number: 0/1 for buttons, [-1, 1] for axes, x for 2D axes |
 | `Input.GetActionVector(name)` | `Vector2` (y is 0 except for 2D axes) |
+| `Input.GetBindings(name, field)` | The key names bound to a field: `keys` (button), `negative` / `positive` (axis), `left` / `right` / `up` / `down` (2D axis) |
+| `Input.SetBindings(name, field, keys)` | Rebinds a field at run time (at most 16 known key names, else an error); `actions.json` is unchanged, so games save their players' bindings and set them at start |
 
 ### Mouse
 

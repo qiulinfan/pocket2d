@@ -37,6 +37,14 @@ std::vector<Declaration> Declarations();
 std::optional<Type> Find(const std::string &name);
 const char *TypeName(Type type);
 
+// Rebinding at run time (a game's key settings): the key names of one binding
+// field, "keys" (buttons), "negative" / "positive" (axes) or "left", "right",
+// "up", "down" (2D axes). SetKeys checks the field and the names (at most 16)
+// and throws std::invalid_argument. actions.json stays as it is: a game saves
+// its players' bindings and sets them again at start.
+std::vector<std::string> GetKeys(const std::string &name, const std::string &field);
+void SetKeys(const std::string &name, const std::string &field, const std::vector<std::string> &keys);
+
 // The complete set of agent-held action values; actions not listed are
 // released. Each value is clamped like bound input.
 void SetAgentValues(const std::map<std::string, Value> &values);

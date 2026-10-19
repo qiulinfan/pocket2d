@@ -1,5 +1,8 @@
 #include "input/Input.h"
+#include "input/ActionMap.h"
 #include "core/FrameClock.h"
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -23,12 +26,33 @@ int main() {
         Input::ProcessEvent(key);
         Input::BeginFrame();
         Check(Input::GetKey("a") && Input::GetKeyDown("a"), "key press must expose held/down");
+        Check(Input::GetKeyDownName() == "a", "a pressed key must be named as GetKey takes it");
         Input::LateUpdate();
         FrameClock::AdvanceFrame();
         key.key.repeat = true;
         Input::ProcessEvent(key);
         Input::BeginFrame();
         Check(Input::GetKey("a") && !Input::GetKeyDown("a"), "repeat must not retrigger key down");
+        Check(Input::GetKeyDownName().empty(), "a held key is not newly pressed");
+
+        // Rebinding: an action reads the keys set at run time.
+        const auto project = std::filesystem::temp_directory_path() / "pocket2d_input_state_test";
+        std::filesystem::create_directories(project);
+        std::ofstream(project / "actions.json")
+            << R"({"version":1,"actions":{"jump":{"type":"button","keys":["k"]},"walk":{"type":"axis","negative":["left"],"positive":["right"]}}})";
+        ActionMap::Load(project);
+        Check(ActionMap::GetKeys("jump", "keys") == std::vector<std::string>{"k"}, "bindings come from actions.json");
+        Check(!ActionMap::IsHeld("jump"), "k is not held");
+        ActionMap::SetKeys("jump", "keys", {"a", "keypad 1"});
+        Check(ActionMap::IsHeld("jump"), "a rebound action reads its new keys");
+        bool rejected = false;
+        try { ActionMap::SetKeys("walk", "keys", {"a"}); } catch (const std::invalid_argument &) { rejected = true; }
+        Check(rejected, "an axis has no keys field");
+        rejected = false;
+        try { ActionMap::SetKeys("walk", "positive", {"no such key"}); } catch (const std::invalid_argument &) { rejected = true; }
+        Check(rejected, "unknown key names are rejected");
+        ActionMap::Load(project);
+        std::filesystem::remove_all(project);
 
         SDL_Event mouse{};
         mouse.type = SDL_EVENT_MOUSE_BUTTON_DOWN;

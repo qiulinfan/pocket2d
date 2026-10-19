@@ -130,6 +130,39 @@ std::vector<Declaration> Declarations() {
     return result;
 }
 
+namespace {
+std::vector<std::string> *Field(Action &action, const std::string &field) {
+    switch (action.type) {
+    case Type::Button: return field == "keys" ? &action.keys : nullptr;
+    case Type::Axis: return field == "negative" ? &action.negative : field == "positive" ? &action.positive : nullptr;
+    case Type::Axis2D:
+        if (field == "left") return &action.left;
+        if (field == "right") return &action.right;
+        if (field == "up") return &action.up;
+        if (field == "down") return &action.down;
+        return nullptr;
+    }
+    return nullptr;
+}
+
+std::vector<std::string> &RequireField(const std::string &name, const std::string &field) {
+    auto &action = const_cast<Action &>(Require(name));
+    auto *keys = Field(action, field);
+    if (!keys) throw std::invalid_argument("action " + name + " (" + TypeName(action.type) + ") has no binding field " + field);
+    return *keys;
+}
+} // namespace
+
+std::vector<std::string> GetKeys(const std::string &name, const std::string &field) { return RequireField(name, field); }
+
+void SetKeys(const std::string &name, const std::string &field, const std::vector<std::string> &keys) {
+    auto &target = RequireField(name, field);
+    if (keys.size() > 16) throw std::invalid_argument("at most 16 keys per binding field");
+    for (const auto &key : keys)
+        if (!Input::IsKnownKeyName(key)) throw std::invalid_argument("unknown key name: " + key);
+    target = keys;
+}
+
 std::optional<Type> Find(const std::string &name) {
     const auto found = Current().actions.find(name);
     if (found == Current().actions.end()) return std::nullopt;

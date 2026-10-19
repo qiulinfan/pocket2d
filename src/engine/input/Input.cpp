@@ -451,6 +451,14 @@ bool Input::IsKnownKeyName(const std::string &keycode) {
     return IsValidScancode(binding.scancode) || IsValidKeycode(binding.keycode);
 }
 
+std::string Input::GetKeyDownName() {
+    for (const SDL_Scancode code : State().just_became_down_scancodes_) {
+        const std::string name = ToLowerASCII(SDL_GetScancodeName(code));
+        if (!name.empty() && ParseKeyBinding(name).scancode == code) return name;
+    }
+    return "";
+}
+
 // string keycode overloads
 bool Input::GetKey(const std::string &keycode) {
     const KeyBinding binding = ParseKeyBinding(keycode);

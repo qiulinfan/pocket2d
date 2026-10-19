@@ -46,6 +46,9 @@ public:
 
     // Whether GetKey and friends recognize this key name.
     static bool IsKnownKeyName(const std::string &keycode);
+    // The name of a key pressed this frame (the first, as GetKey accepts it),
+    // or "" (a key settings screen waiting for the player's choice).
+    static std::string GetKeyDownName();
 
     static glm::vec2 GetMousePosition();
     static bool GetMouseButton(int button_num);
