@@ -65,9 +65,11 @@ struct Status {
     bool relay = false;        // traffic goes through the room server
     std::uint32_t frame = 0;   // the tick being (or next to be) simulated
     std::uint32_t stalls = 0;  // ticks spent waiting
+    std::uint32_t waits = 0;   // rollback: of those, ticks held back for the peer to catch up
     std::uint32_t rollbacks = 0;       // rollback: corrections
     std::uint32_t resimulated = 0;     // rollback: ticks simulated again
     int max_rollback_seen = 0;
+    double slowest_rollback_ms = 0;    // rollback: the longest correction (restore and resimulation)
     bool desync = false;
     std::uint32_t desync_frame = 0;
     std::string peer;          // peer address
@@ -118,6 +120,11 @@ bool CanTick();
 // caller's and the audio API's to drop.
 bool Tick(const std::function<void(bool resimulating)> &run_tick);
 bool Resimulating();
+// Rollback time sync for a caller that runs ticks on a real-time clock: the
+// rate (just below 1 while this side runs ahead of the peer, else 1) at which
+// to advance it. A small slowdown hides what a skipped tick would show, so
+// once a caller asks, Tick holds a tick back only when far ahead.
+double TickRate();
 
 // Rollback state: save to and restore from numbered slots, and hash a slot.
 struct StateHooks {

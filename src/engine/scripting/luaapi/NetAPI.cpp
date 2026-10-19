@@ -105,10 +105,11 @@ void SetBool(lua_State *L, const char *field, bool value) {
 }
 
 // Net.Status() -> {state, side, link, mode, room, code, nat, error, payload, seed, ping, delay, relay,
-//                  frame, stalls, rollbacks, resimulated, max_rollback_seen, desync, desync_frame, peer, lan}
+//                  frame, stalls, waits, rollbacks, resimulated, max_rollback_seen, slowest_rollback_ms,
+//                  desync, desync_frame, peer, lan}
 int Status(lua_State *L) {
     const Netplay::Status s = Netplay::GetStatus();
-    lua_createtable(L, 0, 22);
+    lua_createtable(L, 0, 24);
     SetString(L, "state", Netplay::StateName(s.state));
     SetInt(L, "side", s.side);
     SetString(L, "link", s.link);
@@ -124,9 +125,12 @@ int Status(lua_State *L) {
     SetBool(L, "relay", s.relay);
     SetInt(L, "frame", s.frame);
     SetInt(L, "stalls", s.stalls);
+    SetInt(L, "waits", s.waits);
     SetInt(L, "rollbacks", s.rollbacks);
     SetInt(L, "resimulated", s.resimulated);
     SetInt(L, "max_rollback_seen", s.max_rollback_seen);
+    lua_pushnumber(L, s.slowest_rollback_ms);
+    lua_setfield(L, -2, "slowest_rollback_ms");
     SetBool(L, "desync", s.desync);
     SetInt(L, "desync_frame", s.desync_frame);
     SetString(L, "peer", s.peer);

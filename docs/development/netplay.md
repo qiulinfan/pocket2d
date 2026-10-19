@@ -93,7 +93,10 @@ connection; BYE ends the session. Different input layouts fail with
   input, then it waits. Time sync (as GGPO): from the peer's frame and the ping each side
   estimates how far it runs ahead and sends the estimate; when half the
   difference of the two estimates reaches a tick, the side ahead skips a tick
-  (at most every 8 ticks). Checksums are only sent for final ticks (all real inputs).
+  (at most every 8 ticks, counted in `waits`). `GameLoop` asks `TickRate` each
+  frame and runs its tick clock up to 6% slower while ahead, so the lead
+  melts without a visible skip; once a caller paces itself that way, `Tick`
+  skips only at two ticks ahead. Checksums are only sent for final ticks (all real inputs).
   With `compare_state`, every 60 ticks the engine also hashes the final state
   snapshot and compares it with the peer's (`desync_frame` names the tick);
   that only works when the tracked state holds nothing local (settings, the
@@ -116,7 +119,12 @@ for every Lua closure its upvalues. Loading writes them back in place, so
 every table keeps its identity and closures and other tables still refer to
 the right objects; tables created after the save simply become unreachable.
 `Net.Static` marks tables that never change (converted game data); they are
-neither walked nor restored, which is what keeps a save cheap. Not covered:
+neither walked nor restored, which is what keeps a save cheap. Only the marked
+table is skipped: data that live objects refer to directly (a clip's sprite)
+must be marked too, or it is walked through them. A load writes values in
+place when a table still has exactly the saved keys and clears and refills it
+otherwise; it sets a metatable only when it changed. `slowest_rollback_ms`
+in the status is the longest correction (restore plus resimulation). Not covered:
 engine-side state (actors, physics bodies, event subscriptions, particles),
 userdata contents (kept as values) and coroutines. Games that use rollback
 keep their simulation in Lua and check it with the sync test.

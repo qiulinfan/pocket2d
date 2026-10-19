@@ -4,6 +4,8 @@
 #include "core/World.h"
 #include "lua.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <unordered_set>
 #include <vector>
@@ -14,6 +16,43 @@
 // Records are told apart by the type of their first value.
 namespace LuaSnapshot {
 namespace {
+
+// The tables and functions one save has reached: open addressing over a
+// power-of-two array, emptied for each save without giving back its memory.
+class PointerSet {
+public:
+    void Clear() {
+        std::fill(cells_.begin(), cells_.end(), nullptr);
+        size_ = 0;
+    }
+    // False when `p` was already there.
+    bool Insert(const void *p) {
+        if ((size_ + 1) * 2 > cells_.size()) Grow();
+        const std::size_t mask = cells_.size() - 1;
+        for (std::size_t at = Spread(p) & mask;; at = (at + 1) & mask) {
+            if (cells_[at] == p) return false;
+            if (!cells_[at]) {
+                cells_[at] = p;
+                ++size_;
+                return true;
+            }
+        }
+    }
+
+private:
+    static std::size_t Spread(const void *p) {
+        return static_cast<std::size_t>((reinterpret_cast<std::uintptr_t>(p) >> 4) * 0x9e3779b97f4a7c15ULL >> 16);
+    }
+    void Grow() {
+        std::vector<const void *> old(std::max<std::size_t>(cells_.size() * 2, 1024), nullptr);
+        old.swap(cells_);
+        size_ = 0;
+        for (const void *p : old)
+            if (p) Insert(p);
+    }
+    std::vector<const void *> cells_;
+    std::size_t size_ = 0;
+};
 
 struct Slot {
     int ref = LUA_NOREF;
@@ -28,7 +67,7 @@ struct State {
     int static_ref = LUA_NOREF; // keeps static tables alive (their addresses stay theirs)
     std::unordered_set<const void *> statics;
     std::vector<Slot> slots;
-    std::unordered_set<const void *> visited;
+    PointerSet visited;
     int work_ref = LUA_NOREF;
 };
 
@@ -133,11 +172,13 @@ void Save(int slot) {
     int w = 0;   // work stack size
     int i = 0;   // slot entries
     int objects = 0;
-    s.visited.clear();
+    // Statics count as already reached, so they are neither walked nor saved.
+    s.visited.Clear();
+    for (const void *p : s.statics) s.visited.Insert(p);
     auto queue = [&](int index) {
         if (!Walkable(L, index)) return;
         const void *p = lua_topointer(L, index);
-        if (s.statics.count(p) || !s.visited.insert(p).second) return;
+        if (!s.visited.Insert(p)) return;
         lua_pushvalue(L, index);
         lua_rawseti(L, W, ++w);
     };
@@ -219,33 +260,65 @@ void Load(int slot) {
         lua_rawgeti(L, S, i++);
         const int obj = lua_gettop(L);
         if (lua_type(L, obj) == LUA_TTABLE) {
-            // Clear, refill, and restore the metatable.
-            lua_newtable(L);
-            const int keys = lua_gettop(L);
-            int nkeys = 0;
-            lua_pushnil(L);
-            while (lua_next(L, obj)) {
-                lua_pop(L, 1);
-                lua_pushvalue(L, -1);
-                lua_rawseti(L, keys, ++nkeys);
-            }
-            for (int k = 1; k <= nkeys; ++k) {
-                lua_rawgeti(L, keys, k);
-                lua_pushnil(L);
-                lua_rawset(L, obj);
-            }
-            lua_pop(L, 1);
-            lua_rawgeti(L, S, i++);
-            if (lua_istable(L, -1)) lua_setmetatable(L, obj);
-            else { lua_pop(L, 1); lua_pushnil(L); lua_setmetatable(L, obj); }
+            // Restore the saved pairs and the metatable. Most tables still have
+            // exactly the saved keys: their values are written in place. Any
+            // other table is cleared and refilled (no key is added to a table
+            // in place, so its layout and iteration order end up the same).
+            const int metatable_at = i++;
             lua_rawgeti(L, S, i++);
             const lua_Integer pairs = lua_tointeger(L, -1);
             lua_pop(L, 1);
-            for (lua_Integer p = 0; p < pairs; ++p) {
-                lua_rawgeti(L, S, i++);
-                lua_rawgeti(L, S, i++);
-                lua_rawset(L, obj);
+            const int first_pair = i;
+            i += static_cast<int>(pairs) * 2;
+            lua_Integer present = 0;
+            lua_pushnil(L);
+            while (lua_next(L, obj)) {
+                lua_pop(L, 1);
+                ++present;
             }
+            bool same_keys = present == pairs;
+            for (int k = first_pair; same_keys && k < i; k += 2) {
+                lua_rawgeti(L, S, k);
+                same_keys = lua_rawget(L, obj) != LUA_TNIL;
+                lua_pop(L, 1);
+            }
+            if (same_keys) {
+                for (int k = first_pair; k < i; k += 2) {
+                    lua_rawgeti(L, S, k);
+                    lua_rawgeti(L, S, k + 1);
+                    lua_rawset(L, obj);
+                }
+            } else {
+                lua_newtable(L);
+                const int keys = lua_gettop(L);
+                int nkeys = 0;
+                lua_pushnil(L);
+                while (lua_next(L, obj)) {
+                    lua_pop(L, 1);
+                    lua_pushvalue(L, -1);
+                    lua_rawseti(L, keys, ++nkeys);
+                }
+                for (int k = 1; k <= nkeys; ++k) {
+                    lua_rawgeti(L, keys, k);
+                    lua_pushnil(L);
+                    lua_rawset(L, obj);
+                }
+                lua_pop(L, 1);
+                for (int k = first_pair; k < i; k += 2) {
+                    lua_rawgeti(L, S, k);
+                    lua_rawgeti(L, S, k + 1);
+                    lua_rawset(L, obj);
+                }
+            }
+            // Only a changed metatable is set (setting one again would register
+            // the table for finalization when the metatable has gained __gc).
+            lua_rawgeti(L, S, metatable_at);
+            if (!lua_istable(L, -1)) { lua_pop(L, 1); lua_pushnil(L); }
+            if (!lua_getmetatable(L, obj)) lua_pushnil(L);
+            const bool same_metatable = lua_rawequal(L, -1, -2);
+            lua_pop(L, 1);
+            if (same_metatable) lua_pop(L, 1);
+            else lua_setmetatable(L, obj);
         } else {
             lua_rawgeti(L, S, i++);
             const lua_Integer n = lua_tointeger(L, -1);

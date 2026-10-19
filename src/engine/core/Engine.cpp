@@ -395,7 +395,11 @@ void Engine::GameLoop() {
     Uint64 netplay_stall_since = 0; // a netplay session has been waiting for the peer since
     while (IsRunning()) {
         const Uint64 frame_start = SDL_GetTicksNS();
-        lag = std::min(lag + (frame_start - previous), kTickNs * kMaxTicksPerFrame);
+        // Rollback netplay running ahead of the peer slows this clock slightly.
+        const double rate = Netplay::TickRate();
+        const Uint64 elapsed = frame_start - previous;
+        lag = std::min(lag + (rate < 1.0 ? static_cast<Uint64>(static_cast<double>(elapsed) * rate) : elapsed),
+                       kTickNs * kMaxTicksPerFrame);
         previous = frame_start;
 
         bool quit_requested = false;

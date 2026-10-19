@@ -7,6 +7,7 @@
 #include "net/UdpSocket.h"
 
 #include <algorithm>
+#include <chrono>
 #include <climits>
 #include <cmath>
 #include <cstring>
@@ -59,7 +60,7 @@ struct Session {
     std::map<std::uint32_t, Bytes> local, remote;
     std::uint32_t remote_contiguous = 0; // remote frames [0, n) all received
     std::uint32_t remote_acked = 0;      // our frames [0, n) the peer has
-    std::uint32_t stalls = 0;
+    std::uint32_t stalls = 0, waits = 0;
     std::map<std::uint32_t, std::uint32_t> local_sums, remote_sums;
     bool desync = false;
     std::uint32_t desync_frame = 0;
@@ -77,6 +78,8 @@ struct Session {
     double advantage = 0.0;      // ticks ahead of the peer (smoothed)
     double peer_advantage = 0.0; // the peer's own estimate
     int ticks_since_wait = 0;
+    bool paced = false;          // the caller slows its clock by TickRate
+    double slowest_rollback_ms = 0.0;
     bool resimulating = false;
 
     // Sync test.
@@ -103,6 +106,8 @@ StateHooks &Hooks() {
 }
 
 bool Rollback() { return S().config.mode == SyncMode::Rollback; }
+// Rollback time sync: how many ticks this side runs ahead of the peer, by both sides' estimates.
+double Excess() { return (S().advantage - S().peer_advantage) / 2.0; }
 int Slots() { return S().synctest ? S().synctest_frames + 2 : S().config.max_rollback + 2; }
 int Slot(std::uint32_t frame) { return static_cast<int>(frame % static_cast<std::uint32_t>(Slots())); }
 
@@ -704,6 +709,14 @@ bool CanTick() {
 
 bool Resimulating() { return S().resimulating; }
 
+double TickRate() {
+    auto &s = S();
+    if (s.state != State::Running || s.synctest || !Rollback()) return 1.0;
+    s.paced = true;
+    // Up to 6% slower: a tick of lead is gone in about a third of a second.
+    return 1.0 - std::clamp((Excess() - 0.25) * 0.08, 0.0, 0.06);
+}
+
 namespace {
 
 void RunTick(const std::function<void(bool)> &run_tick, std::uint32_t frame, bool resim) {
@@ -790,6 +803,7 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
     }
     // Rollback: first simulate again from the earliest wrong prediction.
     if (s.rollback_to < s.frame) {
+        const auto started = std::chrono::steady_clock::now();
         const std::uint32_t from = s.rollback_to;
         LoadSlot(from);
         for (std::uint32_t f = from; f < s.frame; ++f) {
@@ -801,6 +815,8 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
         ++s.rollbacks;
         s.resimulated += s.frame - from;
         s.max_rollback_seen = std::max(s.max_rollback_seen, static_cast<int>(s.frame - from));
+        const std::chrono::duration<double, std::milli> took = std::chrono::steady_clock::now() - started;
+        s.slowest_rollback_ms = std::max(s.slowest_rollback_ms, took.count());
     }
     s.rollback_to = kNone;
     // State hashes of final ticks, compared with the peer's.
@@ -812,11 +828,13 @@ bool Tick(const std::function<void(bool resimulating)> &run_tick) {
     }
     if (!CanTick()) { ++s.stalls; return false; }
     // Time sync (as GGPO): the side that runs ahead of the peer, by both
-    // sides' estimates, waits a tick now and then.
-    if (++s.ticks_since_wait >= 8 && (s.advantage - s.peer_advantage) / 2.0 >= 1.0) {
+    // sides' estimates, waits a tick now and then (a paced caller has
+    // already slowed down, so only when that has not been enough).
+    if (++s.ticks_since_wait >= 8 && Excess() >= (s.paced ? 2.0 : 1.0)) {
         s.ticks_since_wait = 0;
         s.advantage -= 1.0;
         ++s.stalls;
+        ++s.waits;
         return false;
     }
     SaveSlot(s.frame);
@@ -850,9 +868,11 @@ Status GetStatus() {
     st.delay = s.config.delay;
     st.frame = s.sim_frame;
     st.stalls = s.stalls;
+    st.waits = s.waits;
     st.rollbacks = s.rollbacks;
     st.resimulated = s.resimulated;
     st.max_rollback_seen = s.max_rollback_seen;
+    st.slowest_rollback_ms = s.slowest_rollback_ms;
     st.desync = s.desync;
     st.desync_frame = s.desync_frame;
     if (s.link) {
