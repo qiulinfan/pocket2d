@@ -15,7 +15,7 @@ struct SDL_Texture;
 
 // How an image combines with what is drawn under it. Add sums its colour
 // (scaled by alpha) onto the destination, for glows and flashes.
-enum class ImageBlend : std::uint8_t { Normal, Add };
+enum class ImageBlend : std::uint8_t { Normal, Add, Multiply };
 
 struct ImageDrawRequest {
     // basic image name and world-space transform

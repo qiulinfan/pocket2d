@@ -270,16 +270,22 @@ void TestRuntime(Engine &engine, const std::string &backend,
     Check(Pixel(lit.get(), 31, 61)[0] >= 237, "a white light cell leaves the colour unchanged");
     // Additive draws add their light (scaled by alpha) to what is under them,
     // in draw order, and leave the texture blending normally for later draws.
-    const auto ui_draw = [](float x, int a, ImageBlend blend, int order) {
+    const auto ui_draw = [](float x, int a, ImageBlend blend, int order, float y = 20.0f) {
         ImageDrawRequest request;
         request.image_name = "red";
-        request.x = x; request.y = 20.0f; request.a = a; request.blend = blend; request.sorting_order = order;
+        request.x = x; request.y = y; request.a = a; request.blend = blend; request.sorting_order = order;
         Renderer::QueueUIImageDraw(request);
     };
     ui_draw(10.0f, 255, ImageBlend::Normal, 0);
     ui_draw(10.0f, 255, ImageBlend::Add, 1);
     ui_draw(30.0f, 128, ImageBlend::Add, 0);
     ui_draw(50.0f, 128, ImageBlend::Normal, 1);
+    // Multiplied draws scale what is under them by their colour and let alpha
+    // through: under * colour + under * (1 - alpha).
+    ui_draw(10.0f, 255, ImageBlend::Normal, 0, 40.0f);
+    ui_draw(10.0f, 255, ImageBlend::Multiply, 1, 40.0f);
+    ui_draw(30.0f, 255, ImageBlend::Normal, 0, 40.0f);
+    ui_draw(30.0f, 128, ImageBlend::Multiply, 1, 40.0f);
     engine.RunSingleFrame(false);
     Surface added = ReadTarget(renderer, engine.GetRuntimeRenderTarget());
     const auto near_pixel = [&](std::array<Uint8, 4> pixel, int r, int g, int b) {
@@ -288,6 +294,8 @@ void TestRuntime(Engine &engine, const std::string &backend,
     Check(near_pixel(Pixel(added.get(), 12, 22), 255, 40, 60), "additive draw sums onto the sprite under it");
     Check(near_pixel(Pixel(added.get(), 32, 22), 123, 17, 26), "additive draw scales its light by alpha");
     Check(near_pixel(Pixel(added.get(), 52, 22), 121, 13, 20), "a normal draw after an additive one alpha blends");
+    Check(near_pixel(Pixel(added.get(), 12, 42), 226, 2, 4), "a multiplied draw scales the sprite under it by its colour");
+    Check(near_pixel(Pixel(added.get(), 32, 42), 255, 11, 17), "a multiplied draw lets its alpha through");
     // Lua names the blend with the optional last argument.
     lua_State *state = luaL_newstate();
     luaL_openlibs(state);
@@ -298,10 +306,12 @@ void TestRuntime(Engine &engine, const std::string &backend,
         Image.DrawEx("red", 0, 0, 0, 1, 1, 0.5, 0.5, 255, 255, 255, 255, 0, "fx", "normal")
         Image.DrawUIScaled("red", 0, 0, 1, 1, 255, 255, 255, 255, 0, "add")
         Image.DrawUIScaled("red", 0, 0, 1, 1, 255, 255, 255, 255, 0)
+        Image.DrawEx("red", 0, 0, 0, 1, 1, 0.5, 0.5, 255, 255, 255, 255, 0, nil, "multiply")
     )"), "Image.DrawEx and DrawUIScaled take an optional blend");
     const RenderQueueState &queued = World::Current().State<RenderQueueState>();
-    Check(queued.scene_draw_requests.size() == 2 && queued.scene_draw_requests[0].blend == ImageBlend::Add &&
+    Check(queued.scene_draw_requests.size() == 3 && queued.scene_draw_requests[0].blend == ImageBlend::Add &&
               queued.scene_draw_requests[1].blend == ImageBlend::Normal &&
+              queued.scene_draw_requests[2].blend == ImageBlend::Multiply &&
               queued.ui_draw_requests.size() == 2 && queued.ui_draw_requests[0].blend == ImageBlend::Add &&
               queued.ui_draw_requests[1].blend == ImageBlend::Normal,
           "Lua blend names reach the draw requests");

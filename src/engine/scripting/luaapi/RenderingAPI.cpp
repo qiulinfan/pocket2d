@@ -35,11 +35,13 @@ std::uint64_t InterpolationKey(const DrawKey &key) {
 }
 
 // The optional blend argument of Image.DrawEx/DrawUIScaled: nil or "normal"
-// alpha blends, "add" adds the image's light to what is under it.
+// alpha blends, "add" adds the image's light to what is under it, "multiply"
+// multiplies what is under it by the image's colour, letting its alpha through.
 ImageBlend ParseBlend(const std::optional<std::string_view> &blend, const char *function) {
     if (!blend || *blend == "normal") return ImageBlend::Normal;
     if (*blend == "add") return ImageBlend::Add;
-    throw std::invalid_argument(std::string(function) + " blend must be nil, \"normal\" or \"add\"");
+    if (*blend == "multiply") return ImageBlend::Multiply;
+    throw std::invalid_argument(std::string(function) + " blend must be nil, \"normal\", \"add\" or \"multiply\"");
 }
 
 void CppImageDrawUI(const std::string &image_name, float x, float y) {

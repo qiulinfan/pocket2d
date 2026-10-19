@@ -137,6 +137,7 @@ SDL_BlendMode BeginRequestBlend(SDL_Texture *texture, ImageBlend blend) {
     SDL_BlendMode own = SDL_BLENDMODE_BLEND;
     SDL_GetTextureBlendMode(texture, &own);
     if (blend == ImageBlend::Add) SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_ADD);
+    else if (blend == ImageBlend::Multiply) SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_MUL);
     return own;
 }
 
