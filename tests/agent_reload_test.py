@@ -70,19 +70,19 @@ DRIVER = '''ZDriver={ticks=0,starts=0,global_clean=true,
 def fixture(root):
     for directory in ["component_types", "scenes", "items", "actor_templates"]:
         (root / directory).mkdir(parents=True)
-    (root / "game.config").write_text(json.dumps({"game_title": "Reload verification", "initial_scene": "reload", "save_namespace": "script_reload"}))
-    (root / "component_types/ReloadProbe.lua").write_text(probe(1))
-    (root / "component_types/ZDriver.lua").write_text(DRIVER)
+    (root / "game.config").write_text(json.dumps({"game_title": "Reload verification", "initial_scene": "reload", "save_namespace": "script_reload"}), encoding="utf-8")
+    (root / "component_types/ReloadProbe.lua").write_text(probe(1), encoding="utf-8")
+    (root / "component_types/ZDriver.lua").write_text(DRIVER, encoding="utf-8")
     (root / "items/reload.items.json").write_text(json.dumps({"version": 1, "items": [
-        {"id": "herb", "display_name": "Herb", "kind": "material", "max_stack": 10}]}))
+        {"id": "herb", "display_name": "Herb", "kind": "material", "max_stack": 10}]}), encoding="utf-8")
     def components(y):
         return {"body": {"type": "Rigidbody", "gravity_scale": 0, "y": y, "has_trigger": False},
                 "logic": {"type": "ReloadProbe"}, "transform": {"type": "Transform", "y": y}}
     (root / "scenes/reload.scene").write_text(json.dumps({"actors": [
         {"uid": 1, "name": "alpha", "components": components(0)},
         {"uid": 2, "name": "beta", "components": components(3)},
-        {"uid": 3, "name": "driver", "components": {"driver": {"type": "ZDriver"}}}]}))
-    (root / "actor_templates/ReloadActor.template").write_text(json.dumps({"name": "gamma", "components": components(6)}))
+        {"uid": 3, "name": "driver", "components": {"driver": {"type": "ZDriver"}}}]}), encoding="utf-8")
+    (root / "actor_templates/ReloadActor.template").write_text(json.dumps({"name": "gamma", "components": components(6)}), encoding="utf-8")
 
 
 def props(snapshot, name="alpha"):
@@ -165,7 +165,7 @@ def run(runtime, root):
         check(props(live)["health"] == 2 and props(live)["bag_count"] == 2 and props(live)["nested_value"] == 12,
               "did not prepare actual non-default live state")
         old = {name: props(live, name).copy() for name in ["alpha", "beta"]}
-        source.write_text(probe(2))
+        source.write_text(probe(2), encoding="utf-8")
         updated = good_reload(agent)
         for name in old:
             for field in ["starts", "destroys", "updates", "health", "bag_count", "bag_revision", "nested_value", "identities_ok"]:
@@ -190,13 +190,13 @@ def run(runtime, root):
         check(props(spawned, "gamma")["starts"] == 1 and props(spawned, "gamma")["health"] == 9
               and props(spawned, "gamma")["version_seen"] == 2, "new actor did not use new prototype/defaults")
         # A later source failure must not publish an earlier staged candidate.
-        source.write_text(probe(3));driver.write_text('error("late batch failure")')
+        source.write_text(probe(3), encoding="utf-8");driver.write_text('error("late batch failure")', encoding="utf-8")
         rejected_reload(agent, types=["ZDriver", "ReloadProbe"])
         before = observe(agent);after = step(agent)
         check(props(after)["updates"] == props(before)["updates"] + 2 and
               properties(after, "driver", "ZDriver")["ticks"] == properties(before, "driver", "ZDriver")["ticks"] + 1,
               "failed batch partially installed a method")
-        driver.write_text(DRIVER)
+        driver.write_text(DRIVER, encoding="utf-8")
         for bad_source in [
             "ReloadProbe={", 'error("candidate evaluation rejected")', "NotTheExport={}",
             'ReloadLeak=1;error("leak check")',
@@ -208,7 +208,7 @@ def run(runtime, root):
             'error(string.rep("a",10*1024*1024))', 'error(string.rep("汉",2000))',
             "while true do end", 'local huge=string.rep("x",40*1024*1024);ReloadProbe={}',
         ]:
-            source.write_text(bad_source)
+            source.write_text(bad_source, encoding="utf-8")
             rejected = rejected_reload(agent)
             if "10*1024*1024" in bad_source or '"汉",2000' in bad_source:
                 check(any("[truncated]" in diagnostic["message"] for diagnostic in rejected["diagnostics"]),
@@ -219,7 +219,7 @@ def run(runtime, root):
             check(properties(alive, "driver", "ZDriver")["global_clean"], "candidate globals escaped staging")
             check(not (root / "saves/script_reload/forbidden.save.json").exists(), "candidate top-level host API wrote a save")
         # Fix and retry succeeds in the same worker after instruction/OOM staging failures.
-        source.write_text(probe(3, update=False))
+        source.write_text(probe(3, update=False), encoding="utf-8")
         removed = good_reload(agent, instances=3)
         before_updates = {name: props(removed, name)["updates"] for name in ["alpha", "beta", "gamma"]}
         stepped = step(agent, 3)
@@ -228,18 +228,18 @@ def run(runtime, root):
         before_events = props(stepped)["events"]
         published = step(agent, keys=["p"])
         check(props(published)["events"] == before_events + 3, "event callback did not update while OnUpdate absent")
-        source.write_text(probe(2, event=False));removed = good_reload(agent, instances=3)
+        source.write_text(probe(2, event=False), encoding="utf-8");removed = good_reload(agent, instances=3)
         before_events = props(removed)["events"]
         step(agent);published = step(agent, keys=["p"])
         check(props(published)["events"] == before_events, "deleted prototype event method remained subscribed")
         before_updates = props(removed)["updates"]
         check(props(published)["updates"] == before_updates + 4, "re-added OnUpdate not scheduled")
         # A cached function inside live state is an explicit unsupported migration.
-        step(agent, keys=["c"]);source.write_text(probe(3, event=False))
+        step(agent, keys=["c"]);source.write_text(probe(3, event=False), encoding="utf-8")
         rejected_reload(agent)
         step(agent, keys=["v"]);good_reload(agent, instances=3)
         # Anonymous event subscriptions cannot be safely remapped by method name.
-        step(agent, keys=["a"]);source.write_text(probe(2))
+        step(agent, keys=["a"]);source.write_text(probe(2), encoding="utf-8")
         rejected_reload(agent)
         reset = successful(agent, {"cmd": "reset"})
         check(reset["frame"] == 0 and len(reset["actors"]) == 3 and props(reset)["health"] == 9,

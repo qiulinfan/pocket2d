@@ -45,11 +45,12 @@ class Report:
     def emit(self, severity, code, message, file=None):
         if severity == "error":
             self.errors += 1
+        # Diagnostics name files with forward slashes on every platform.
+        file = Path(file).as_posix() if file else None
         if self.as_json:
-            print(json.dumps({"severity": severity, "code": code, "file": str(file) if file else None,
-                              "message": message}))
+            print(json.dumps({"severity": severity, "code": code, "file": file, "message": message}))
         else:
-            print("%s: %s%s [%s]" % (severity, (str(file) + ": ") if file else "", message, code))
+            print("%s: %s%s [%s]" % (severity, (file + ": ") if file else "", message, code))
 
 
 def find_game(explicit):
@@ -136,7 +137,7 @@ def check_lua(project, report):
             command = [lua_ls, "--check=" + str(project), "--checklevel=Warning", "--configpath=" + str(config)]
         else:
             command = [emmylua, str(project), "-c", str(config)]
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
         report.emit("error", "lua_check", output[-4000:] or "Lua checker failed")
@@ -214,7 +215,7 @@ def command_test(options):
                             path.relative_to(project))
         for path in sorted(project.glob("replays/**/*.jsonl")):
             result = subprocess.run([game, "--headless", "--replay", str(path), "--project", str(project),
-                                     "--save-dir", saves], capture_output=True, text=True)
+                                     "--save-dir", saves], capture_output=True, text=True, encoding="utf-8")
             ran += 1
             summary = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else result.stderr.strip()
             if result.returncode == 0:
@@ -338,7 +339,7 @@ def command_import_unity(options, project):
             if problems:
                 print("pocket import: wrote an invalid %s %s: %s" % (schema, path, "; ".join(problems[:3])), file=sys.stderr)
                 return 1
-    print("wrote %s: %s, %d notes in import_report.json" % (scene.relative_to(project), json.dumps(report["stats"]),
+    print("wrote %s: %s, %d notes in import_report.json" % (scene.relative_to(project).as_posix(), json.dumps(report["stats"]),
                                                            len(report["notes"])))
     return 0
 
@@ -366,7 +367,7 @@ def command_import(options):
         if problems:
             print("pocket import: wrote an invalid %s: %s" % (schema, "; ".join(problems)), file=sys.stderr)
             return 1
-    print("wrote %s" % written.relative_to(project))
+    print("wrote %s" % written.relative_to(project).as_posix())
     return 0
 
 

@@ -40,7 +40,7 @@ class Agent:
     def __init__(self, executable, project, timeout=1500, heap=8 * 1024 * 1024):
         self.process = subprocess.Popen(
             arguments(executable, project, timeout, heap), stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
             start_new_session=(os.name == "posix"))
         self.lines = queue.Queue()
         self.errors = []
@@ -164,7 +164,7 @@ def startup_failure(executable, source, heap=8 * 1024 * 1024):
         (root / "component_types" / "Probe.lua").write_text(source)
         process = subprocess.Popen(arguments(executable, root, heap=heap),
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   text=True, start_new_session=(os.name == "posix"))
+                                   text=True, encoding="utf-8", start_new_session=(os.name == "posix"))
         try:
             output, errors = process.communicate('{"cmd":"observe"}\n', timeout=7)
         except subprocess.TimeoutExpired:
@@ -246,7 +246,7 @@ def warning_diagnostics(executable):
             "warn('@on'); warn('budget-warning-', 'preserved'); warn('@off'); Probe={}")
         result = subprocess.run(arguments(executable, root),
                                 input='{"cmd":"observe"}\n{"cmd":"quit"}\n',
-                                text=True, capture_output=True, timeout=7)
+                                text=True, encoding="utf-8", capture_output=True, timeout=7)
         check(result.returncode == 0, "warning fixture must exit cleanly")
         check("Lua warning: budget-warning-preserved" in result.stderr,
               "custom allocator VM must preserve standard Lua warning diagnostics")

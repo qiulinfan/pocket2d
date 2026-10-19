@@ -144,13 +144,13 @@ def run(executable):
                     {"cmd": "observe"}, {"cmd": "quit"}]
         recorded = subprocess.run([executable, "--headless", "--agent", "--project", str(root), "--seed", "7",
                                    "--record", str(replay)], input="".join(json.dumps(r) + "\n" for r in requests),
-                                  capture_output=True, text=True, timeout=60)
+                                  capture_output=True, text=True, encoding="utf-8", timeout=60)
         check(recorded.returncode == 0, "recording failed: " + recorded.stderr[-2000:])
         lines = [json.loads(line) for line in replay.read_text().splitlines()]
         check(sum(1 for line in lines if line.get("request", {}).get("cmd") == "call") == 2,
               "calls are recorded in replays")
         result = subprocess.run([executable, "--headless", "--replay", str(replay), "--project", str(root)],
-                                capture_output=True, text=True, timeout=60)
+                                capture_output=True, text=True, encoding="utf-8", timeout=60)
         summary = json.loads(result.stdout.strip().splitlines()[-1])
         check(result.returncode == 0 and summary["ok"] and summary["frame"] == 7,
               "the replay with calls matches: " + result.stdout + result.stderr[-2000:])

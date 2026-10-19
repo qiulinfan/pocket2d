@@ -12,7 +12,7 @@ import sys
 
 
 def run(benchmark, workers):
-    result = subprocess.run([benchmark, "70", "0", "90"], capture_output=True, text=True, timeout=300,
+    result = subprocess.run([benchmark, "70", "0", "90"], capture_output=True, text=True, encoding="utf-8", timeout=300,
                             env=dict(os.environ, POCKET_PHYSICS_WORKERS=workers))
     if result.returncode != 0:
         raise AssertionError("physics benchmark failed: " + result.stderr)

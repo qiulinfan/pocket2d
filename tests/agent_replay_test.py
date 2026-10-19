@@ -12,7 +12,7 @@ from agent_protocol_test import check
 def record(executable, project, path, requests):
     command = [executable, "--headless", "--agent", "--project", str(project), "--seed", "42", "--record", str(path)]
     lines = "".join(json.dumps(request) + "\n" for request in requests)
-    result = subprocess.run(command, input=lines, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(command, input=lines, capture_output=True, text=True, encoding="utf-8", timeout=120)
     check(result.returncode == 0, "recording session failed: " + result.stderr[-2000:])
     responses = [json.loads(line) for line in result.stdout.splitlines()]
     check(all(response["ok"] for response in responses), "recorded requests succeed")
@@ -21,7 +21,7 @@ def record(executable, project, path, requests):
 
 def replay(executable, project, path):
     result = subprocess.run([executable, "--headless", "--replay", str(path), "--project", str(project)],
-                            capture_output=True, text=True, timeout=120)
+                            capture_output=True, text=True, encoding="utf-8", timeout=120)
     lines = result.stdout.splitlines()
     check(len(lines) == 1, "replay prints one summary line: " + result.stdout + result.stderr[-2000:])
     return result.returncode, json.loads(lines[0])

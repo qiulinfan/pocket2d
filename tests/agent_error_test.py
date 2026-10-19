@@ -16,7 +16,7 @@ def startup_failure(executable, source, mutator):
         shutil.copytree(source, project)
         mutator(project)
         result = subprocess.run([executable, "--project", str(project), "--headless", "--agent"],
-                                input='{"cmd":"observe"}\n', capture_output=True, text=True, timeout=15)
+                                input='{"cmd":"observe"}\n', capture_output=True, text=True, encoding="utf-8", timeout=15)
         check(result.returncode != 0, "invalid startup must fail nonzero")
         lines = result.stdout.splitlines()
         check(len(lines) == 1 and json.loads(lines[0])["ok"] is False,

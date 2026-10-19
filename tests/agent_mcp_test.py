@@ -17,7 +17,7 @@ class Client:
     def __init__(self, executable, project, *extra):
         self.process = subprocess.Popen(
             [executable, "--headless", "--mcp", "--project", project, "--seed", "42", *extra],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1)
         self.lines = queue.Queue()
         self.errors = []
         threading.Thread(target=lambda: [self.lines.put(l) for l in self.process.stdout] + [self.lines.put(None)],

@@ -18,7 +18,7 @@ class SaveAgent(Agent):
             [str(executable), "--headless", "--project", str(project), "--agent",
              "--save-dir", str(save_root)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
+            text=True, encoding="utf-8", bufsize=1,
         )
         self.lines = queue.Queue()
         self.errors = []

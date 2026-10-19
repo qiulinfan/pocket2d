@@ -29,7 +29,7 @@ def write_png(path, width, height):
 
 def pocket(game, *arguments, expect=0):
     result = subprocess.run([sys.executable, str(REPOSITORY / "tools/pocket"), "--game", game, *arguments],
-                            capture_output=True, text=True, timeout=120)
+                            capture_output=True, text=True, encoding="utf-8", timeout=120)
     check(result.returncode == expect, "pocket %s exited %d:\n%s%s" % (" ".join(arguments), result.returncode,
                                                                        result.stdout, result.stderr))
     return result.stdout + result.stderr

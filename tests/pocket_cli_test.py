@@ -16,7 +16,7 @@ def check(condition, message):
 
 def pocket(game, *arguments, expect=0):
     result = subprocess.run([sys.executable, str(REPOSITORY / "tools/pocket"), "--game", game, *arguments],
-                            capture_output=True, text=True, timeout=180)
+                            capture_output=True, text=True, encoding="utf-8", timeout=180)
     check(result.returncode == expect, "pocket %s exited %d, expected %d:\n%s%s" %
           (" ".join(arguments), result.returncode, expect, result.stdout, result.stderr))
     return result.stdout
@@ -33,7 +33,7 @@ def run(game):
         pocket(game, "new", str(project))
         check((project / "AGENTS.md").is_file() and (project / "actions.json").is_file(), "scaffold files")
         check("not empty" in subprocess.run([sys.executable, str(REPOSITORY / "tools/pocket"), "new", str(project)],
-                                            capture_output=True, text=True).stderr, "new refuses a non-empty directory")
+                                            capture_output=True, text=True, encoding="utf-8").stderr, "new refuses a non-empty directory")
         report = diagnostics(game, "check", str(project))
         check(not [d for d in report if d["severity"] == "error"], "a new project checks clean: %r" % report)
         check(any(d["code"] == "runtime" for d in report), "check starts the runtime")
@@ -46,7 +46,7 @@ def run(game):
         session = subprocess.run([sys.executable, str(REPOSITORY / "tools/pocket"), "--game", game, "run",
                                   str(project), "--record", str(replay)],
                                  input='{"cmd":"step","frames":20,"keys":["d"]}\n{"cmd":"quit"}\n',
-                                 capture_output=True, text=True, timeout=60)
+                                 capture_output=True, text=True, encoding="utf-8", timeout=60)
         check(session.returncode == 0 and replay.is_file(), "pocket run records: " + session.stderr)
         report = diagnostics(game, "test", str(project))
         check(sorted(d["code"] for d in report) == ["replay_passed", "scenario_passed"], "replay passes: %r" % report)

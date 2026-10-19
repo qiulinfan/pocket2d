@@ -80,7 +80,7 @@ def run_case(runtime, fixture, candidate, output, case):
     (case_dir / "commands.jsonl").write_text(encoded)
     run = subprocess.run(
         [str(runtime), "--headless", "--agent", "--project", str(project), "--seed", "42"],
-        input=encoded, text=True, capture_output=True, timeout=20,
+        input=encoded, text=True, encoding="utf-8", capture_output=True, timeout=20,
     )
     (case_dir / "stdout.jsonl").write_text(run.stdout)
     (case_dir / "stderr.log").write_text(run.stderr)

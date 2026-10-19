@@ -75,7 +75,7 @@ def run(executable):
         root = Path(directory)
         write_project(root, {"version": 1, "actions": {"jump": {"type": "button", "keys": ["not-a-key"]}}})
         result = subprocess.run([executable, "--headless", "--agent", "--project", str(root)],
-                                input='{"cmd":"quit"}\n', capture_output=True, text=True, timeout=30)
+                                input='{"cmd":"quit"}\n', capture_output=True, text=True, encoding="utf-8", timeout=30)
         response = json.loads(result.stdout.splitlines()[0])
         check(result.returncode == 1 and not response["ok"] and "unknown key name" in response["error"],
               "invalid actions.json fails startup: " + result.stdout)

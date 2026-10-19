@@ -34,7 +34,7 @@ def run(executable):
         finally:
             default.close()
         missing = subprocess.run([executable, "--project", str(root), "--scene", "nowhere", "--frames", "1"],
-                                 capture_output=True, text=True, timeout=30)
+                                 capture_output=True, text=True, encoding="utf-8", timeout=30)
         check(missing.returncode != 0 and "nowhere" in missing.stderr, "a missing scene is an error: " + missing.stderr)
     print("agent start scene passed")
 

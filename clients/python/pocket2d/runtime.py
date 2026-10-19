@@ -29,7 +29,7 @@ class Runtime:
         command += list(extra_args)
         self.timeout = timeout
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE, text=True, bufsize=1)
+                                        stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1)
         self._lines = queue.Queue()
         self.stderr = []
         self._ids = itertools.count(1)

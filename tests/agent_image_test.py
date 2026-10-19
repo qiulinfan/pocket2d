@@ -94,7 +94,7 @@ def run(executable, project):
                            POCKET_RENDER_DRIVER="software", POCKET_RENDER_VSYNC="0")
         result = subprocess.run([executable, "--project", str(project), "--save-dir", str(root / "saves"),
                                  "--frames", "31", "--capture", str(capture)],
-                                env=environment, capture_output=True, text=True, timeout=60)
+                                env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60)
         check(result.returncode == 0, "graphical capture failed: " + result.stderr[-2000:])
         graphical = decode_png(capture.read_bytes())
         differing = sum(1 for a, b in zip(graphical[2], headless) if a != b)

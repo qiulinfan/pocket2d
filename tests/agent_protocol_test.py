@@ -19,7 +19,7 @@ class Agent:
         self.process = subprocess.Popen(
             [executable, "--headless", "--project", project, "--agent", *extra_args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
+            text=True, encoding="utf-8", bufsize=1,
         )
         self.lines = queue.Queue()
         self.errors = []
