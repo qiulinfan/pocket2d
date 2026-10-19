@@ -103,11 +103,15 @@ def check_packaged_runtime(root, executable):
     folder = root / "runnable"
     folder.mkdir()
     shutil.copy2(executable, folder / Path(executable).name)
+    # Windows loads the SDL DLLs from beside the executable; without them the
+    # loader's missing-DLL dialog blocks the run.
+    for library in Path(executable).parent.glob("*.dll"):
+        shutil.copy2(library, folder / library.name)
     shutil.copytree(FIXTURE, folder / "project")
     shutil.copytree(ROOT / ".engine/system", folder / ".engine/system")
     capture = root / "frame.png"
     result = subprocess.run([str(folder / Path(executable).name), "--frames", "3", "--capture", str(capture)],
-                            cwd=root, capture_output=True, text=True, timeout=60)
+                            cwd=root, capture_output=True, text=True, encoding="utf-8", timeout=60)
     check(result.returncode == 0, "the packaged runtime starts: " + result.stderr[-400:])
     check(capture.is_file() and capture.read_bytes()[:4] == b"\x89PNG", "and renders its project")
 
