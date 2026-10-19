@@ -40,8 +40,13 @@ previous frame held), so a resimulated tick sees the same edges.
   side the other's public and LAN addresses. Both punch to both addresses for
   3 s (and at least 20 punches, so a stalled game does not give up early); if
   no direct packet arrives, traffic is relayed through the server
-  (`PK2R` frames). `force_relay` skips punching. Rooms expire after two minutes
-  without traffic; no answer from the server for 8 s fails.
+  (`PK2R` frames). `force_relay` skips punching. While punching, each side
+  also times the relay (punches through the server, answered the same way, the
+  stamp's top bit set); before START the host compares the best round trip of
+  each path and plays over the relay when it is faster by a fifth and 10 ms
+  (`direct_ms`, `relay_ms` in the status), and START tells the guest to relay
+  too. Rooms expire after two minutes without traffic; no answer from the
+  server for 8 s fails.
 - **Direct.** `HostDirect(port)` listens (default 27778) and its status `lan`
   is the address to type; `JoinDirect("ip[:port]")` connects. This is also the
   virtual LAN path: with Tailscale, ZeroTier or Radmin VPN both machines are on
@@ -74,7 +79,11 @@ guest adopts them. With `delay = 0` the host first times five punch round
 trips (at most 0.5 s): lockstep uses one-way ticks + 1 (2..10), rollback half
 that (1..2), and rollback (automatic delay or not) widens its window to the one-way trip beyond the delay plus 4 ticks (8..15). Input packets carry every unacknowledged frame (up to 32), the
 acknowledgement, a ping stamp, the sender's frame (time sync) and the latest
-checksums; they are resent every 30 ms. No packet for 6 s is a lost
+checksums; they are resent every 30 ms. While playing, a timed punch goes out
+every 250 ms: `loss` in the status is the share of the last 40 that got no
+answer within 1.5 s (-1 until 8 are that old), and before the session `ping` is
+the best punch round trip, so a game can show the connection's quality before
+the match. No packet for 6 s is a lost
 connection; BYE ends the session. Different input layouts fail with
 "different game version".
 
@@ -225,7 +234,8 @@ through `POCKET_NET_SERVER` or their own configuration.
   (round trip, typos), STUN messages, Lua snapshots (in-place restore,
   identity, upvalues, static tables, hashes) and the sound ledger.
 - `tests/netplay_test.py` (CTest `netplay`): two headless runtimes through a
-  local room server (punching, forced relay, rollback with corrections), a
+  local room server (punching, forced relay, rollback with corrections, the
+  relay chosen over a slow direct path behind a NAT-like proxy), a
   direct host found by LAN discovery, connection codes through a local STUN
   server with rollback, and the sync test (passing with all state tracked,
   failing on state outside the snapshots); sounds are played once, late ones

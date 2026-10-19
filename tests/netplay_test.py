@@ -4,7 +4,8 @@ local bindings, must agree on every synced value, edge and shared action.
 
 Links: a local room server (hole punching and forced relay), direct
 connections found by LAN discovery, and connection codes through a local STUN
-server. Sync: lockstep, and rollback (with corrections counted). A sync test
+server; a host behind a slow direct path plays over the faster relay, with the
+ping and loss measured. Sync: lockstep, and rollback (with corrections counted). A sync test
 session must pass with all state tracked and catch state that is not. Sounds
 across corrections: each is played once, those a correction reveals are played
 late, mispredicted ones are cancelled, and both machines end up with the same
@@ -230,6 +231,96 @@ class StunServer:
         self.running = False
 
 
+class SlowDirect:
+    """A NAT in front of the host whose direct path is slow. The host talks to
+    the room server through `port` (socket A); the server and the guest see
+    the host at socket B, and the host sees the guest at B as well. Direct
+    packets either way are held for `lag` seconds; server and relay traffic
+    passes at once, so the relay is the faster path."""
+
+    def __init__(self, server, lag):
+        self.server, self.lag = server, lag
+        self.a = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.b = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        for sock in (self.a, self.b):
+            sock.bind(("127.0.0.1", 0))
+            sock.setblocking(False)
+        self.port = self.a.getsockname()[1]
+        self.public = b"127.0.0.1:%d" % self.b.getsockname()[1]
+        self.host = self.guest = None
+        self.pending = []
+        self.running = True
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        import select
+        while self.running:
+            ready, _, _ = select.select([self.a, self.b], [], [], 0.002)
+            later = time.monotonic() + self.lag
+            for sock in ready:
+                try:
+                    data, addr = sock.recvfrom(4096)
+                except BlockingIOError:
+                    continue
+                if sock is self.a:  # the host to the server
+                    self.host = addr
+                    if data.startswith(b"PK2 HOST "):
+                        data = b" ".join(data.split(b" ")[:3] + [self.public])
+                    self.pending.append((0, self.b, data, self.server))
+                elif addr == self.server:
+                    if data.startswith(b"PK2 PEER "):
+                        ip, port = data.split(b" ")[2].decode().split(":")
+                        self.guest = (ip, int(port))
+                        data = b"PK2 PEER " + self.public + b" " + self.public
+                    self.pending.append((0, self.a, data, self.host))
+                elif addr == self.host:  # direct, to the guest
+                    self.pending.append((later, self.b, data, self.guest))
+                else:  # direct, from the guest
+                    self.pending.append((later, self.b, data, self.host))
+            now = time.monotonic()
+            due = [x for x in self.pending if x[0] <= now]
+            self.pending = [x for x in self.pending if x[0] > now]
+            for _, sock, data, to in due:
+                if to:
+                    sock.sendto(data, to)
+
+    def close(self):
+        self.running = False
+
+
+def relay_choice(executable, server_port):
+    """The host times the direct path and the relay and plays over the faster."""
+    proxy = SlowDirect(("127.0.0.1", server_port), 0.08)
+    a, b = pair(executable)
+    try:
+        check(call(a, "start", {"mode": "host", "server": "127.0.0.1:%d" % proxy.port, "rollback": True, "delay": 0}),
+              "host starts behind the slow proxy")
+        room = ""
+        for _ in range(100):
+            successful(a, {"cmd": "step"})
+            room = call(a, "status")["room"]
+            if room:
+                break
+            time.sleep(0.02)
+        check(call(b, "start", {"mode": "join", "server": "127.0.0.1:%d" % server_port, "room": room}), "guest starts")
+        sa, sb = wait_running(a, b)
+        check(sa["direct_ms"] >= 150 and 0 <= sa["relay_ms"] < 100, "the host timed both paths: direct %d ms, relay %d ms"
+              % (sa["direct_ms"], sa["relay_ms"]))
+        check(sa["relay"] and sb["relay"], "both play over the faster relay")
+        # The loss counts probes old enough to have been answered (1.5 s, 8 at least).
+        for _ in range(80):
+            both(a, b, {"cmd": "step", "frames": 5}, {"cmd": "step", "frames": 5})
+            time.sleep(0.05)
+        sa, sb = call(a, "status"), call(b, "status")
+        check(0 <= sa["ping"] < 100 and 0 <= sa["loss"] <= 0.1 and 0 <= sb["loss"] <= 0.1,
+              "ping %d ms and loss %.2f / %.2f over the relay" % (sa["ping"], sa["loss"], sb["loss"]))
+        print("relay choice: direct %d ms, relay %d ms, ping %d ms, loss %.2f" % (
+            sa["direct_ms"], sa["relay_ms"], sa["ping"], sa["loss"]))
+    finally:
+        a.close(); b.close()
+        proxy.close()
+
+
 def pair(executable):
     da, db = tempfile.mkdtemp(prefix="pocket-net-a-"), tempfile.mkdtemp(prefix="pocket-net-b-")
     write_project(Path(da)); write_project(Path(db))
@@ -265,6 +356,7 @@ def room_server(executable, server_port, relay, rollback):
         check(sa["side"] == 1 and sb["side"] == 2 and sb["payload"] == "payload-42", label + ": sides and payload")
         sa, sb = play(a, b, label, rollback)
         check(sa["relay"] == relay and sb["relay"] == relay, label + ": relay mode as requested")
+        check(sa["loss"] <= 0 and sb["loss"] <= 0, label + ": no loss on this machine (%s / %s)" % (sa["loss"], sb["loss"]))
         if rollback:
             check(sa["rollbacks"] + sb["rollbacks"] > 0, label + ": predictions were corrected (%d / %d rollbacks)"
                   % (sa["rollbacks"], sb["rollbacks"]))
@@ -362,6 +454,7 @@ def run(executable):
         room_server(executable, server_port, relay=False, rollback=False)
         room_server(executable, server_port, relay=True, rollback=False)
         room_server(executable, server_port, relay=False, rollback=True)
+        relay_choice(executable, server_port)
         discovery(executable)
         codes(executable)
         sync_test(executable, leaky=False)

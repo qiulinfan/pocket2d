@@ -60,7 +60,10 @@ struct Status {
     std::string error;
     std::string payload;       // the host's session payload (both sides)
     std::uint32_t seed = 0;    // shared session seed
-    int ping_ms = -1;
+    int ping_ms = -1;          // round trip (before the session: the best probe's)
+    double loss = -1;          // share of recent probes lost (0..1; -1 until measured)
+    int direct_ms = -1;        // best round trip of the direct path (-1: not measured)
+    int relay_ms = -1;         // room server: of the relay path
     int delay = 0;             // input delay in ticks (0 until chosen)
     bool relay = false;        // traffic goes through the room server
     std::uint32_t frame = 0;   // the tick being (or next to be) simulated

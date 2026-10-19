@@ -29,6 +29,30 @@ std::uint32_t GetU32(const std::uint8_t *p) {
            (static_cast<std::uint32_t>(p[2]) << 16) | (static_cast<std::uint32_t>(p[3]) << 24);
 }
 
+constexpr std::size_t kLossProbes = 40;         // the loss counts the last 40 probes (10 s while playing)...
+constexpr std::uint32_t kLossAnswerMs = 1500;   // ...that are old enough to have been answered
+constexpr std::size_t kLossMinProbes = 8;
+
+void Link::NoteProbe(std::uint32_t stamp) {
+    probes_.emplace_back(stamp, false);
+    while (probes_.size() > kLossProbes) probes_.pop_front();
+}
+
+void Link::NoteAnswer(std::uint32_t stamp) {
+    for (auto &[sent, answered] : probes_)
+        if (sent == stamp) answered = true;
+}
+
+double Link::Loss(std::uint64_t now) const {
+    std::size_t old = 0, lost = 0;
+    for (const auto &[sent, answered] : probes_) {
+        if (static_cast<std::uint32_t>(now) - sent < kLossAnswerMs) continue;
+        ++old;
+        if (!answered) ++lost;
+    }
+    return old < kLossMinProbes ? -1.0 : static_cast<double>(lost) / static_cast<double>(old);
+}
+
 namespace {
 
 constexpr std::uint32_t kPunchFallbackMs = 3000; // room server: then relay...
@@ -83,23 +107,48 @@ public:
         last_server_send = NowMs();
     }
 
-    void Send(const std::vector<std::uint8_t> &packet) override {
-        if (relay) {
-            std::vector<std::uint8_t> wrapped = {'P', 'K', '2', 'R'};
-            wrapped.insert(wrapped.end(), packet.begin(), packet.end());
-            SendRaw(server, wrapped);
-            return;
-        }
+    void SendRelayed(const std::vector<std::uint8_t> &packet) {
+        std::vector<std::uint8_t> wrapped = {'P', 'K', '2', 'R'};
+        wrapped.insert(wrapped.end(), packet.begin(), packet.end());
+        SendRaw(server, wrapped);
+    }
+
+    void SendDirect(const std::vector<std::uint8_t> &packet) {
         if (peer.Valid()) SendRaw(peer, packet);
         if (!peer_confirmed && peer_lan.Valid() && peer_lan != peer) SendRaw(peer_lan, packet);
     }
 
+    void Send(const std::vector<std::uint8_t> &packet) override {
+        if (relay) SendRelayed(packet);
+        else SendDirect(packet);
+    }
+
     void Probe() override {
+        const auto stamp = static_cast<std::uint32_t>(NowMs()) & 0x7FFFFFFFu;
         auto b = Header(kPunch);
-        PutU32(b, static_cast<std::uint32_t>(NowMs()));
+        PutU32(b, stamp);
         Send(b);
+        NoteProbe(stamp);
+        // The relay too, while it may still turn out the faster path; its
+        // punches are answered through the relay, the stamp's top bit set.
+        if (probe_relay && !relay && mode == Mode::Server && !force_relay && !room.empty()) {
+            auto r = Header(kPunch);
+            PutU32(r, stamp | 0x80000000u);
+            SendRelayed(r);
+        }
         last_punch_send = NowMs();
         ++punches;
+    }
+
+    bool CanRelay() const override { return mode == Mode::Server && !force_relay; }
+
+    void UseRelay() override {
+        if (relay || !CanRelay()) return;
+        relay = true;
+        best_rtt = relay_rtt;
+        probes_.clear();
+        Log::Info("netplay", "the relay is faster (" + std::to_string(relay_rtt) + " ms against " +
+                             std::to_string(direct_rtt) + " ms direct): relaying through the room server");
     }
 
     void Close() override {
@@ -144,6 +193,7 @@ public:
             if (auto a = Net::ParseAddress(pub, 0)) SetPeer(*a);
             if (auto a = Net::ParseAddress(lan, 0)) peer_lan = *a;
             StartConnecting();
+            probe_relay = !force_relay;
             Log::Info("netplay", "peer " + pub + " (lan " + lan + "), punching");
         } else if (cmd == "ERR") {
             std::string why;
@@ -166,21 +216,35 @@ public:
             if (state == LinkState::Waiting || state == LinkState::Connecting) state = LinkState::Connected;
             discovery.Close();
         }
-        if (via_relay && state == LinkState::Connecting && !peer_confirmed) {
+        const std::uint8_t type = p[4];
+        const bool timing = type == kPunch || type == kPunchAck;
+        if (via_relay && !timing && state == LinkState::Connecting && !peer_confirmed) {
             relay = true; // the peer gave up on punching first
             state = LinkState::Connected;
         }
-        const std::uint8_t type = p[4];
         if (type == kPunch) {
+            // Answered on the path it came by, so each path times itself.
             auto b = Header(kPunchAck);
             if (n >= 9) b.insert(b.end(), p + 5, p + 9); // echo the stamp
-            Send(b);
+            if (via_relay) SendRelayed(b);
+            else if (relay) Send(b);
+            else SendDirect(b);
         } else if (type == kPunchAck) {
             if (n >= 9) {
-                const auto rtt = static_cast<std::int64_t>(static_cast<std::uint32_t>(NowMs()) - GetU32(p + 5));
+                const std::uint32_t echoed = GetU32(p + 5);
+                const bool relay_probe = (echoed & 0x80000000u) != 0;
+                const std::uint32_t stamp = echoed & 0x7FFFFFFFu;
+                const auto rtt = static_cast<std::int64_t>((static_cast<std::uint32_t>(NowMs()) - stamp) & 0x7FFFFFFFu);
                 if (rtt >= 0 && rtt < 5000) {
-                    best_rtt = best_rtt < 0 ? static_cast<int>(rtt) : std::min(best_rtt, static_cast<int>(rtt));
-                    ++rtt_samples;
+                    const int ms = static_cast<int>(rtt);
+                    int &path = via_relay ? relay_rtt : direct_rtt;
+                    path = path < 0 ? ms : std::min(path, ms);
+                    if (via_relay) ++relay_samples;
+                    if (!relay_probe) {
+                        best_rtt = best_rtt < 0 ? ms : std::min(best_rtt, ms);
+                        ++rtt_samples;
+                        NoteAnswer(echoed);
+                    }
                 }
             }
         } else {

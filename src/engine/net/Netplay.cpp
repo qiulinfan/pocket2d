@@ -27,6 +27,8 @@ constexpr std::uint32_t kTimeoutMs = 6000;
 constexpr int kMaxFramesPerPacket = 32;
 constexpr std::uint32_t kMeasureMs = 500;    // the host measures the round trip before START
 constexpr int kMeasureSamples = 5;
+constexpr int kRelaySamples = 3;               // ...and the relay's, when a room server could relay
+constexpr std::uint32_t kProbeEveryMs = 250;   // while playing: probes for the loss
 constexpr std::uint32_t kEngineSum = 0x80000000u; // checksum keys of engine state hashes
 constexpr std::uint32_t kHashEvery = 60;
 constexpr std::uint32_t kNone = UINT32_MAX;
@@ -251,8 +253,20 @@ int DelayForRtt(int rtt_ms, SyncMode mode) {
     return std::clamp(ticks + 1, 2, 10);
 }
 
+// Room server: the relay instead of the direct path when it is clearly faster
+// (a fifth and 10 ms), decided by the host once before START.
+void ChoosePath() {
+    auto &s = S();
+    Link &l = *s.link;
+    if (s.start_sends == 0 && l.CanRelay() && !l.relay && l.direct_rtt >= 0 && l.relay_rtt >= 0 &&
+        l.relay_rtt + 10 < l.direct_rtt * 4 / 5)
+        l.UseRelay();
+    l.probe_relay = false;
+}
+
 void SendStart() {
     auto &s = S();
+    ChoosePath();
     if (s.config.delay <= 0) s.config.delay = DelayForRtt(s.link->best_rtt, s.config.mode);
     // Rollback over a long trip predicts further ahead: the window covers the one-way trip
     // beyond the delay plus some jitter (at least the configured window, at most 15 ticks).
@@ -272,6 +286,7 @@ void SendStart() {
     b.push_back(static_cast<std::uint8_t>(n & 255));
     b.push_back(static_cast<std::uint8_t>(n >> 8));
     b.insert(b.end(), s.payload.begin(), s.payload.begin() + static_cast<std::ptrdiff_t>(n));
+    b.push_back(static_cast<std::uint8_t>(s.link->relay ? 1 : 0)); // the guest relays too
     s.link->Send(b);
     s.last_start_send = NowMs();
     ++s.start_sends;
@@ -430,6 +445,8 @@ void HandleSessionPacket(const Bytes &packet) {
                 s.config.max_rollback = std::clamp<int>(p[11], 1, 30);
                 const std::size_t len = static_cast<std::size_t>(p[12]) | (static_cast<std::size_t>(p[13]) << 8);
                 if (14 + len <= n) s.payload.assign(reinterpret_cast<const char *>(p + 14), len);
+                if (14 + len < n && p[14 + len] != 0) s.link->UseRelay();
+                s.link->probe_relay = false;
                 StartSession();
             }
             s.link->Send(Header(kStartAck));
@@ -677,8 +694,10 @@ void Pump() {
         if (s.side == 1 && s.link->state == LinkState::Connected) {
             // With an automatic delay, or for the rollback window, first time a few round trips.
             if (!s.measure_started) s.measure_started = now;
-            const bool measuring = (s.config.delay <= 0 || s.config.mode == SyncMode::Rollback) && s.start_sends == 0 && now - s.measure_started < kMeasureMs &&
-                                   s.link->rtt_samples < kMeasureSamples;
+            const bool measuring = (s.config.delay <= 0 || s.config.mode == SyncMode::Rollback || s.link->probe_relay) &&
+                                   s.start_sends == 0 && now - s.measure_started < kMeasureMs &&
+                                   (s.link->rtt_samples < kMeasureSamples ||
+                                    (s.link->probe_relay && s.link->relay_samples < kRelaySamples));
             if (measuring) {
                 if (now - s.last_probe > 50) { s.link->Probe(); s.last_probe = now; }
             } else if (now - s.last_start_send > 100) {
@@ -689,6 +708,7 @@ void Pump() {
     case State::Running:
         if (s.side == 1 && !s.start_acked && now - s.last_start_send > 100) SendStart();
         if (now - s.last_send > 30) SendInput();
+        if (now - s.last_probe > kProbeEveryMs) { s.link->Probe(); s.last_probe = now; }
         if (now - s.last_peer_recv > kTimeoutMs) {
             s.state = State::Disconnected;
             s.error = "connection lost";
@@ -885,7 +905,7 @@ Status GetStatus() {
     st.error = s.error;
     st.payload = s.payload;
     st.seed = s.seed;
-    st.ping_ms = s.ping_ms;
+    st.ping_ms = s.ping_ms >= 0 || !s.link ? s.ping_ms : s.link->best_rtt;
     st.delay = s.config.delay;
     st.frame = s.sim_frame;
     st.stalls = s.stalls;
@@ -901,6 +921,9 @@ Status GetStatus() {
         st.code = s.link->code;
         st.nat = s.link->nat;
         st.relay = s.link->relay;
+        st.loss = s.link->Loss(NowMs());
+        st.direct_ms = s.link->direct_rtt;
+        st.relay_ms = s.link->relay_rtt;
         st.peer = s.link->peer_text;
         st.lan = s.link->lan_text;
     }
