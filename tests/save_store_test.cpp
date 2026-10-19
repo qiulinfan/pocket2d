@@ -55,6 +55,23 @@ void Run() {
     Check(loaded.status.ok && loaded.schema_version == 42 && loaded.data == data, "exact nested/signed64/UTF8/NUL roundtrip failed");
     Check(loaded.data["nested"][2]["min"].GetInt64() == std::numeric_limits<std::int64_t>::min(), "int64 minimum lost");
     Check(SaveStore::Write(directory, "slot", 43, data).ok && SaveStore::Read(directory, "slot").schema_version == 43, "existing slot replacement failed");
+    // The replaced version stays as the backup, which a damaged or missing slot falls back to.
+    const auto backup = directory / "slot.save.json.bak";
+    Check(Bytes(backup) == original, "the replaced version is kept as .bak");
+    const auto newest = Bytes(slot);
+    Put(slot, newest.substr(0, newest.size() / 2));
+    Code(SaveStore::Read(directory, "slot").status, "invalid_data");
+    auto recovered = SaveStore::Read(directory, "slot", true);
+    Check(recovered.status.ok && recovered.recovered && recovered.schema_version == 42 && recovered.data == data,
+          "a truncated slot falls back to its backup");
+    fs::remove(slot);
+    Check(SaveStore::Read(directory, "slot", true).recovered, "a missing slot falls back to its backup");
+    Put(backup, "{");
+    Code(SaveStore::Read(directory, "slot", true).status, "not_found");
+    fs::remove(backup);
+    Put(slot, newest);
+    Check(!SaveStore::Read(directory, "slot", true).recovered, "a sound slot is read as it is");
+    fs::remove(backup);
     const auto unicode_directory = temporary.path / fs::path(std::u8string(u8"存档"));
     Check(SaveStore::Write(unicode_directory, "slot", 42, data).ok && SaveStore::Read(unicode_directory, "slot").data == data,
           "UTF-8 directory roundtrip failed");

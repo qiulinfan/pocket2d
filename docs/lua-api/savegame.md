@@ -37,7 +37,9 @@ end
 ```
 
 `Write(slot, schema_version, data)` 成功返回 `{ok=true}`。
-`Read(slot)` 成功返回 `{ok=true, schema_version=..., data=...}`。
+`Read(slot)` 成功返回 `{ok=true, schema_version=..., data=...}`；`Read(slot, {fallback = true})`
+在存档缺失或损坏而上一版本（`<slot>.save.json.bak`，每次覆盖时自动保留）完好时返回上一版本并带
+`recovered=true`；不带 fallback 时损坏照常报错。
 两者的预期失败都返回 `{ok=false, code=..., error=...}`，不会把文件错误当作成功。
 错误类别包括 `invalid_argument`、`not_configured`、`not_found`、`invalid_data`、
 `unsupported_format` 和 `io_error`。游戏自己拥有 `schema_version`，引擎不会替游戏
@@ -55,8 +57,9 @@ userdata、thread 和循环引用被拒绝。共享 table 会复制其数据，�
 嵌套深度上限 32（根为 1），节点上限 100,000，完整文件上限 4 MiB。超限、非法
 UTF-8、非有限数值、损坏或未知引擎格式会明确失败。
 
-Write 在替换目标文件前完整验证和编码数据，并使用同目录的独占临时文件。
-校验或写入失败不能先截断旧存档。文件同步、原子替换与断电持久性的精确边界见
+Write 在替换目标文件前完整验证和编码数据，并使用同目录的独占临时文件，
+刷到磁盘（macOS 用 F_FULLFSYNC）后原子替换并同步目录；崩溃或断电后槽位要么是旧档
+要么是新档。校验或写入失败不能先截断旧存档。文件同步、原子替换与断电持久性的精确边界见
 [存储格式](../development/save-format.md)。这不是不可信脚本或敌对文件系统的 sandbox。
 
 Read 只返回数据，不改变角色、地图或输入。玩法恢复代码必须先校验整份 schema，

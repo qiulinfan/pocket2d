@@ -171,6 +171,9 @@ Status AtomicWrite(const std::filesystem::path &target, const char *bytes, std::
     }
 #ifdef _WIN32
     const int synced = _commit(temporary.fd);
+#elif defined(__APPLE__)
+    // fsync leaves the data in the drive's cache on macOS; F_FULLFSYNC flushes it.
+    const int synced = fcntl(temporary.fd, F_FULLFSYNC) == 0 ? 0 : fsync(temporary.fd);
 #else
     const int synced = fsync(temporary.fd);
 #endif
@@ -182,9 +185,31 @@ Status AtomicWrite(const std::filesystem::path &target, const char *bytes, std::
     std::filesystem::path checked;
     const auto checked_status = CheckPath(target.parent_path(), target.stem().stem().string(), checked);
     if (!checked_status.ok) return checked_status;
+    // The version being replaced stays as the backup: a second name for the same file
+    // (or a copy where links are not supported), so the slot itself never goes missing.
+    if (std::filesystem::is_regular_file(target, error)) {
+        auto backup = target;
+        backup += ".bak";
+        std::filesystem::remove(backup, error);
+        error.clear();
+        std::filesystem::create_hard_link(target, backup, error);
+        if (error) {
+            error.clear();
+            std::filesystem::copy_file(target, backup, std::filesystem::copy_options::overwrite_existing, error);
+        }
+        error.clear();
+    }
     if (!SDL_RenamePath(UTF8Path(temporary.path).c_str(), UTF8Path(target).c_str()))
         return Fail("io_error", "cannot replace save slot: " + std::string(SDL_GetError()));
     temporary.path.clear();
+#ifndef _WIN32
+    // The rename itself is durable once the directory is flushed.
+    const int directory_fd = open(target.parent_path().c_str(), O_RDONLY | O_CLOEXEC);
+    if (directory_fd >= 0) {
+        fsync(directory_fd);
+        CloseFD(directory_fd);
+    }
+#endif
     return Success();
 }
 } // namespace
@@ -214,13 +239,14 @@ Status Write(const std::filesystem::path &directory, const std::string &slot,
     } catch (const std::length_error &error) { return Fail("invalid_data", error.what()); }
       catch (const std::exception &error) { return Fail("io_error", error.what()); }
 }
-ReadResult Read(const std::filesystem::path &directory, const std::string &slot) {
+namespace {
+ReadResult ReadFile(const std::filesystem::path &target) {
     ReadResult result;
     try {
-        std::filesystem::path target;
-        result.status = CheckPath(directory, slot, target);
-        if (!result.status.ok) return result;
         std::error_code error;
+        if (std::filesystem::is_symlink(std::filesystem::symlink_status(target, error))) {
+            result.status = Fail("io_error", "symlink save slot is not supported"); return result;
+        }
         if (!std::filesystem::exists(target, error)) {
             result.status = Fail(error ? "io_error" : "not_found", error ? error.message() : "save slot does not exist"); return result;
         }
@@ -257,6 +283,33 @@ ReadResult Read(const std::filesystem::path &directory, const std::string &slot)
         result.schema_version = 0;
         result.data.SetNull();
         result.status = Fail("io_error", error.what());
+    }
+    return result;
+}
+} // namespace
+
+ReadResult Read(const std::filesystem::path &directory, const std::string &slot, bool fallback) {
+    std::filesystem::path target;
+    if (const auto checked = CheckPath(directory, slot, target); !checked.ok) {
+        ReadResult result;
+        result.status = checked;
+        return result;
+    }
+    ReadResult result = ReadFile(target);
+    // With fallback, a slot that is gone or does not parse gives its previous version. A
+    // slot that parses but is from another engine format is reported as it is.
+    if (fallback && !result.status.ok && (result.status.code == "not_found" || result.status.code == "invalid_data" ||
+                              result.status.code == "io_error")) {
+        auto backup = target;
+        backup += ".bak";
+        std::error_code error;
+        if (std::filesystem::exists(backup, error)) {
+            ReadResult previous = ReadFile(backup);
+            if (previous.status.ok) {
+                previous.recovered = true;
+                return previous;
+            }
+        }
     }
     return result;
 }

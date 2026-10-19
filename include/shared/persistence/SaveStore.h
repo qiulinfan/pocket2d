@@ -19,12 +19,18 @@ struct ReadResult {
     Status status;
     int schema_version = 0;
     rapidjson::Document data;
+    bool recovered = false; // read from the slot's previous version (the slot itself was missing or damaged)
 };
 
 bool IsValidIdentifier(const std::string &value);
+// A write goes to a temporary file that is flushed to the disk (F_FULLFSYNC on
+// macOS) and renamed over the slot, and the directory is flushed too, so after
+// a crash the slot holds the old or the new save, never a mix. The replaced
+// version stays beside it as <slot>.save.json.bak; Read with `fallback` returns
+// it (marked recovered) when the slot is missing or does not parse.
 Status Write(const std::filesystem::path &directory, const std::string &slot,
              int schema_version, const rapidjson::Value &data);
-ReadResult Read(const std::filesystem::path &directory, const std::string &slot);
+ReadResult Read(const std::filesystem::path &directory, const std::string &slot, bool fallback = false);
 } // namespace SaveStore
 
 #endif

@@ -36,7 +36,8 @@ The envelope has exactly three members:
 `schema_version` is a positive signed C++ `int` owned by the game. The store
 preserves newer game versions rather than migrating or rejecting them. A game
 must reject a version it does not understand before changing gameplay state.
-There is no automatic backup, migration, slot deletion or corruption repair API.
+There is no migration or slot deletion API. Each replacement keeps the previous
+version as `slot1.save.json.bak`, which Read falls back to (see below).
 
 ## Supported values and limits
 
@@ -79,8 +80,11 @@ Write performs validation and bounded encoding before creating anything in the
 slot directory. It then creates an exclusive temporary file in the same directory
 with a timer and counter suffix; exclusivity, not secrecy,
 protects ownership of that temporary filename. On POSIX it uses mode `0600`.
-It writes all bytes, checks the result, calls `fsync` on POSIX or `_commit` on
-Windows, and checks close before calling `SDL_RenamePath` to replace the target.
+It writes all bytes, checks the result, calls `fcntl(F_FULLFSYNC)` on macOS
+(`fsync` alone leaves data in the drive's cache there), `fsync` on other POSIX
+systems or `_commit` on Windows, and checks close. The slot being replaced then
+gets a second name, `slot1.save.json.bak` (a hard link, or a copy where links
+are unsupported), before `SDL_RenamePath` replaces the target.
 Current SDL3 implements that operation with POSIX `rename` or Windows
 `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING)`. There is no copy/truncate fallback.
 
@@ -88,9 +92,9 @@ Validation failure, temporary-file write/sync/close failure and failed replaceme
 leave previous valid slot bytes intact. The writer attempts to remove only its
 own temporary file on failure. A successful replacement is the commit point;
 later errors are not reported as if the previous file could be rolled back.
-The implementation does not synchronize the containing directory after rename,
-and file sync is not a universal power-loss guarantee. Abrupt termination may
-leave a temporary file. It is not automatically deleted during a later read.
+On POSIX the containing directory is synchronized after the rename, so the
+replacement itself survives a power loss; file sync is still only as good as the
+drive's own guarantees. Abrupt termination may leave a temporary file. It is not automatically deleted during a later read.
 Concurrent writers have last-successful-replacement semantics, without locking
 or conflict detection. Synchronous I/O can block on the underlying filesystem.
 
@@ -107,6 +111,10 @@ not a filesystem sandbox; the caller controls and trusts its storage root.
 `schema_version` and an owned RapidJSON document. A failed read exposes no partial
 payload. Both use structured results for ordinary validation and filesystem
 errors; neither terminates the process. Read never modifies storage or gameplay.
+Read with `fallback` (Lua: `Save.Read(slot, {fallback = true})`): when the
+slot is missing or fails with `invalid_data` or `io_error` and its `.bak` reads
+cleanly, Read returns the backup with `recovered` set; the game may tell the
+player and should save again. Without it, a damaged slot is reported as is.
 
 | Code | Meaning |
 | --- | --- |

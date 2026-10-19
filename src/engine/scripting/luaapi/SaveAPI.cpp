@@ -182,15 +182,22 @@ int Write(lua_State *state) {
 }
 int Read(lua_State *state) {
     const int top = lua_gettop(state);
-    if (top != 1 || lua_type(state, 1) != LUA_TSTRING)
-        return StatusResult(state, false, "invalid_argument", "Save.Read expects one slot string");
+    if (top < 1 || top > 2 || lua_type(state, 1) != LUA_TSTRING || (top == 2 && !lua_istable(state, 2)))
+        return StatusResult(state, false, "invalid_argument", "Save.Read expects a slot string and optional {fallback = true}");
+    bool fallback = false;
+    if (top == 2) {
+        lua_getfield(state, 2, "fallback");
+        fallback = lua_toboolean(state, -1);
+        lua_pop(state, 1);
+    }
     if (ActiveNamespace().empty()) return StatusResult(state, false, "not_configured", "game.config save_namespace is required");
     try {
-        const auto result = SaveStore::Read(Directory(), Slot(state));
+        const auto result = SaveStore::Read(Directory(), Slot(state), fallback);
         if (!result.status.ok) return StatusResult(state, false, result.status.code, result.status.message);
         StatusResult(state, true);
         lua_pushinteger(state, result.schema_version); lua_setfield(state, -2, "schema_version");
         Decode(state, result.data); lua_setfield(state, -2, "data");
+        if (result.recovered) { lua_pushboolean(state, 1); lua_setfield(state, -2, "recovered"); }
         return 1;
     } catch (const InvalidData &error) {
         lua_settop(state, top); return StatusResult(state, false, "invalid_data", error.what());
