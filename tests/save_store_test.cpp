@@ -187,6 +187,37 @@ void Run() {
         std::cout << "immutable-target rename failure check skipped: filesystem does not permit flags\n";
     }
 #endif
+#ifndef _WIN32
+    // Killed mid-write: a writer replacing a slot with two versions in turn is killed at
+    // random moments; the slot always reads as one whole version (and so does its backup).
+    {
+        const auto crash = temporary.path / "crash";
+        auto first = Parse(R"({"version":"a","fill":")" + std::string(200000, 'a') + R"("})");
+        auto second = Parse(R"({"version":"b","fill":")" + std::string(300000, 'b') + R"("})");
+        Check(SaveStore::Write(crash, "slot", 1, first).ok, "crash fixture write failed");
+        std::srand(12345);
+        for (int round = 0; round < 60; ++round) {
+            const auto writer = fork();
+            Check(writer >= 0, "fork failed");
+            if (writer == 0) {
+                for (int i = 0;; ++i) SaveStore::Write(crash, "slot", 1, i % 2 ? first : second);
+            }
+            usleep(static_cast<useconds_t>(std::rand() % 20000));
+            kill(writer, SIGKILL);
+            int status = 0;
+            waitpid(writer, &status, 0);
+            const auto read = SaveStore::Read(crash, "slot");
+            Check(read.status.ok && !read.recovered && (read.data == first || read.data == second),
+                  "a writer killed mid-write left a damaged slot (round " + std::to_string(round) + ")");
+            const auto backup = crash / "slot.save.json.bak";
+            if (fs::exists(backup)) {
+                Put(crash / "copy.save.json", Bytes(backup));
+                const auto previous = SaveStore::Read(crash, "copy");
+                Check(previous.status.ok && (previous.data == first || previous.data == second), "a damaged backup");
+            }
+        }
+    }
+#endif
     Check(Bytes(slot) == original, "error-path tests changed previous save");
     for (const auto &entry : fs::directory_iterator(directory))
         Check(entry.path().filename().string().find(".tmp-") == std::string::npos, "temporary file leaked after failure");
