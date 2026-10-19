@@ -24,6 +24,7 @@ void RegisterParticleSystemAPI();
 void RegisterSaveAPI();
 void RegisterInventoryAPI();
 void RegisterNetAPI();
+void RegisterUpdateAPI();
 
 } // namespace APIRegistrationDetail
 

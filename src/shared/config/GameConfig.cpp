@@ -195,6 +195,16 @@ GameConfigData GameConfig::Read() {
         }
     }
 
+    if (game_config.HasMember("version")) {
+        if (!game_config["version"].IsString()) throw std::runtime_error(game_config_path.string() + ": version must be a string");
+        config.version = game_config["version"].GetString();
+    }
+    if (game_config.HasMember("update")) {
+        const auto &update = game_config["update"];
+        if (!update.IsObject() || (update.HasMember("github") && !update["github"].IsString()))
+            throw std::runtime_error(game_config_path.string() + ": update must be {\"github\": \"owner/repo\"}");
+        if (update.HasMember("github")) config.update_github = update["github"].GetString();
+    }
     if (game_config.HasMember("save_namespace")) {
         const auto &value = game_config["save_namespace"];
         config.save_namespace.assign(value.GetString(), value.GetStringLength());

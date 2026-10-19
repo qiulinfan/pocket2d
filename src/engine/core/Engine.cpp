@@ -6,6 +6,7 @@ EM_ASYNC_JS(void, WaitForAnimationFrame, (), { await new Promise(resolve => requ
 #include "rendering/SplashScreen.h"
 #include <string_view>
 #include <charconv>
+#include "core/AppUpdate.h"
 #include "input/ActionMap.h"
 #include "net/Netplay.h"
 #include "shared/resources/ResourcePath.h"
@@ -300,6 +301,7 @@ Engine::Engine(World &world) : world_(world) {
         GameSave::Configure({});
         config_ = GameConfig::Read();
         ActionMap::Load(ResourcePath::ResourcesRootPath());
+        AppUpdate::Configure(config_.version, config_.update_github);
         GameSave::Configure(config_.save_namespace);
         // `game --scene NAME` starts elsewhere than the project's initial scene.
         if (const char *start = SDL_getenv("POCKET_INITIAL_SCENE"); start != nullptr && *start != '\0')

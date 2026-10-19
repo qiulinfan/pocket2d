@@ -7,6 +7,7 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/tilemap/TilemapAsset.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/animation/SpriteAnimationAsset.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/persistence/SaveStore.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/persistence/Sha256.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inventory/InventoryModel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inventory/ItemCatalog.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/ImageSize.cpp"

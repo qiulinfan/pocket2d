@@ -35,6 +35,10 @@ struct GameConfigData {
     // the way to the latest tick (one tick behind it); false shows the latest
     // tick as it is.
     bool frame_interpolation = true;
+    // The game's version ("1.2.0") and the GitHub repository ("owner/repo",
+    // game.config "update": {"github": ...}) whose Releases update it.
+    std::string version = "";
+    std::string update_github = "";
 };
 
 class GameConfig {
