@@ -49,7 +49,14 @@ The macOS app keeps the runtime and its libraries in `Contents/MacOS` and the
 project and engine resources in `Contents/Resources`, has an `Info.plist`, an
 icon made from `game.config`'s `package_icon` (default: the Pocket2D icon) and
 an ad-hoc signature (Apple silicon requires one; it is not notarized, so
-players open it the first time with right-click, Open). Archives: a zip for
+players open it the first time with right-click, Open). The Windows `.exe` gets the same
+icon: the packager appends a `.rsrc` section (RT_ICON 256, 48, 32 and 16 px
+PNGs, resized by Pillow or `sips`, and RT_GROUP_ICON 1) to the runtime kit's
+executable, which has no resources of its own. The icon file ships in
+`project/` even when `package_exclude` leaves its folder out, and the
+running game shows it as its window icon on every platform. `package_icon` is
+optional: a square PNG in the project; without it everything uses the
+Pocket2D icon. Archives: a zip for
 macOS (made with `ditto`, which keeps the signature), Windows and the web, a
 tar.gz for Linux (which keeps the executable bit).
 

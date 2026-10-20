@@ -91,6 +91,107 @@ def mac_icon(source_png, resources):
     return "icon.icns"
 
 
+ICON_SIZES = (256, 48, 32, 16)
+
+
+def icon_pngs(source_png):
+    """PNG images of the icon for a Windows icon, 256, 48, 32 and 16 pixels: resized by
+    Pillow, else by sips (macOS hosts), else the PNG as it is."""
+    try:
+        from PIL import Image
+        import io
+        image = Image.open(source_png).convert("RGBA")
+        out = []
+        for size in ICON_SIZES:
+            buffer = io.BytesIO()
+            image.resize((size, size), Image.LANCZOS).save(buffer, "PNG")
+            out.append(buffer.getvalue())
+        return out
+    except ImportError:
+        pass
+    if shutil.which("sips"):
+        with tempfile.TemporaryDirectory() as temp:
+            out = []
+            for size in ICON_SIZES:
+                target = Path(temp) / ("%d.png" % size)
+                if subprocess.run(["sips", "-z", str(size), str(size), "-s", "format", "png", str(source_png), "--out",
+                                   str(target)], capture_output=True).returncode != 0:
+                    break
+                out.append(target.read_bytes())
+            else:
+                return out
+    return [source_png.read_bytes()]
+
+
+def windows_icon(source_png, exe):
+    """Gives a PE executable without resources an icon: a new .rsrc section holding RT_ICON
+    images (PNG, which Windows reads since Vista) and RT_GROUP_ICON 1. False when the
+    executable already has resources or no room for another section header."""
+    data = bytearray(exe.read_bytes())
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    sections = struct.unpack_from("<H", data, pe + 6)[0]
+    optional_size = struct.unpack_from("<H", data, pe + 20)[0]
+    optional = pe + 24
+    pe32_plus = struct.unpack_from("<H", data, optional)[0] == 0x20B
+    section_align, file_align = struct.unpack_from("<II", data, optional + 32)
+    size_of_headers = struct.unpack_from("<I", data, optional + 60)[0]
+    directory = optional + (112 if pe32_plus else 96) + 2 * 8   # IMAGE_DIRECTORY_ENTRY_RESOURCE
+    table = optional + optional_size
+    if struct.unpack_from("<II", data, directory) != (0, 0) or table + 40 * (sections + 1) > size_of_headers:
+        return False
+    align = lambda v, a: (v + a - 1) // a * a
+    last = table + 40 * (sections - 1)
+    virtual_size, virtual_address = struct.unpack_from("<II", data, last + 8)
+    rva = align(virtual_address + virtual_size, section_align)
+
+    images = icon_pngs(source_png)
+    # Resource tree: types (ICON 3, GROUP_ICON 14) -> ids -> language 0 -> data entries.
+    count = len(images)
+    root_size = 16 + 8 * 2
+    ids_size = [16 + 8 * count, 16 + 8]           # ICON ids, GROUP id
+    langs_size = 16 + 8                            # one language each
+    tree_size = root_size + sum(ids_size) + langs_size * (count + 1)
+    entries_offset = tree_size
+    blobs_offset = entries_offset + 16 * (count + 1)
+    group = struct.pack("<HHH", 0, 1, count)
+    for i, png in enumerate(images):
+        w, h = struct.unpack(">II", png[16:24])
+        group += struct.pack("<BBBBHHIH", w if w < 256 else 0, h if h < 256 else 0, 0, 0, 1, 32, len(png), i + 1)
+    blobs = images + [group]
+    out = bytearray()
+    sub_dir = 0x80000000
+    icon_ids_at = root_size
+    group_ids_at = icon_ids_at + ids_size[0]
+    langs_at = group_ids_at + ids_size[1]
+    out += struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 2)
+    out += struct.pack("<II", 3, sub_dir | icon_ids_at) + struct.pack("<II", 14, sub_dir | group_ids_at)
+    out += struct.pack("<IIHHHH", 0, 0, 0, 0, 0, count)
+    for i in range(count):
+        out += struct.pack("<II", i + 1, sub_dir | (langs_at + langs_size * i))
+    out += struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 1) + struct.pack("<II", 1, sub_dir | (langs_at + langs_size * count))
+    for i in range(count + 1):
+        out += struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 1) + struct.pack("<II", 0, entries_offset + 16 * i)
+    offset = blobs_offset
+    for blob in blobs:   # IMAGE_RESOURCE_DATA_ENTRY: data RVA, size, code page, reserved
+        out += struct.pack("<IIII", rva + offset, len(blob), 0, 0)
+        offset = align(offset + len(blob), 8)
+    for blob in blobs:
+        out += blob
+        out += b"\0" * (align(len(out), 8) - len(out))
+
+    raw_size = align(len(out), file_align)
+    raw_pointer = align(len(data), file_align)
+    data += b"\0" * (raw_pointer - len(data)) + bytes(out) + b"\0" * (raw_size - len(out))
+    header = table + 40 * sections
+    struct.pack_into("<8sIIIIIIHHI", data, header, b".rsrc", len(out), rva, raw_size, raw_pointer, 0, 0, 0, 0,
+                     0x40000040)   # initialized data, readable
+    struct.pack_into("<H", data, pe + 6, sections + 1)
+    struct.pack_into("<I", data, optional + 56, align(rva + len(out), section_align))   # SizeOfImage
+    struct.pack_into("<II", data, directory, rva, len(out))
+    exe.write_bytes(bytes(data))
+    return True
+
+
 def package_mac(kit, project, files, config, stage):
     require(kit, "game", "lib", ".engine/system")
     title = config.get("game_title") or project.name
@@ -125,7 +226,11 @@ def package_windows(kit, project, files, config, stage):
     title = config.get("game_title") or project.name
     folder = stage / slug(title)
     folder.mkdir(parents=True)
-    shutil.copy2(kit / "game.exe", folder / (slug(title) + ".exe"))
+    exe = folder / (slug(title) + ".exe")
+    shutil.copy2(kit / "game.exe", exe)
+    icon_png = project / config["package_icon"] if config.get("package_icon") else kit / ".engine/system/icon.png"
+    if icon_png.is_file() and not windows_icon(icon_png, exe):
+        print("pocket package: %s already has resources; its icon is left as it is" % exe.name, file=sys.stderr)
     for dll in sorted(kit.glob("*.dll")):
         shutil.copy2(dll, folder / dll.name)
     copy_tree_resolved(kit / ".engine", folder / ".engine")
@@ -206,6 +311,10 @@ def package(project, platform, kit, out, make_archive=True):
         raise PackageError("%s has no game.config" % project)
     config = json.loads(config_path.read_text(encoding="utf-8"))
     files = project_files(project, config.get("package_exclude", []))
+    # The icon ships too (the window shows it), also from a folder the package leaves out.
+    icon = config.get("package_icon")
+    if icon and (project / icon).is_file() and all(relative != Path(icon).as_posix() for relative, _ in files):
+        files.append((Path(icon).as_posix(), project / icon))
     stage = out / platform
     if stage.exists():
         shutil.rmtree(stage)

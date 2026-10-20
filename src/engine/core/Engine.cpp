@@ -1175,6 +1175,18 @@ void Engine::initialize() {
     if (window == nullptr) {
         throw std::runtime_error(std::string("window creation failed: ") + SDL_GetError());
     }
+    // The game's icon (game.config package_icon), else the Pocket2D one.
+    {
+        std::error_code missing;
+        std::filesystem::path icon = config_.package_icon.empty()
+                                         ? std::filesystem::path()
+                                         : ResourcePath::ResourcesRootPath() / config_.package_icon;
+        if (icon.empty() || !std::filesystem::is_regular_file(icon, missing)) icon = ResourcePath::EngineSystemIconPath();
+        if (SDL_Surface *surface = IMG_Load(icon.string().c_str())) {
+            SDL_SetWindowIcon(window, surface);
+            SDL_DestroySurface(surface);
+        }
+    }
     const SDL_DisplayID display = ChooseWindowDisplay();
     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display));
     FitWindowToDisplayScale(window, display, config_.window_width, config_.window_height);

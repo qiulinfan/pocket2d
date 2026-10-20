@@ -195,6 +195,11 @@ GameConfigData GameConfig::Read() {
         }
     }
 
+    if (game_config.HasMember("package_icon")) {
+        if (!game_config["package_icon"].IsString())
+            throw std::runtime_error(game_config_path.string() + ": package_icon must be a string");
+        config.package_icon = game_config["package_icon"].GetString();
+    }
     if (game_config.HasMember("version")) {
         if (!game_config["version"].IsString()) throw std::runtime_error(game_config_path.string() + ": version must be a string");
         config.version = game_config["version"].GetString();

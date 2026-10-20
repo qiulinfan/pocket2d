@@ -39,6 +39,10 @@ struct GameConfigData {
     // game.config "update": {"github": ...}) whose Releases update it.
     std::string version = "";
     std::string update_github = "";
+    // The game's icon, a PNG in the project (game.config "package_icon"): the
+    // window's icon and the packages' (the .app's, the Windows .exe's). Empty:
+    // the Pocket2D icon.
+    std::string package_icon = "";
 };
 
 class GameConfig {
