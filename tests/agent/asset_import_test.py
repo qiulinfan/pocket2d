@@ -8,7 +8,7 @@ import sys
 import tempfile
 import zlib
 
-REPOSITORY = Path(__file__).resolve().parents[1]
+REPOSITORY = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPOSITORY / "clients/python"))
 from pocket2d import Runtime  # noqa: E402
 

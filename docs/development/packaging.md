@@ -84,7 +84,7 @@ do not fetch `project.pack` from `file://`), for example with
 
 ## Tests
 
-`tests/package_test.py` (CTest `package`) packages a fixture project for each
+`tests/agent/package_test.py` (CTest `package`) packages a fixture project for each
 platform from stand-in kits and checks the layouts, the exclusions and the
 web pack, then copies this build's runtime beside a project folder and checks
 that it runs and renders it with no arguments.

@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients/python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "clients/python"))
 from pocket2d import PocketEnv, Scenario, ScenarioError, VectorPocketEnv, find_actor, read_property  # noqa: E402
 
 

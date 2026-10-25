@@ -51,7 +51,7 @@ Load 必须先验证完整 schema 和跨字段关系，再修改 live 状态。�
 | 游戏规则 | `component_types/VillageState.lua`、`FarmRules.lua`、`Combatant.lua`、`InvasionRoute.lua`、`PortalPair.lua`；统一游戏时钟、动作仲裁和稳定 route ID。 |
 | 内容与反馈 | fixture 的 `scenes/`、`maps/`、`items/`、`actor_templates/`、HUD，以及自制几何生成脚本；两个区域应有可辨识的颜色和路线提示。 |
 | 持久化 | `component_types/VillageSave.lua`、`CONTRACT.md`；schema 校验、明确 busy／失败反馈、物品和永久进度关系。 |
-| QA／集成 | `tests/agent_two_world_village_test.py`、对应 runtime／render 测试，构建接线及迁移矩阵更新。实际 ownership 在实施前分配，避免多人同时改同一控制脚本。 |
+| QA／集成 | `tests/agent/agent_two_world_village_test.py`、对应 runtime／render 测试，构建接线及迁移矩阵更新。实际 ownership 在实施前分配，避免多人同时改同一控制脚本。 |
 
 只读观察应暴露 world ID、route ID／阶段、剩余倒计时、波次、祭坛／来源生命、库存数量和保存状态。agent 用同一键鼠输入完成流程；不提供直接改生命、直接关闭路线等验收捷径。
 

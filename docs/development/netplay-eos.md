@@ -53,7 +53,7 @@ which is ignored by Git.
 - Lua: `Net.EosHost(payload)` / `Net.EosJoin(room)`, with the credentials in
   `Net.Configure{eos = {product_id, sandbox_id, deployment_id, client_id,
   client_secret}}`; `Net.Status().link` is `"eos"`.
-- Test: like `tests/netplay_test.py` with two runtimes logged in with two
+- Test: like `tests/agent/netplay_test.py` with two runtimes logged in with two
   device IDs (`EOS_Connect_DeleteDeviceId` between runs), skipped when the
   SDK or credentials are absent.
 

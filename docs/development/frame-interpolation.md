@@ -50,7 +50,7 @@ move exactly with it, since interpolation is linear.
 
 ## Verification
 
-`tests/frame_interpolation_test.cpp` covers pairing, the fraction, cuts and
+`tests/engine/frame_interpolation_test.cpp` covers pairing, the fraction, cuts and
 the Lua key argument. On 2026-10-17 PocketTerraria (a scratch copy with
 `max_fps: 120`, a fresh scratch save, `RENDERLOGGER=1` and an input file
 walking right for 360 ticks) drew about 1.9 frames per tick. Interpolated, the

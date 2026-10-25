@@ -524,7 +524,7 @@ def sync_test(executable, leaky):
 
 def run(executable):
     server_port = free_port()
-    server = subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent.parent / "tools/room_server/room_server.py"),
+    server = subprocess.Popen([sys.executable, str(Path(__file__).resolve().parents[2] / "tools/room_server/room_server.py"),
                                "--port", str(server_port), "--bind", "127.0.0.1"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.5)

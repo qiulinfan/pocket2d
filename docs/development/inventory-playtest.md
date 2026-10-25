@@ -10,7 +10,7 @@ source game's partial-pickup duplication and asymmetric swaps are not retained.
 
 ```
 build/sdl3-debug/game --project tests/fixtures/inventory_village --save-dir build/inventory-playtest-saves
-python3 tests/agent_inventory_test.py build/sdl3-debug/game tests/fixtures/inventory_village
+python3 tests/agent/agent_inventory_test.py build/sdl3-debug/game tests/fixtures/inventory_village
 ```
 
 The window is fixed at 960×720. The top strip contains the real player, training

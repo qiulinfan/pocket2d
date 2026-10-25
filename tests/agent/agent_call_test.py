@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients/python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "clients/python"))
 from pocket2d import ProtocolError, Runtime  # noqa: E402
 
 

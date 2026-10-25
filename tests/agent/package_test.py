@@ -13,11 +13,11 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "clients/python"))
 from pocket2d.package import package  # noqa: E402
 
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "agent_session"
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "agent_session"
 
 
 def check(condition, message):

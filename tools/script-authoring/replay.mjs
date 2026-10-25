@@ -15,7 +15,7 @@ if(args.length!==4||args[0]!=='--runtime'||args[2]!=='--python'){
   const result=compileProject(path.join(root,'tests/script_authoring/tsconfig.json'),output);
   if(!result.ok){console.error(JSON.stringify(result));process.exitCode=1;}
   else{
-   const run=spawnSync(args[3],[path.join(root,'tests/agent_typed_gameplay_test.py'),path.resolve(args[1]),path.join(root,'tests/fixtures/typed_gameplay'),output],{encoding:'utf8',maxBuffer:8*1024*1024,timeout:80000});
+   const run=spawnSync(args[3],[path.join(root,'tests/agent/agent_typed_gameplay_test.py'),path.resolve(args[1]),path.join(root,'tests/fixtures/typed_gameplay'),output],{encoding:'utf8',maxBuffer:8*1024*1024,timeout:80000});
    process.stdout.write(run.stdout??'');process.stderr.write(run.stderr??'');
    if(run.error)console.error(run.error.message);
    process.exitCode=run.status===0?0:1;

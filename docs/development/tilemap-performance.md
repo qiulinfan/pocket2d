@@ -1,6 +1,6 @@
 # Native Tilemap performance boundary
 
-The first local comparison uses `tests/tilemap_benchmark.cpp` in Release on the
+The first local comparison uses `tests/benchmarks/tilemap_benchmark.cpp` in Release on the
 same Mac and SDL3 backend. The baseline instantiates one SpriteRenderer actor
 per cell. The native path owns cell arrays and submits only visible tiles.
 Both use the same generated atlas, cell IDs, camera path, 640×360 render target,

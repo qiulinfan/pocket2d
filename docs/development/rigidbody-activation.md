@@ -62,7 +62,7 @@ does not introduce a recursive physics-state flush or a worker-thread API.
 
 ## Evidence and remaining validation
 
-`tests/rigidbody_activation_test.cpp` uses the real Engine, Lua setters and Box2D.
+`tests/engine/rigidbody_activation_test.cpp` uses the real Engine, Lua setters and Box2D.
 Before the fix it failed with an enabled body's position not advancing because
 the hierarchy still reported it disabled. The regression covers early and late
 activation, one-time Lua/native startup, real contact suspension and recovery,
@@ -75,7 +75,7 @@ solid map cell, then calling `map:OnDestroy()` from its contact-exit callback,
 crashed the worker with SIGSEGV even inside `pcall`. The reverse operation also
 reproduced SIGSEGV: disabling the map and directly destroying the touching
 Rigidbody from its exit callback. The shared mutation scope covers both owners;
-`tests/tilemap_activation_test.cpp` establishes real circle/map contact in each
+`tests/engine/tilemap_activation_test.cpp` establishes real circle/map contact in each
 of six cases: rejecting direct map destruction when disabling the Rigidbody;
 rejecting direct Rigidbody destruction when disabling the map; safely deferring
 map actor destruction; safely deferring Rigidbody component removal; allowing

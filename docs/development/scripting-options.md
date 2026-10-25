@@ -41,7 +41,7 @@ TypeScript 游戏脚本也不必引入第二 VM：TypeScriptToLua 已提供保�
 
 ### 已完成的 Lua 5.4.9 维护升级
 
-**源码替换、集成构建与升级回归已经完成。** 替换前对官方 5.4.6 archive 与 vendored C/C++ 源文件的只读比较未发现项目补丁，因此无需移植私有 Lua 修改。与官方 5.4.9 比较，`lua.h` 的差异仅涉及版本/版权信息，`lauxlib.h`、`lualib.h`、`lua.hpp` 未变；`luaconf.h` 增加模块名称处理标记。当前保留 LuaBridge 2.7，并新增 `tests/lua_vm_test.cpp` 覆盖 hook/yield、GC/weak userdata、加载/运行错误与现有绑定。原版源码留在忽略的 `build/lua-upgrade-baseline/`；不能把头文件相近当作运行正确证明。
+**源码替换、集成构建与升级回归已经完成。** 替换前对官方 5.4.6 archive 与 vendored C/C++ 源文件的只读比较未发现项目补丁，因此无需移植私有 Lua 修改。与官方 5.4.9 比较，`lua.h` 的差异仅涉及版本/版权信息，`lauxlib.h`、`lualib.h`、`lua.hpp` 未变；`luaconf.h` 增加模块名称处理标记。当前保留 LuaBridge 2.7，并新增 `tests/engine/lua_vm_test.cpp` 覆盖 hook/yield、GC/weak userdata、加载/运行错误与现有绑定。原版源码留在忽略的 `build/lua-upgrade-baseline/`；不能把头文件相近当作运行正确证明。
 
 升级来源应直接固定为 [lua.org 的 5.4.9 官方 archive](https://www.lua.org/ftp/lua-5.4.9.tar.gz)，对照 [官方下载目录](https://www.lua.org/ftp/)；完整保留源码中的许可，校验输出仅保存在忽略目录。官方已知缺陷和差异包含 hook/yield 处理、错误定位、弱 table/GC、finalizer 栈空间、非法 UTF-8 等修复。其中部分错误处理与 GC 路径和后续预算/失败恢复工作相关；REPL 专属修复则不直接作用于目前排除 `lua.c` 的嵌入构建。[Lua 官方 bug 列表](https://www.lua.org/bugs.html)、[5.4.8→5.4.9 官方差异](https://www.lua.org/work/diffs-lua-5.4.8-lua-5.4.9.html)
 

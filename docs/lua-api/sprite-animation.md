@@ -126,9 +126,9 @@ Play 的首帧事件在后续动画推进阶段派发。
 tick。新增组件不会进入当前接收者快照。Lua getter 和 callback 错误走正常结构化
 runtime error 路径，不应使 native worker 崩溃。
 
-测试包括 [资源校验](../../tests/sprite_animation_asset_test.cpp)、
-[原生播放](../../tests/sprite_animation_test.cpp)、
-[像素读回](../../tests/sprite_animation_render_test.cpp)、
-[agent 时序和重放](../../tests/agent_animation_test.py)及
-[getter 重入](../../tests/animation_getter_reentry_test.py)。最终集成矩阵以
+测试包括 [资源校验](../../tests/engine/sprite_animation_asset_test.cpp)、
+[原生播放](../../tests/engine/sprite_animation_test.cpp)、
+[像素读回](../../tests/engine/sprite_animation_render_test.cpp)、
+[agent 时序和重放](../../tests/agent/agent_animation_test.py)及
+[getter 重入](../../tests/agent/animation_getter_reentry_test.py)。最终集成矩阵以
 [development status](../development/status.md) 为准。

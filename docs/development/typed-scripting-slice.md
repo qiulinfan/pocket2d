@@ -60,7 +60,7 @@ configure/test time.
 
 QA owns `tests/fixtures/typed_gameplay/**` (handwritten Lua reference plus existing
 self-authored animation geometry), `tests/script_authoring/**` (TS source/config),
-and `tests/agent_typed_gameplay_test.py`.
+and `tests/agent/agent_typed_gameplay_test.py`.
 
 Implement the same real movement/animation one-shot attack/health/damage/save-load
 controller in TS and Lua. Use actual Rigidbody, Input, SpriteAnimation callbacks,
@@ -77,7 +77,7 @@ does not overwrite last good Lua. Test valid generated code under the real
 Debug/Release/sanitized engine where meaningful. Source-map runtime diagnostics
 are not claimed until separately verified; TS compiler diagnostics are in scope.
 
-Native worker owns `tests/script_api_contract_test.cpp` and may write a standalone
+Native worker owns `tests/engine/script_api_contract_test.cpp` and may write a standalone
 runtime Lua probe fixture. It verifies declared runtime names/properties and real
 representative calls/readonly failures/nullable behavior; compile-only nominal
 markers and authoring-only readonly rules are distinguished. Coordinate manifest

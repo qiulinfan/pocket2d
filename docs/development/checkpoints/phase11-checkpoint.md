@@ -62,7 +62,7 @@ The runtime benchmark measures the complete Engine::ApplySceneEditCommand call,
 including snapshot, preparation and commit, with three warmups and seven measured
 samples. Fixture construction/startup is excluded; only the before/after SceneEdits
 translation unit differs against the same Release dependencies. Its tracked
-workload is tests/scene_edit_benchmark.cpp.
+workload is tests/benchmarks/scene_edit_benchmark.cpp.
 
 The document profile measures three complete standalone SetComponentProperty calls
 on root Transform.x and reports their median. It has no live session hook, runtime

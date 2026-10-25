@@ -9,10 +9,10 @@ import struct
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients/python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "clients/python"))
 from pocket2d import Session  # noqa: E402
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def check(condition, message):

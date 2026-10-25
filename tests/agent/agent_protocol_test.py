@@ -85,7 +85,7 @@ def run(executable, project):
         initial = successful(agent, {"cmd": "observe"})
         check(initial["frame"] == 0, "observe must not step")
         description = successful(agent, {"cmd": "describe"})
-        expected_api = json.loads((Path(__file__).resolve().parents[1] / "api/host-api.json").read_text())
+        expected_api = json.loads((Path(__file__).resolve().parents[2] / "api/host-api.json").read_text())
         check(description.get("script_api") == expected_api, "agent discovery must expose the generated curated script contract")
         types = {entry["type"]: entry for entry in description["component_types"]}
         check("Rigidbody" in types and "Village" in types,

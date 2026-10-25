@@ -273,7 +273,7 @@ return JSON `null`. Responses report the map revision, dimensions and cell size,
 plus requested cell values. UIDs return as decimal strings even when a request
 uses a lossless unsigned JSON integer. Pending `SetCell` writes remain invisible
 until the next pre-physics commit. The real farming fixture and Python protocol
-test are `tests/fixtures/tilemap_farm` and `tests/agent_tilemap_test.py`.
+test are `tests/fixtures/tilemap_farm` and `tests/agent/agent_tilemap_test.py`.
 
 Seeded replay is tested on the same platform/build. Cross-platform bit-exact
 physics, arbitrary Lua IO determinism, controller action schemas,

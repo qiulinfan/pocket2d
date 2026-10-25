@@ -66,7 +66,7 @@ dict of action values, and returns Gymnasium 1.x results. `info` carries
 `condition` index and the reported `events`. `Runtime` is the underlying JSONL
 client for direct protocol use.
 
-`tests/scenario_env_test.py` solves all three village scenarios with scripted
+`tests/agent/scenario_env_test.py` solves all three village scenarios with scripted
 key policies and checks reward accounting and episode reproducibility.
 `VectorPocketEnv(executable, project, scenario, num_envs)` runs one runtime
 process per sub-environment and steps them in parallel threads. Its `reset`
@@ -131,6 +131,6 @@ with Bot(PROJECT, seed=3, out="build/my-game", select={"names": ["Player"]}) as 
   `tiles(actor_uid, component_key, layer, cells)` reads tilemap cells without
   advancing; `request` and `reset` reach the protocol directly.
 
-`tests/agent_session_test.py` drives `tests/fixtures/agent_session` through
+`tests/agent/agent_session_test.py` drives `tests/fixtures/agent_session` through
 each of these. PocketTerraria's `tools/tbot.py` and VillageRim's
 `tools/playtest.py` in the games repository build their players on it.

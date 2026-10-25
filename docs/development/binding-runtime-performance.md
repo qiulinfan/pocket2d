@@ -41,7 +41,7 @@ It is distinct from the isolated binding-operation benchmarks in
 
 ## Matched workload and correctness
 
-The tracked workload is tests/sprite_animation_benchmark.cpp. Each executable
+The tracked workload is tests/benchmarks/sprite_animation_benchmark.cpp. Each executable
 creates its own identical geometric atlas and scenes, then runs full headless
 Engine::StepSimulation calls with 1,000 and 10,000 actors. Settings are explicit
 and identical: 8 warmup ticks, 60 measured ticks and a 30,000 ms cooperative budget
