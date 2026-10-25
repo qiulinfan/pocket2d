@@ -69,7 +69,7 @@ worker 能报告实际已完成帧时沿用它的 frame。若 worker 被强杀�
 
 核心文件：
 
-- `include/engine/scripting/ScriptBudget.h`、`src/engine/scripting/ScriptBudget.cpp`：allocator、count hook、嵌套作用域与粘性原因。
+- `src/engine/scripting/ScriptBudget.h`、`src/engine/scripting/ScriptBudget.cpp`：allocator、count hook、嵌套作用域与粘性原因。
 - `src/engine/scripting/manager/Runtime.cpp`：创建/关闭预算化 Lua state；不改变 LuaBridge 或 VM 版本。
 - `src/app/runtime/AgentSession.cpp`：启动/命令作用域、失败上报和内部握手。
 - `src/app/runtime/AgentSupervisor.cpp`：非阻塞 SDL3 process pipes、deadline、关联、校验、kill/reap 与恢复。

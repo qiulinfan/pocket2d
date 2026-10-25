@@ -6,7 +6,7 @@ add_executable(
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentSupervisor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentReplay.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AgentMcpServer.cpp"
-    "${PROJECT_SOURCE_DIR}/include/app/runtime/RuntimeApp.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/RuntimeApp.h"
 )
 target_link_libraries(game_engine PRIVATE engine_runtime)
 target_compile_definitions(game_engine PRIVATE POCKET2D_VERSION="${PROJECT_VERSION}")
@@ -33,7 +33,7 @@ elseif(UNIX AND NOT EMSCRIPTEN)
     set_target_properties(game_engine PROPERTIES INSTALL_RPATH "$ORIGIN/lib")
 endif()
 if(EMSCRIPTEN)
-    # The web runtime: game.html/.js/.wasm. The page (web/shell.html) loads the
+    # The web runtime: game.html/.js/.wasm. The page (web_shell.html) loads the
     # packaged project into /project before main; ASYNCIFY lets the game loop
     # yield to the browser every frame; saves live in IndexedDB.
     set_target_properties(game_engine PROPERTIES SUFFIX ".html")
@@ -41,8 +41,8 @@ if(EMSCRIPTEN)
         "-sASYNCIFY" "-sASYNCIFY_STACK_SIZE=1048576" "-sSTACK_SIZE=8388608" "-sALLOW_MEMORY_GROWTH=1"
         "-sINITIAL_MEMORY=268435456" "-sFORCE_FILESYSTEM=1" "-lidbfs.js"
         "-sEXPORTED_RUNTIME_METHODS=FS,addRunDependency,removeRunDependency,callMain"
-        "--shell-file=${PROJECT_SOURCE_DIR}/web/shell.html")
-    set_property(TARGET game_engine APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/web/shell.html")
+        "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web_shell.html")
+    set_property(TARGET game_engine APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web_shell.html")
     install(FILES "$<TARGET_FILE_DIR:game_engine>/game.html" "$<TARGET_FILE_DIR:game_engine>/game.js"
         "$<TARGET_FILE_DIR:game_engine>/game.wasm" DESTINATION . COMPONENT runtime_kit)
 else()

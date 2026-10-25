@@ -112,7 +112,7 @@ Run the game executable:
 - `src/engine/*`: runtime systems
 - `src/editor/*`: editor shell, documents, panels
 - `src/shared/*`: config, scene format, resource helpers
-- `include/*`: public headers for the same layers
+- each `src/` folder keeps its headers beside its sources
 - `.engine/system/*`: editor fonts and icons
 - `.engine/templates/*`: project templates, including the ball game sample
 - `thirdparty/*`: vendored dependencies; SDL3 (with SDL_image, SDL_ttf, SDL_mixer) and Box2D 3 are fetched at configure time

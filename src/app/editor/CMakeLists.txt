@@ -2,7 +2,7 @@ add_executable(
     game_editor
     "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/editor_bootstrap.cpp"
-    "${PROJECT_SOURCE_DIR}/include/app/editor/EditorApp.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.h"
 )
 target_link_libraries(game_editor PRIVATE editor_core)
 if(WIN32)

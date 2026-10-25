@@ -6,7 +6,7 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/Link.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Link.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConnectionCode.cpp"
-        "${PROJECT_SOURCE_DIR}/include/engine/net/ConnectionCode.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/net/UdpSocket.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/net/Netplay.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ConnectionCode.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/UdpSocket.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Netplay.h"
 )

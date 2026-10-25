@@ -4,5 +4,5 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/SceneDocument.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SceneMutations.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TilemapDocument.cpp"
-        "${PROJECT_SOURCE_DIR}/include/editor/documents/SceneDocument.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SceneDocument.h"
 )

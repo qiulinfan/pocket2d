@@ -4,9 +4,9 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/EventBus.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LuaBoundary.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LuaJson.cpp"
-        "${PROJECT_SOURCE_DIR}/include/engine/scripting/APIRegistration.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/scripting/ComponentManager.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/scripting/EventBus.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/APIRegistration.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ComponentManager.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/EventBus.h"
 )
 
 add_subdirectory(luaapi)

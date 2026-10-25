@@ -34,7 +34,7 @@ if(UNIX)
     target_link_libraries(probe_lua PUBLIC m ${CMAKE_DL_LIBS})
 endif()
 add_library(probe_budget STATIC "${POCKET_ROOT}/src/engine/scripting/ScriptBudget.cpp")
-target_include_directories(probe_budget PUBLIC "${POCKET_ROOT}/include/engine")
+target_include_directories(probe_budget PUBLIC "${POCKET_ROOT}/src/engine")
 target_link_libraries(probe_budget PUBLIC probe_lua)
 
 include(CTest)

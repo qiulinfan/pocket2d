@@ -264,7 +264,7 @@ def main():
         contract = json.loads(source.read_text(encoding="utf-8"))
         validate(contract)
         outputs = {"types/pocket2d.d.ts": typescript(contract), "types/pocket2d.lua": luals(contract),
-                   "include/engine/scripting/ScriptAPIContract.h": header(contract)}
+                   "src/engine/scripting/ScriptAPIContract.h": header(contract)}
         stale = []
         for relative, content in outputs.items():
             path = options.root / relative

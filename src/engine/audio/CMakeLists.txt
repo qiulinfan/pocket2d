@@ -3,6 +3,6 @@ target_sources(
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/AudioManager.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SoundLedger.cpp"
-        "${PROJECT_SOURCE_DIR}/include/engine/audio/AudioManager.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/audio/SoundLedger.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AudioManager.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SoundLedger.h"
 )

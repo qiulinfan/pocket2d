@@ -126,7 +126,7 @@ def main():
     try:
         source = json.loads((options.root / "scripting/api/agent-protocol.json").read_text(encoding="utf-8"))
         schema = build(source)
-        outputs = {"include/app/runtime/AgentProtocolSchema.h": header(schema),
+        outputs = {"src/app/runtime/AgentProtocolSchema.h": header(schema),
                    "docs/development/agent-commands.md": reference(schema)}
         stale = []
         for relative, content in outputs.items():
