@@ -13,6 +13,18 @@
   defense fixture proves only that slice, not migration of the full game.
 - Build and test using CMake/CTest. Benchmark Release builds with warmup and
   workload counts; record timings locally under ignored `build/`, not in Git.
+- Layout: each `src/` module keeps its headers beside its sources (include
+  roots `src` and `src/engine`). `api/` holds the host API contract, agent
+  command schema and asset schemas, with generated declarations in
+  `api/types/`. Tests sit in `tests/{engine,editor,agent,benchmarks}` and are
+  all listed in `tests/CMakeLists.txt`; fixture projects in `tests/fixtures/`.
+  ADRs and phase checkpoints go in `docs/development/{adr,checkpoints}/`.
+  Builds write only under `build/`, never into the source root.
+- pocket2d-games and bleach-vs-naruto-pocket use these paths directly:
+  `clients/python`, `tools/pocket`, `tools/room_server`, `build/sdl3-release/game`,
+  `docs/lua-api/`, `docs/development/{game-completeness-tests,netplay}.md` and
+  `.engine/`. Move them only together with those repositories. Games and
+  samples stay out of this repository.
 - Do not claim SOTA from an isolated microbenchmark. Comparable published
   baselines, representative workloads and platform coverage are still required.
 - Keep README owner-authored. Development plans, ADRs, and handoffs belong here
