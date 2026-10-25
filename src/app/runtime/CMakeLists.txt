@@ -13,7 +13,6 @@ target_compile_definitions(game_engine PRIVATE POCKET2D_VERSION="${PROJECT_VERSI
 game_engine_apply_cxx_warnings(game_engine)
 game_engine_link_sdl(game_engine)
 game_engine_stage_resources(game_engine)
-game_engine_mirror_windows_runtime_to_root(game_engine)
 set_target_properties(
     game_engine
     PROPERTIES
@@ -56,25 +55,3 @@ else()
     endforeach()
 endif()
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/.engine/system" DESTINATION .engine COMPONENT runtime_kit)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32)
-    add_custom_command(
-        TARGET game_engine
-        POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:game_engine>"
-            "${PROJECT_SOURCE_DIR}/$<TARGET_FILE_NAME:game_engine>"
-        COMMENT "Mirroring game executable to project root"
-    )
-    add_custom_target(
-        game_engine_root_mirror ALL
-        COMMAND
-            ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:game_engine>"
-            "${PROJECT_SOURCE_DIR}/$<TARGET_FILE_NAME:game_engine>"
-        DEPENDS game_engine
-        COMMENT "Refreshing root game executable"
-        VERBATIM
-    )
-endif()

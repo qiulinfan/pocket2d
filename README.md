@@ -71,14 +71,14 @@ cmake --preset unix-makefiles-release
 cmake --build --preset unix-makefiles-release -j4
 ```
 
-Run the editor from the project root:
+Run the editor from the repository root:
 ```bash
-./pocket
+./build/unix-makefiles-release/pocket
 ```
 
 Run the game executable:
 ```bash
-./game
+./build/unix-makefiles-release/game
 ```
 
 ### Windows Release
@@ -97,13 +97,13 @@ cmake --build --preset vs-release
 Run the editor:
 
 ```powershell
-.\pocket.exe
+.\build\vs2022-x64\Release\pocket.exe
 ```
 
 Run the game executable:
 
 ```powershell
-.\game.exe
+.\build\vs2022-x64\Release\game.exe
 ```
 
 ## Repository Layout and Architecture
