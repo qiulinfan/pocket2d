@@ -89,9 +89,9 @@ upstream fix passes the same compilation and real-engine replay tests.
 ## Verification and current limits
 
 ```sh
-cmake -S . -B build/modern-debug -DPOCKET_ENABLE_TYPESCRIPT_TESTS=ON
-cmake --build build/modern-debug --parallel
-ctest --test-dir build/modern-debug --output-on-failure
+cmake --preset ninja-debug -DPOCKET_ENABLE_TYPESCRIPT_TESTS=ON
+cmake --build --preset ninja-debug
+ctest --preset ninja-debug
 ```
 
 The core suite has 70 tests and needs no npm installation. Explicitly enabling

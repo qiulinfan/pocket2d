@@ -2,7 +2,8 @@
 
 `tools/pocket` is a headless command line for projects. It needs Python 3 and
 a built runtime: `--game PATH`, the `POCKET_GAME` environment variable, or
-`build/sdl3-release/game` then `build/sdl3-debug/game`.
+the newest Release build of a CMake preset (`build/ninja-release/game`,
+`build/vs2022-x64/Release/game.exe`, ...), else the newest Debug build.
 
 | Command | Does |
 | --- | --- |

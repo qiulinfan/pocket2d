@@ -115,7 +115,7 @@ post-publication host failures and their separate reset policies are not redefin
 Run the focused cases with:
 
 ```sh
-ctest --test-dir build/sdl3-debug \
+ctest --preset ninja-debug \
   -R '^(lua_receiver|agent_receiver)$' --output-on-failure
 ```
 

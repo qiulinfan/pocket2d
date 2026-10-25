@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```sh
-./build/modern-debug/game --project tests/fixtures/tilemap_farm
+./build/ninja-debug/game --project tests/fixtures/tilemap_farm
 ```
 
 Use arrow keys to move. `E` plants the brown tilled cell under the player, or

@@ -35,7 +35,7 @@ unsupported or invalid game schema changes only failure-status fields.
 Run the integration workload with:
 
 ```
-python3 tests/agent/agent_savegame_test.py build/sdl3-debug/game tests/fixtures/persistent_village
+python3 tests/agent/agent_savegame_test.py build/ninja-debug/game tests/fixtures/persistent_village
 ```
 
 The test creates a temporary save root, uses real supervisor/worker processes,

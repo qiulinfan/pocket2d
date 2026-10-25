@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""pocket CLI: new, check, test (scenario scripts and replays), render, replay."""
+"""pocket CLI: new, check, test (scenario scripts and replays), render, replay, and
+which runtime it drives without --game."""
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPOSITORY / "clients/python"))
+from pocket2d.cli import find_game  # noqa: E402
 
 
 def check(condition, message):
@@ -24,6 +30,45 @@ def pocket(game, *arguments, expect=0):
 
 def diagnostics(game, *arguments, expect=0):
     return [json.loads(line) for line in pocket(game, *arguments, "--json", expect=expect).splitlines()]
+
+
+def check_find_game():
+    """Without --game or POCKET_GAME the CLI drives the newest Release build of a CMake
+    preset, else the newest Debug build; other folders under build/ are not presets."""
+    with tempfile.TemporaryDirectory(prefix="pocket-find-game-") as directory:
+        root = Path(directory)
+        shutil.copy(REPOSITORY / "CMakePresets.json", root)
+
+        def build(relative, age):
+            path = root / "build" / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("")
+            os.utime(path, (time.time() - age,) * 2)
+            return str(path.resolve())
+
+        saved = os.environ.pop("POCKET_GAME", None)
+        try:
+            try:
+                find_game(None, root)
+            except SystemExit as error:
+                check("ninja-release" in str(error), "the error says how to build: %s" % error)
+            else:
+                raise AssertionError("no build is an error")
+            debug = build("ninja-debug/game", 0)
+            check(find_game(None, root) == debug, "a Debug build when there is no Release build")
+            old_release = build("unix-makefiles-release/game", 100)
+            check(find_game(None, root) == old_release, "a Release build before a newer Debug build")
+            release = build("vs2022-x64/Release/game.exe", 10)
+            check(find_game(None, root) == release, "the newest Release build, multi-config folders included")
+            build("runtime/mac/game", -100)
+            check(find_game(None, root) == release, "a runtime kit is not a preset build")
+            os.environ["POCKET_GAME"] = debug
+            check(find_game(None, root) == debug, "POCKET_GAME before the preset builds")
+            check(find_game(old_release, root) == old_release, "--game before POCKET_GAME")
+        finally:
+            os.environ.pop("POCKET_GAME", None)
+            if saved is not None:
+                os.environ["POCKET_GAME"] = saved
 
 
 def run(game):
@@ -80,4 +125,5 @@ def run(game):
 
 if __name__ == "__main__":
     check(len(sys.argv) == 2, "usage: pocket_cli_test.py RUNTIME")
+    check_find_game()
     run(str(Path(sys.argv[1]).resolve()))

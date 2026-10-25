@@ -16,7 +16,7 @@ translation units were unchanged by this inventory.
 ```sh
 python3 tools/binding-experiment/compile_inventory.py \
   --repo . \
-  --build build/sdl3-debug \
+  --build build/ninja-debug \
   --candidate build/dependency-sources/LuaBridge3-53e031b7df6a14d43f92a54fd792b76dbadcc970/Source \
   --output build/phase12-compatibility
 ```
@@ -41,7 +41,7 @@ each compiler invocation at 90 seconds.
 ## Executed result
 
 Configuration: Apple clang 21.0.0 (`clang-2100.3.34.2`), arm64, C++26, current
-`sdl3-debug` compile database, syntax-only with the diagnostic error limit removed.
+`ninja-debug` compile database, syntax-only with the diagnostic error limit removed.
 All eight header-resolution checks passed; no baseline/candidate header mixing
 was observed. All baseline preprocessing and syntax checks passed with zero
 warnings. Candidate diagnostics also contained zero warnings.

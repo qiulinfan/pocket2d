@@ -9,8 +9,8 @@ production SpriteAnimation component, shared immutable asset and normal event
 production/dispatch checks; neither path has animation event subscribers.
 
 ```sh
-./build/modern-release/tests/sprite_animation_benchmark
-./build/modern-release/tests/sprite_animation_benchmark --actors 10 --warmup 2 --samples 4
+./build/ninja-release/tests/sprite_animation_benchmark
+./build/ninja-release/tests/sprite_animation_benchmark --actors 10 --warmup 2 --samples 4
 ```
 
 The default is 1,000 and 10,000 actors, eight warmup ticks and 60 measured ticks

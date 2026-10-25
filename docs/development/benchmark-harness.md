@@ -6,7 +6,7 @@ machine, commit, backend and every benchmark row. `--quick` uses 20 samples
 and is only a smoke test.
 
 ```sh
-cmake --build build/sdl3-release
+cmake --build --preset ninja-release
 python3 tools/run_benchmarks.py --backend gpu
 ```
 

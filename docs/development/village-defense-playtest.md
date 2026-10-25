@@ -9,7 +9,7 @@ source are the deliberately bounded gameplay slice.
 From the repository root, launch a built runtime:
 
 ```sh
-build/sdl3-debug/game --project tests/fixtures/village_defense
+build/ninja-debug/game --project tests/fixtures/village_defense
 ```
 
 Use arrow keys to move. Hold Space to attack nearby invaders or the purple devil
@@ -36,7 +36,7 @@ python3 tests/fixtures/village_defense/generate_geometry.py
 Run the matching automated scenarios through CTest:
 
 ```sh
-ctest --test-dir build/sdl3-debug -R 'runtime_step|agent_protocol' --output-on-failure
+ctest --preset ninja-debug -R 'runtime_step|agent_protocol' --output-on-failure
 ```
 
 The C++ scenario checks input edges and release, real trigger collection, three-wave

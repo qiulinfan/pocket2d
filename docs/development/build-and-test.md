@@ -1,6 +1,9 @@
 # Building and testing the modernized runtime
 
-Requires a compiler with C++26 mode, CMake 3.30 or newer, and a native build tool.
+Requires a compiler with C++26 mode, CMake 3.30 or newer, and Ninja for the
+`ninja-*` presets used below; the `unix-makefiles-*`, `vs2022-x64` and `xcode`
+presets need no Ninja. Each preset builds into `build/<preset>/` (Visual Studio
+and Xcode into its `Release/` and `Debug/`).
 The verified local toolchain is Apple Clang 21 and CMake 4.4. Unsupported C++26
 compilers should fail configuration rather than silently lowering the standard.
 
@@ -17,16 +20,20 @@ fetched from its release tag and linked statically; its CMake compiles it with
 `_BOX2D` overrides can use existing offline checkouts of those releases.
 
 ```sh
-cmake -S . -B build/modern-debug -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/modern-debug --parallel
-ctest --test-dir build/modern-debug --output-on-failure
+cmake --preset ninja-debug
+cmake --build --preset ninja-debug
+ctest --preset ninja-debug
 ```
+
+`tools/pocket`, the Python client and the game repositories' tools drive the
+newest Release build of any preset, else the newest Debug build, unless
+`--game` or `POCKET_GAME` names a runtime.
 
 Run the graphical editor or runtime from the repository root:
 
 ```sh
-./build/modern-debug/pocket
-./build/modern-debug/game --project .engine/templates/ballgame
+./build/ninja-debug/pocket
+./build/ninja-debug/game --project .engine/templates/ballgame
 ```
 
 `POCKET_RENDER_DRIVER=metal`, `opengl`, `gpu` or `software` selects the
@@ -41,10 +48,10 @@ standalone `game` draws as many frames as it can between ticks unless
 while the editor's play mode and `--frames` runs draw one frame per tick at 60 Hz.
 
 ```sh
-./build/modern-debug/tests/render_backend_test software
-./build/modern-debug/tests/render_backend_test metal
-./build/modern-debug/tests/render_backend_test opengl
-./build/modern-debug/tests/render_backend_test gpu
+./build/ninja-debug/tests/render_backend_test software
+./build/ninja-debug/tests/render_backend_test metal
+./build/ninja-debug/tests/render_backend_test opengl
+./build/ninja-debug/tests/render_backend_test gpu
 ```
 
 `POCKET_ENABLE_GPU_RENDER_TESTS` (default on for Apple platforms) adds CTest
@@ -73,10 +80,10 @@ resolution, queueing and rendering; a frame mark ends each gameplay frame.
 Use Release for measurements:
 
 ```sh
-cmake -S . -B build/modern-release -DCMAKE_BUILD_TYPE=Release
-cmake --build build/modern-release --parallel
-./build/modern-release/tests/hierarchy_benchmark
-./build/modern-release/tests/particle_benchmark
+cmake --preset ninja-release
+cmake --build --preset ninja-release
+./build/ninja-release/tests/hierarchy_benchmark
+./build/ninja-release/tests/particle_benchmark
 ```
 
 Benchmark output belongs under ignored `build/`. Report workload counts,
@@ -93,7 +100,7 @@ A bounded graphical smoke can save the engine's rendered target before
 presentation and exit without leaving a window open:
 
 ```sh
-POCKET_RENDER_DRIVER=metal ./build/modern-debug/game \
+POCKET_RENDER_DRIVER=metal ./build/ninja-debug/game \
   --project tests/fixtures/village_defense --frames 2 \
   --capture build/village-defense.png
 ```
@@ -120,11 +127,11 @@ completed build matrix rather than assuming an old result covers new code.
 The native Tilemap fixture uses the same runtime and input protocol:
 
 ```sh
-./build/modern-debug/game --project tests/fixtures/tilemap_farm
-./build/modern-debug/game --headless --agent --project tests/fixtures/tilemap_farm
-./build/modern-debug/tests/tilemap_render_test software
-./build/modern-debug/tests/tilemap_render_test metal
-./build/modern-debug/tests/tilemap_render_test opengl
+./build/ninja-debug/game --project tests/fixtures/tilemap_farm
+./build/ninja-debug/game --headless --agent --project tests/fixtures/tilemap_farm
+./build/ninja-debug/tests/tilemap_render_test software
+./build/ninja-debug/tests/tilemap_render_test metal
+./build/ninja-debug/tests/tilemap_render_test opengl
 ```
 
 Tilemap render tests verify actual readback, sorting, transparency, DPI/zoom and
@@ -138,7 +145,7 @@ Versioned gameplay persistence has a separate playable fixture and explicit
 storage root. Do not point it at the source project:
 
 ```sh
-./build/modern-debug/game --project tests/fixtures/persistent_village \
+./build/ninja-debug/game --project tests/fixtures/persistent_village \
   --save-dir build/local-game-saves
 ```
 
@@ -157,9 +164,9 @@ The optional TypeScript frontend has pinned local development dependencies:
 
 ```sh
 npm --prefix tools/script-authoring ci --ignore-scripts --no-audit --no-fund
-cmake -S . -B build/modern-debug -DPOCKET_ENABLE_TYPESCRIPT_TESTS=ON
-cmake --build build/modern-debug --parallel
-ctest --test-dir build/modern-debug --output-on-failure
+cmake --preset ninja-debug -DPOCKET_ENABLE_TYPESCRIPT_TESTS=ON
+cmake --build --preset ninja-debug
+ctest --preset ninja-debug
 ```
 
 The option adds two real authoring tests to the 70-test core suite, with explicit
@@ -175,8 +182,8 @@ keyboard/mouse gameplay against tests/fixtures/inventory_village. To repeat pixe
 checks for an available local backend:
 
 ```sh
-build/sdl3-debug/tests/inventory_render_test tests/fixtures/inventory_village metal
-build/sdl3-debug/tests/inventory_render_test tests/fixtures/inventory_village opengl
+build/ninja-debug/tests/inventory_render_test tests/fixtures/inventory_village metal
+build/ninja-debug/tests/inventory_render_test tests/fixtures/inventory_village opengl
 ```
 
 The render test rejects a silently substituted backend. The optional third
@@ -193,7 +200,7 @@ reload button with the software renderer and retains scene/map drafts. For an
 ignored diagnostic screenshot:
 
 ```sh
-build/sdl3-debug/tests/script_reload_editor_test tests/fixtures/tilemap_farm build/reload-editor.png
+build/ninja-debug/tests/script_reload_editor_test tests/fixtures/tilemap_farm build/reload-editor.png
 ```
 
 The optional compiled gameplay replay retains its 102 baseline comparisons and
@@ -211,7 +218,7 @@ active/queued event subscriptions through component renames. See
 A manual Release hierarchy workload is built but is not a timing-gated test:
 
 ```sh
-build/sdl3-release/tests/scene_edit_benchmark
+build/ninja-release/tests/scene_edit_benchmark
 ```
 
 It reports rename/reparent timings for flat and chain-shaped 100/1000-actor
@@ -220,7 +227,7 @@ build/test workloads. Results do not establish a comparison with other engines.
 The editor status regression optionally writes a local screenshot:
 
 ```sh
-build/sdl3-debug/tests/editor_edit_status_test "$PWD/build/editor-edit-status.png"
+build/ninja-debug/tests/editor_edit_status_test "$PWD/build/editor-edit-status.png"
 ```
 
 ## Isolated binding comparison
@@ -265,7 +272,7 @@ renderer. A third argument writes a PNG of the final strokes from a real window
 on the native renderer instead:
 
 ```sh
-POCKET_WINDOW_DISPLAY=EDB323QU POCKET_WINDOW_BACKGROUND=1 ./build/sdl3-release/tests/editor_ui_test --tilemap tests/fixtures/tilemap_farm build/captures/map-paint.png
+POCKET_WINDOW_DISPLAY=EDB323QU POCKET_WINDOW_BACKGROUND=1 ./build/ninja-release/tests/editor_ui_test --tilemap tests/fixtures/tilemap_farm build/captures/map-paint.png
 ```
 
 `POCKET_WINDOW_DISPLAY` places new windows on a display chosen by 0-based index
@@ -274,7 +281,7 @@ or by part of its name (for example a monitor model such as `EDB323QU`);
 automated graphical runs do not take keyboard focus:
 
 ```sh
-POCKET_WINDOW_DISPLAY=EDB323QU POCKET_WINDOW_BACKGROUND=1 ./build/sdl3-release/game --project tests/fixtures/village_defense --frames 120
+POCKET_WINDOW_DISPLAY=EDB323QU POCKET_WINDOW_BACKGROUND=1 ./build/ninja-release/game --project tests/fixtures/village_defense --frames 120
 ```
 
 It is for automation only: it makes the unbundled `game` executable a macOS

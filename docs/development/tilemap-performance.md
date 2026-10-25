@@ -10,10 +10,10 @@ RGBA pixels before reporting a successful result.
 Commands, from the repository root:
 
 ```sh
-./build/modern-release/tests/tilemap_benchmark 64 metal 21
-./build/modern-release/tests/tilemap_benchmark 128 metal 21
-./build/modern-release/tests/tilemap_benchmark 256 metal 21
-./build/modern-release/tests/tilemap_benchmark 64 software 21
+./build/ninja-release/tests/tilemap_benchmark 64 metal 21
+./build/ninja-release/tests/tilemap_benchmark 128 metal 21
+./build/ninja-release/tests/tilemap_benchmark 256 metal 21
+./build/ninja-release/tests/tilemap_benchmark 64 software 21
 ```
 
 There are three warmup frames and 21 timed frames per fixed-camera, scrolling,

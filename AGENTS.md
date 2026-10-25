@@ -21,10 +21,12 @@
   ADRs and phase checkpoints go in `docs/development/{adr,checkpoints}/`.
   Builds write only under `build/`, never into the source root.
 - pocket2d-games and bleach-vs-naruto-pocket use these paths directly:
-  `clients/python`, `tools/pocket`, `tools/room_server`, `build/sdl3-release/game`,
-  `docs/lua-api/`, `docs/development/{game-completeness-tests,netplay}.md` and
-  `.engine/`. Move them only together with those repositories. Games and
-  samples stay out of this repository.
+  `clients/python`, `tools/pocket`, `tools/room_server`, `docs/lua-api/`,
+  `docs/development/{game-completeness-tests,netplay}.md` and `.engine/`. Move
+  them only together with those repositories. Their tools find the runtime with
+  `pocket2d.cli.find_game` (`POCKET_GAME`, else the newest preset build), so
+  build directories follow `CMakePresets.json`. Games and samples stay out of
+  this repository.
 - Do not claim SOTA from an isolated microbenchmark. Comparable published
   baselines, representative workloads and platform coverage are still required.
 - Keep README owner-authored. Development plans, ADRs, and handoffs belong here

@@ -52,7 +52,7 @@ Observations are the protocol's dictionaries, so `observation_space` is `None`.
 import sys; sys.path.insert(0, "clients/python")
 from pocket2d import PocketEnv
 
-env = PocketEnv("build/sdl3-release/game", "tests/fixtures/two_world_village",
+env = PocketEnv("build/ninja-release/game", "tests/fixtures/two_world_village",
                 "tests/fixtures/two_world_village/scenarios/plant_and_harvest.scenario.json",
                 save_dir="/tmp/pocket-saves")
 observation, info = env.reset(seed=42)
@@ -105,7 +105,8 @@ with Bot(PROJECT, seed=3, out="build/my-game", select={"names": ["Player"]}) as 
 ```
 
 - The runtime binary comes from `executable=`, `POCKET_GAME`, or the client's
-  own checkout (`build/sdl3-release/game`, then `sdl3-debug`), so a game
+  own checkout (the newest Release preset build, else the newest Debug one,
+  as `pocket2d.cli.find_game` picks it), so a game
   repository finds the engine once, through `POCKET2D_ENGINE` or the sibling
   folder. `ENGINE_ROOT` in `pocket2d.session` is that checkout.
 - Without `save_dir` the game saves into a fresh temporary directory, removed

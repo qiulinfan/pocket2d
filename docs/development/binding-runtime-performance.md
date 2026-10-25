@@ -24,7 +24,7 @@ HEAD. Its executable is `build/binding-baseline-phase11/sprite_animation_benchma
 local provenance is in that directory's baseline.json. The candidate is the
 integrated Release runtime using LuaBridge3 3.0-rc12 at
 `53e031b7df6a14d43f92a54fd792b76dbadcc970`, with the same Lua 5.4.9 VM. Its executable
-is `build/sdl3-release/tests/sprite_animation_benchmark`; the initial integrated
+is `build/ninja-release/tests/sprite_animation_benchmark`; the initial integrated
 result-mode binary was separately retained at
 `build/phase13-initial-result-mode/sprite_animation_benchmark`. The enabled variant
 was retained at `build/phase13-enabled-result-mode/sprite_animation_benchmark`.
@@ -262,9 +262,9 @@ the last frame is presented, then the runtime exits automatically.
 
 ```sh
 mkdir -p build/phase13-runtime-comparison/captures build/phase13-runtime-comparison/saves
-POCKET_RENDER_DRIVER=metal build/sdl3-release/game --project tests/fixtures/village_defense --frames 180 --capture build/phase13-runtime-comparison/captures/village-defense-180.png
-POCKET_RENDER_DRIVER=metal build/sdl3-release/game --project tests/fixtures/village_defense --frames 500 --capture build/phase13-runtime-comparison/captures/village-defense-500.png
-POCKET_RENDER_DRIVER=metal build/sdl3-release/game --project tests/fixtures/inventory_village --save-dir build/phase13-runtime-comparison/saves --frames 2 --capture build/phase13-runtime-comparison/captures/inventory-village-2.png
+POCKET_RENDER_DRIVER=metal build/ninja-release/game --project tests/fixtures/village_defense --frames 180 --capture build/phase13-runtime-comparison/captures/village-defense-180.png
+POCKET_RENDER_DRIVER=metal build/ninja-release/game --project tests/fixtures/village_defense --frames 500 --capture build/phase13-runtime-comparison/captures/village-defense-500.png
+POCKET_RENDER_DRIVER=metal build/ninja-release/game --project tests/fixtures/inventory_village --save-dir build/phase13-runtime-comparison/saves --frames 2 --capture build/phase13-runtime-comparison/captures/inventory-village-2.png
 ```
 
 The defense captures exercise initial lifecycle, invasion spawning and unattended

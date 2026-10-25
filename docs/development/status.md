@@ -692,8 +692,8 @@ commands; `village-defense-playtest.md` describes controls.
 `binding-experiment-results.md` and ADR 007 record the executed isolated comparison
 and the verified integration contract. `binding-runtime-performance.md` records
 matched initial/final costs, the local patch and scope limits.
-Current local build trees
-are `build/sdl3-debug`, `build/sdl3-release` and `build/sdl3-sanitize`; final full-suite
+The Phase 15 checks ran in
+Debug, Release and ASan/UBSan build trees; final full-suite
 logs use `build/phase15-*-tests.log` and remain ignored. All three builds pass 72
 cases, including the 27-case compiler suite and 102+31 exact compiled gameplay
 comparisons. Final suite durations were 77.83 s Debug, 51.35 s Release and
