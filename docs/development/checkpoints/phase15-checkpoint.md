@@ -3,8 +3,8 @@
 The new `tests/fixtures/two_world_village` project connects existing native engine
 capabilities into one input-driven gameplay loop. It is a bounded migration
 workload, not a completed Village_Rim port. Original rules and explicit tuning
-choices are linked in [the integration plan](two-world-integration-plan.md) and
-[fixture contract](../../tests/fixtures/two_world_village/CONTRACT.md).
+choices are linked in [the integration plan](../two-world-integration-plan.md) and
+[fixture contract](../../../tests/fixtures/two_world_village/CONTRACT.md).
 
 ## Delivered behavior
 
@@ -51,7 +51,7 @@ callback directly destroying its Tilemap, and a map-disable exit callback direct
 destroying its Rigidbody. A shared owner-thread contact-mutation scope covers
 native state changes/destruction and rejects those direct reentrant destruction
 entry points. Deferred actor/component removal and queued cell edits continue to
-work. See [activation contract and measurements](rigidbody-activation.md).
+work. See [activation contract and measurements](../rigidbody-activation.md).
 
 ## Acceptance matrix
 

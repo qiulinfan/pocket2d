@@ -2,7 +2,7 @@
 
 2026-10-15. This slice implements native Tilemap authoring/gameplay and bounded
 agent script execution. The authoritative completed validation matrix and next
-work are in [status.md](status.md); the full modernization goal remains active.
+work are in [status.md](../status.md); the full modernization goal remains active.
 
 Implemented:
 
@@ -29,6 +29,6 @@ Logs, PNGs, benchmarks and external-agent traces stay in ignored `build/`.
 Both fixtures include their reproducible self-authored BMP geometry rather than
 depending on ignored local art or editor metadata.
 
-Usage: [Tilemap API](../lua-api/tilemap.md), [farm playtest](tilemap-farm-playtest.md),
-[agent protocol](agent-protocol.md), [script budgets](script-budgets.md),
-[performance comparison](tilemap-performance.md), [build commands](build-and-test.md).
+Usage: [Tilemap API](../../lua-api/tilemap.md), [farm playtest](../tilemap-farm-playtest.md),
+[agent protocol](../agent-protocol.md), [script budgets](../script-budgets.md),
+[performance comparison](../tilemap-performance.md), [build commands](../build-and-test.md).

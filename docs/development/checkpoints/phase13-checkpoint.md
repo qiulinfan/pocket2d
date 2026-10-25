@@ -117,10 +117,10 @@ success is claimed. Timings here describe test duration, not engine performance.
 
 The final production gates include native validation, ownership/lifetime,
 EventBus/key remapping, reload, spawn/edit transactions, budget recovery and
-TypeScriptToLua replay/reload parity. See [ADR 007](adr-007-checked-lua-binding.md),
-[the experiment plan](binding-upgrade-experiment.md),
-[compile inventory](binding-compatibility-inventory.md), and
-[status](status.md) for the decision, compatibility evidence and final integration
+TypeScriptToLua replay/reload parity. See [ADR 007](../adr/adr-007-checked-lua-binding.md),
+[the experiment plan](../binding-upgrade-experiment.md),
+[compile inventory](../binding-compatibility-inventory.md), and
+[status](../status.md) for the decision, compatibility evidence and final integration
 state. No commit or push was performed for this checkpoint.
 
 ## Final runtime evidence and remaining scope

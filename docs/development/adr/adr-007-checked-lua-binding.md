@@ -134,5 +134,5 @@ The checked result lifetime ends before raising a Lua error. Raw class C callbac
 keep their closure shape and safe-C guard; raw index/newindex reject malformed
 receiver structures through Lua errors. This is a bounded ordinary-API contract,
 not an arbitrary debug/metatable/upvalue sandbox. See native-call-receivers.md and
-phase14-checkpoint.md. Matched performance ranges overlap on the principal valid
+../checkpoints/phase14-checkpoint.md. Matched performance ranges overlap on the principal valid
 paths; native-receiver-performance.md retains the measured costs and variability.

@@ -80,5 +80,5 @@ must not claim repair by merely changing the comments or discarding the user's
 authoring draft. Broader scripting, gameplay, packaging, human testing and matched
 cross-engine performance/completeness gates remain open.
 
-See [ADR 005](adr-005-runtime-actor-publication.md),
-[runtime actor contract](runtime-actor-preparation.md), and [status](status.md).
+See [ADR 005](../adr/adr-005-runtime-actor-publication.md),
+[runtime actor contract](../runtime-actor-preparation.md), and [status](../status.md).

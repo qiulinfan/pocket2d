@@ -7,7 +7,7 @@ converter. The scene and both regions remain resident; portals do not call
 Scene.Load or prove resource streaming.
 
 Independent automated acceptance is recorded in
-[Phase 15](../../../docs/development/phase15-checkpoint.md). Human playtesting
+[Phase 15](../../../docs/development/checkpoints/phase15-checkpoint.md). Human playtesting
 remains a separate gate; this contract defines behavior, not game feel.
 
 ## Regions, objects and controls

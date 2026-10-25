@@ -1,6 +1,6 @@
 # Typed host API and TypeScript authoring experiment
 
-Phase 5, 2026-10-15. Implemented and verified; see phase5-checkpoint.md and status.md.
+Phase 5, 2026-10-15. Implemented and verified; see checkpoints/phase5-checkpoint.md and status.md.
 The contract adds a curated, tested host surface and compares one real
 TypeScriptToLua component against a hand-authored Lua reference. This is an
 optional authoring frontend, not a second VM or complete JS/npm compatibility.

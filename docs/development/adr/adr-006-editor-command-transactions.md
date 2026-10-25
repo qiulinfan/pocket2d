@@ -4,7 +4,7 @@
 
 Accepted under the owner's autonomous Pocket2D development direction, 2026-10-15.
 Implementation is in the local working tree; all 65 Debug, Release and ASan/UBSan
-cases pass as recorded in [the Phase 11 checkpoint](phase11-checkpoint.md).
+cases pass as recorded in [the Phase 11 checkpoint](../checkpoints/phase11-checkpoint.md).
 
 The Phase 10 editor audit reproduced three failures outside the fixed runtime
 Instantiate/duplicate paths: rejected component addition left an authoring spec,
@@ -124,5 +124,5 @@ workloads separately from CTest correctness. Final results belong in the checkpo
 Do not revert only the hook or only the SceneView delivery change: that would
 restore partial document/runtime publication or double execution. Any rollback
 must preserve a single command delivery path, retain drafts and diagnostics, and
-run the same regressions. The narrower [command contract](editor-command-transactions.md)
+run the same regressions. The narrower [command contract](../editor-command-transactions.md)
 records the public behavior and remaining limits.

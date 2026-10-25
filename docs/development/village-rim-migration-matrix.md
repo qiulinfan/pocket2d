@@ -44,7 +44,7 @@ B 世界敌人与四个 Boss、Golem 与通往 D 岛的桥、最终 Boss、名�
 
 **双世界玩法整合切片已实现并通过三配置验证。** [two_world_village 合同](../../tests/fixtures/two_world_village/CONTRACT.md) 定义固定池、原生容器、门户、入侵与 schema 1；[来源规则和整合计划](two-world-integration-plan.md) 区分原源码默认行为、尚未核实的序列化调参与单岛切片假设。玩家能种植并采收食物、装备剑提高实际攻击伤害、经同场景配对门户进入地下、击败守卫并永久关闭入侵来源，再保存并在新进程恢复。清空一波仅开启下一倒计时，不冒充永久胜利。
 
-本轮证据来自 `tests/agent_two_world_village_test.py` 的实际 Engine/Lua/Box2D 输入流程及 `tests/two_world_render_test.cpp` 的 software、Metal、OpenGL 渲染检查；已覆盖满包产出保留、无种子、伤害差异、作物优先/祭坛后续攻击、端点缺失、传送防抖、活动入侵取消、失败恢复与存档拒绝。完整72项CTest已在Debug、Release、ASan/UBSan通过；最终证据见 [Phase 15](phase15-checkpoint.md)。F5/F9 会先停止动态物体速度再返回，普通失败不改变该冻结输入边界之后的游戏模型；这不等于回滚整帧物理或任意 Lua 堆。人工试玩尚未完成，操作手感、伤害与门户反馈、节奏和难度仍待验收；本片不覆盖多岛、元素/boss、旧 Unity 存档和原美术迁移。
+本轮证据来自 `tests/agent_two_world_village_test.py` 的实际 Engine/Lua/Box2D 输入流程及 `tests/two_world_render_test.cpp` 的 software、Metal、OpenGL 渲染检查；已覆盖满包产出保留、无种子、伤害差异、作物优先/祭坛后续攻击、端点缺失、传送防抖、活动入侵取消、失败恢复与存档拒绝。完整72项CTest已在Debug、Release、ASan/UBSan通过；最终证据见 [Phase 15](checkpoints/phase15-checkpoint.md)。F5/F9 会先停止动态物体速度再返回，普通失败不改变该冻结输入边界之后的游戏模型；这不等于回滚整帧物理或任意 Lua 堆。人工试玩尚未完成，操作手感、伤害与门户反馈、节奏和难度仍待验收；本片不覆盖多岛、元素/boss、旧 Unity 存档和原美术迁移。
 
 ## 可比较的性能 workload
 

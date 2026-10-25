@@ -63,7 +63,7 @@ real agent_actor_spawn regression, plus existing UID/lifetime/hierarchy/reload a
 gameplay tests. Cover late component failure, old-world health/callback preservation,
 source repair/retry, cached native identities, valid delayed starts, mixed activation
 ordering, resource deletion after preparation and outer-cache isolation. Final
-results belong in phase10-checkpoint.md and status.md.
+results belong in ../checkpoints/phase10-checkpoint.md and status.md.
 
 Editor scene-edit mutation batches and all lazy sprite/audio/font resources are
 separate boundaries. This decision does not certify those paths, all native memory

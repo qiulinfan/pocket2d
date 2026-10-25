@@ -107,8 +107,8 @@ click/readback evidence, not coverage of all panels, window sizes or human editi
 feel. The standalone component-key regression first reproduced duplicate updates
 against the old direct path, then passed with deferred activation preserved.
 
-See [ADR 006](adr-006-editor-command-transactions.md),
-[the command contract](editor-command-transactions.md), and
+See [ADR 006](../adr/adr-006-editor-command-transactions.md),
+[the command contract](../editor-command-transactions.md), and
 [the preceding checkpoint](phase10-checkpoint.md). Full gameplay migration,
 packaging, broader native/API coverage and matched cross-engine performance and
 completeness evaluation remain open.

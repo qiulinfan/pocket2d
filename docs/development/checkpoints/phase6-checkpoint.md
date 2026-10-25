@@ -62,11 +62,11 @@ transaction must share the same opened catalog. Native allocations are outside
 the Lua allocator quota. There are no new performance ranking claims.
 
 Gameplay input integrity and pixels do not establish human usability. Follow
-[inventory-playtest.md](inventory-playtest.md) for manual feel and layout review.
+[inventory-playtest.md](../inventory-playtest.md) for manual feel and layout review.
 The next engine work should address transactional script module reload and the
 remaining maintained-binding evaluation, while subsequent gameplay slices connect
 inventory to farming, drops, combat and persistent multi-world progress.
 
-Contracts: [inventory-slice.md](inventory-slice.md),
-[Lua inventory API](../lua-api/inventory.md),
-[migration matrix](village-rim-migration-matrix.md).
+Contracts: [inventory-slice.md](../inventory-slice.md),
+[Lua inventory API](../../lua-api/inventory.md),
+[migration matrix](../village-rim-migration-matrix.md).

@@ -242,7 +242,7 @@ lifecycle/event behavior. `lua_vm` also checks same-thread, coroutine-shared and
 independent-VM identities. Core CTest count is 70; the two optional TypeScript
 checks bring it to 72. `lua_receiver` and `agent_receiver` cover invalid instance
 receivers, legal nullable arguments and real-worker continuation after caught and
-uncaught script errors. See phase14-checkpoint.md and native-call-receivers.md for
+uncaught script errors. See checkpoints/phase14-checkpoint.md and native-call-receivers.md for
 acceptance and scope, and native-receiver-performance.md for matched costs.
 Earlier binding migration measurements remain in binding-runtime-performance.md.
 
@@ -254,7 +254,7 @@ physics participation, native identity and cross-owner contact mutation guards.
 recovery through the supervisor. `two_world_render_software` checks the same
 fixture through real input and pixel readback; its executable also accepts
 `metal` or `opengl` after the fixture path for available local hardware checks.
-See phase15-checkpoint.md and the fixture CONTRACT for scope and final evidence.
+See checkpoints/phase15-checkpoint.md and the fixture CONTRACT for scope and final evidence.
 
 `POCKET_ENABLE_IMGUI_TEST_ENGINE` (default on) compiles Dear ImGui Test Engine
 hooks into ImGui and builds `editor_ui_test`, which clicks real editor

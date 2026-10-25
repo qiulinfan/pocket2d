@@ -120,5 +120,5 @@ ctest --test-dir build/sdl3-debug \
 ```
 
 Final Debug/Release/sanitizer and performance evidence is owned by the integration
-run and recorded in [phase14-checkpoint](phase14-checkpoint.md) / [status](status.md).
+run and recorded in [phase14-checkpoint](checkpoints/phase14-checkpoint.md) / [status](status.md).
 Source/diagnostic expectations are behavioral assertions, not timing thresholds.

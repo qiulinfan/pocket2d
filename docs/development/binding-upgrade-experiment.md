@@ -4,7 +4,7 @@ Date: 2026-10-15. **The isolated LuaBridge3 experiment has now executed; see
 [binding experiment results](binding-experiment-results.md).** This document
 retains its candidate research and experiment design. The production
 baseline for this experiment was Lua 5.4.9 (compiled as C), LuaBridge 2.7, C++26 and SDL3.
-The subsequent production integration is recorded in [Phase 13](phase13-checkpoint.md).
+The subsequent production integration is recorded in [Phase 13](checkpoints/phase13-checkpoint.md).
 This is a binding comparison; it does not change the VM or add a JavaScript VM.
 
 ## Candidates and evidence
@@ -127,5 +127,5 @@ specified in [script-reload](script-reload.md) and
 [script-api-contract](script-api-contract.md); older research notes are not the
 current implementation contract. Budget boundaries remain in
 [script-budgets](script-budgets.md). The isolated results and
-[ADR 007](adr-007-checked-lua-binding.md) now define the full integration step.
+[ADR 007](adr/adr-007-checked-lua-binding.md) now define the full integration step.
 Production acceptance evidence belongs to [status](status.md), not to the probe.

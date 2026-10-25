@@ -23,7 +23,7 @@ LuaBridge result mode and existing error/recovery categories remain unchanged.
 - New `lua_receiver` and `agent_receiver` targets cover actual registered patterns
   and 35 isolated real-worker cases. No existing assertions were weakened.
 
-[Native receiver contract](native-call-receivers.md) documents the exact entry
+[Native receiver contract](../native-call-receivers.md) documents the exact entry
 paths, original SIGSEGV/SIGABRT evidence, nullable argument distinction, and caught
 versus uncaught behavior. An uncaught rejection is an ordinary completed-tick
 script error: pre-error script changes remain, later requests can continue, and
@@ -55,11 +55,11 @@ in 10.60 seconds. Both Release/Metal fixture smokes exited successfully with emp
 logs: defense at 180 frames and inventory at two frames. Their captures under
 `build/phase14-captures` were inspected; human game feel remains unverified.
 
-[Matched performance](native-receiver-performance.md) reports all samples and
+[Matched performance](../native-receiver-performance.md) reports all samples and
 limits. All principal p50 ranges overlap; the native-method micro median changes
 42.097 to 43.560 ns (+3.5%) with overlapping run ranges. These measurements do not
 establish a general speedup, stable material regression, or zero guard cost.
 Earlier migration timings remain historical Phase 13 evidence. Routine logs and
-measurements remain in ignored `build/`. [Status](status.md) owns the cross-slice
+measurements remain in ignored `build/`. [Status](../status.md) owns the cross-slice
 outcome. No commit or push was made. The next gameplay slice is specified in
-[two-world integration plan](two-world-integration-plan.md).
+[two-world integration plan](../two-world-integration-plan.md).

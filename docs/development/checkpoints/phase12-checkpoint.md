@@ -11,9 +11,9 @@ or pushes were made.
   65-case Phase 11 matrix.
 - Matched Release operation, fresh-object compile and executable-size measurements
   are complete. Gains and costs are workload-specific, not an engine ranking.
-- [Detailed results and reproduction](binding-experiment-results.md) describe the
+- [Detailed results and reproduction](../binding-experiment-results.md) describe the
   actual adaptations, diagnostics, lifecycle/budget evidence and limitations.
-- [ADR 007](adr-007-checked-lua-binding.md) selects full checked-binding integration
+- [ADR 007](../adr/adr-007-checked-lua-binding.md) selects full checked-binding integration
   at the fixed VM version as the next implementation. Its production acceptance
   is still gated by complete runtime/typed/render/reload verification.
 

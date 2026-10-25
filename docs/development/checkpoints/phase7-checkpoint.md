@@ -84,5 +84,5 @@ fatal/reset boundary. The editor has no hard wall-clock preemption or OS sandbox
 the supervised agent has its separate request deadline. Human editor usability
 and broader platform packaging remain unverified gates.
 
-See [ADR 003](adr-003-script-reload.md), [reload contract](script-reload.md),
-[agent protocol](agent-protocol.md), and [status](status.md).
+See [ADR 003](../adr/adr-003-script-reload.md), [reload contract](../script-reload.md),
+[agent protocol](../agent-protocol.md), and [status](../status.md).

@@ -94,5 +94,5 @@ Headless Session tests cover
 the document/runtime transaction. Full Village_Rim content and human playtesting
 remain separate gates.
 
-See [ADR 004](adr-004-scene-preparation.md), [scene contract](scene-transitions.md),
-[agent protocol](agent-protocol.md), and [status](status.md).
+See [ADR 004](../adr/adr-004-scene-preparation.md), [scene contract](../scene-transitions.md),
+[agent protocol](../agent-protocol.md), and [status](../status.md).

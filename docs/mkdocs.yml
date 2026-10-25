@@ -2,8 +2,8 @@ site_name: pocket2d Docs
 site_url: https://qiulinfan.github.io/pocket2d/documentation/
 repo_url: https://github.com/qiulinfan/pocket2d
 repo_name: qiulinfan/pocket2d
-docs_dir: docs/lua-api
-site_dir: .site/documentation
+docs_dir: lua-api
+site_dir: ../.site/documentation
 
 theme:
   name: mkdocs

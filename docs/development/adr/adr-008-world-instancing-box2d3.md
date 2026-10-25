@@ -2,8 +2,8 @@
 
 Date: 2026-10-16. Status: implemented; Debug, Release and ASan/UBSan suites pass,
 and ThreadSanitizer reports no races in the multi-World tests.
-Plan: [world-instancing-plan.md](world-instancing-plan.md). Direction:
-[agent-native-modernization.md](agent-native-modernization.md) (M1, M2a).
+Plan: [world-instancing-plan.md](../world-instancing-plan.md). Direction:
+[agent-native-modernization.md](../agent-native-modernization.md) (M1, M2a).
 
 ## World
 

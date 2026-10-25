@@ -104,5 +104,5 @@ unpublished candidates. Local evidence remains in build/phase9-spawn-audit. Main
 source-aware diagnostics, full gameplay integration, platform packaging, human
 playtesting and matched cross-engine benchmarks remain open requirements.
 
-See [native runtime contract](native-runtime-validation.md),
-[scene transaction contract](scene-transitions.md), and [status](status.md).
+See [native runtime contract](../native-runtime-validation.md),
+[scene transaction contract](../scene-transitions.md), and [status](../status.md).

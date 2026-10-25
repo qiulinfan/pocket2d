@@ -460,7 +460,7 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   manager renames reject during dispatch and preserve deferred actor activation;
   the reproduced double Update/LateUpdate now executes once. Command-local and
   subtree pose memoization remove measured repeated deep ancestor traversal.
-  See phase11-checkpoint.md and ADR 006 for contracts, measurements and limits.
+  See checkpoints/phase11-checkpoint.md and ADR 006 for contracts, measurements and limits.
 
 - The isolated LuaBridge3 rc12 experiment now runs against the same C-built Lua
   5.4.9 and actual ScriptBudget. Four standalone checks pass Debug, Release and
@@ -475,7 +475,7 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   is described below.
   The candidate has C++26 deprecation warnings and remains a prerelease. ADR 007
   selected full integration, subsequently completed in Phase 13.
-  See phase12-checkpoint.md and binding-experiment-results.md.
+  See checkpoints/phase12-checkpoint.md and binding-experiment-results.md.
 
 - LuaBridge3 is now integrated into the production engine. LuaBoundary checks
   conversions, preserves nonzero stacks and requested results, ignores lifecycle
@@ -497,7 +497,7 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   migration, all editor feel or audio quality. Explicit nil self-receiver crashes
   were also reproduced in the retained 2.7 baseline; Phase 14 resolves the bounded
   ordinary instance-receiver paths described below.
-  See phase13-checkpoint.md, ADR 007 and binding-runtime-performance.md.
+  See checkpoints/phase13-checkpoint.md, ADR 007 and binding-runtime-performance.md.
 
 - Phase 14 guards native instance receivers before member/property/proxy/raw-C
   invocation and converts malformed raw index/newindex shapes to Lua errors.
@@ -510,7 +510,7 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   All 68 checks pass in three configurations. Final Metal defense/inventory
   captures were inspected. Arbitrary debug/metatable/upvalue tampering and full
   constructor/coroutine/GC certification remain outside this bounded repair.
-  See phase14-checkpoint.md and native-call-receivers.md.
+  See checkpoints/phase14-checkpoint.md and native-call-receivers.md.
 
 - Phase 15 connects farming, native inventory/equipment, real enemy damage/food,
   paired portals and persistent invasion closure in two resident regions. Crops
@@ -532,7 +532,7 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   inspected. A 78-file source-visible-only copy also passes Metal launch/readback.
   The self-authored test geometry and fixed pool are a bounded game workload,
   with human feel and complete original-game content still unverified. See
-  phase15-checkpoint.md, rigidbody-activation.md and the two_world_village CONTRACT.
+  checkpoints/phase15-checkpoint.md, rigidbody-activation.md and the two_world_village CONTRACT.
 
 ## Measurements and limits
 
@@ -576,7 +576,7 @@ before/after comparisons (20 warmup / 120 measured ticks, seven workers). At
 serial changes from -11.4% to -3.0%. The 1k serial-fallback case varies around
 5–7.4 microseconds and does not support a broad percentage claim. This measures
 update work only, excluding creation/burst validation, physics and rendering;
-see phase9-checkpoint.md for medians and limits. It establishes no SOTA ranking.
+see checkpoints/phase9-checkpoint.md for medians and limits. It establishes no SOTA ranking.
 
 Phase 11 compares the initial transaction implementation against its memoized
 version, using matching Release dependencies. A 1,000-actor chain rename changes
@@ -584,7 +584,7 @@ from 111.086 to 2.318 ms; reparent from 109.973 to 2.259 ms. A standalone docume
 root pose edit with a body on every chain node changes from 156.708 to 0.680 ms.
 These are bounded command measurements, not net gains over the original engine,
 whole-frame timings or cross-engine rankings. Raw profiles remain ignored; see
-phase11-checkpoint.md for sampling and workload boundaries.
+checkpoints/phase11-checkpoint.md for sampling and workload boundaries.
 
 The Phase 12 isolated binding measurement uses 21 samples per operation across
 three interleaved processes, with the same Release Lua/allocator configuration.
@@ -688,7 +688,7 @@ commands; `village-defense-playtest.md` describes controls.
 `native-runtime-validation.md` describes direct native input domains and limits.
 `runtime-actor-preparation.md` and ADR 005 cover complete runtime publication.
 `editor-command-transactions.md` and ADR 006 cover coordinated authoring edits.
-`phase2-checkpoint.md` through `phase15-checkpoint.md` link the implementation contracts.
+`checkpoints/phase2-checkpoint.md` through `checkpoints/phase15-checkpoint.md` link the implementation contracts.
 `binding-experiment-results.md` and ADR 007 record the executed isolated comparison
 and the verified integration contract. `binding-runtime-performance.md` records
 matched initial/final costs, the local patch and scope limits.

@@ -3,6 +3,7 @@
 
 CMAKE ?= cmake
 MKDOCS ?= mkdocs
+MKDOCS_CONFIG := docs/mkdocs.yml
 RSYNC ?= rsync
 JOBS ?= 4
 
@@ -49,16 +50,16 @@ compile-commands: configure
 	cp $(DEBUG_BUILD_DIR)/compile_commands.json ./compile_commands.json
 
 docs-build:
-	$(MKDOCS) build --clean
+	$(MKDOCS) build --clean -f $(MKDOCS_CONFIG)
 
 docs-serve:
-	$(MKDOCS) serve
+	$(MKDOCS) serve -f $(MKDOCS_CONFIG)
 
 site-build:
 	rm -rf $(SITE_BUILD_DIR)
 	mkdir -p $(SITE_BUILD_DIR)
-	$(RSYNC) -av --delete --exclude 'lua-api/' --exclude '*.md' docs/ $(SITE_BUILD_DIR)/
-	$(MKDOCS) build --clean
+	$(RSYNC) -av --delete --prune-empty-dirs --exclude 'lua-api/' --exclude '*.md' --exclude 'mkdocs.yml' docs/ $(SITE_BUILD_DIR)/
+	$(MKDOCS) build --clean -f $(MKDOCS_CONFIG)
 
 # Pages deploys from the published main branch, not from this checkout.
 docs: site-build

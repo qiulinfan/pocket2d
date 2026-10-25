@@ -17,7 +17,7 @@ TypeScript 游戏脚本也不必引入第二 VM：TypeScriptToLua 已提供保�
 | 统一的 LuaBoundary 已用于受保护字段访问和生命周期／事件调用。 | `LuaBoundary.h/.cpp` 检查结果、忽略回调返回值、保留调用前栈并提供有界 UTF-8 traceback；`Shared.cpp` 保留错误计数。`lua_boundary` 和 `event_bus` 验证恢复与嵌套调用。 | 生产保持库 result mode，避免全局异常绕过 Lua pcall。预算／进程恢复和显式 reload 合同保留；原始 nil-self 崩溃、更多结构化上下文和 TS source map 仍待完善。 |
 | Lua 细节跨越宿主边界。 | `src/engine` 中多个文件直接使用 `luabridge::LuaRef`；`ActorHandle` 的组件查询仍返回 LuaRef，EventBus 持有 LuaRef。 | TypeScript 适配不能直接复用这些返回类型。应先抽出少量纯 C++ 查询/写入契约，再让各语言绑定负责包装结果。 |
 | 已增加代际 ActorHandle，不能再把所有脚本 actor 访问概括为原始指针。 | `src/engine/scene/ActorHandle.h`、`ActorAPI.cpp`；UID + generation 在调用时解析。 | 第二种语言应复用同一寿命规则，继续测试销毁、场景替换与 UID 复用。不可让 JS 再持有直接 `Actor*`。 |
-| 显式 reload 已在独立有界候选 VM 准备代码，在 idle 边界保留实例/native 状态并更新 prototype、事件与生命周期缓存。 | `script-reload.md`、`adr-003-script-reload.md`、真实 agent/editor 和编译 TS 重载回归。 | 这是有边界的活实例重载；任意 heap/schema/continuation 迁移、旧 module-local 状态迁移仍不支持。 |
+| 显式 reload 已在独立有界候选 VM 准备代码，在 idle 边界保留实例/native 状态并更新 prototype、事件与生命周期缓存。 | `script-reload.md`、`adr/adr-003-script-reload.md`、真实 agent/editor 和编译 TS 重载回归。 | 这是有边界的活实例重载；任意 heap/schema/continuation 迁移、旧 module-local 状态迁移仍不支持。 |
 | Inspector/agent 的属性模型是标量与同质数组，不是任意 Lua heap。 | `Actor::ComponentPropertyValue`、`SceneFormat.cpp`、`Queries.cpp`。 | JSON observe/reset 不等于保存闭包、协程、任意嵌套 table 或完整物理状态。跨语言数据先遵循现有可序列化子集。 |
 
 上述行为测试区分研究起点的故障复现和本轮已经完成的修复，只证明相应本地构建的结果。没有运行候选 VM 的 Pocket2D benchmark，也没有证据说明 Lua 执行本身已成为整帧主瓶颈。此前层级查询与粒子优化的收益属于 C++ 算法和数据并行，不能归因于脚本 VM。
@@ -141,7 +141,7 @@ instance闭包、匿名订阅和元表明确拒绝。错误文本有4096字节UT
 第八阶段随后移除了场景预检中的旧重复加载路径：可信启动脚本执行一次，已知来源
 按路径缓存；新来源用受限候选VM准备，成功才发布。可信启动的任意外部IO、提交后的
 回调副作用和主VM耗尽仍不承诺回滚，详见[场景合同](scene-transitions.md)、
-[ADR 004](adr-004-scene-preparation.md)与[重载合同](script-reload.md)。
+[ADR 004](adr/adr-004-scene-preparation.md)与[重载合同](script-reload.md)。
 
 ## 下一阶段的绑定实验
 
@@ -150,7 +150,7 @@ instance闭包、匿名订阅和元表明确拒绝。错误文本有4096字节UT
 版本的独立边界探针，保持 Lua 5.4.9。该实验现已运行，两版的四项隔离测试分别通过
 Debug/Release/ASan；真实引擎 TU 的不兼容、属性可写性、返回值、错误传播、所有权
 与预算结果见 [实验结果](binding-experiment-results.md)。生产引擎仍是 2.7；
-[ADR 007](adr-007-checked-lua-binding.md) 指定下一步完整接入及不可弱化的验证门槛。
+[ADR 007](adr/adr-007-checked-lua-binding.md) 指定下一步完整接入及不可弱化的验证门槛。
 
 ## 第十三阶段实际进展
 
