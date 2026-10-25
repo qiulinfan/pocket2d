@@ -55,6 +55,10 @@ Optional backend tests return 77 only when backend initialization is unavailable
 a rendering mismatch is a failure. The final optional argument writes a PNG of
 the generated test target, never the desktop.
 
+`ENGINE_LOG_AUDIO=1` logs audio device setup and playback failures, and
+`ENGINE_LOG_PERF=1` logs the frame rates, actor counts and audio failure counts
+once a second.
+
 Engine diagnostics go to stderr as `level [category] message`;
 `POCKET_LOG_FORMAT=jsonl` writes one JSON object per line with level, category,
 World id, frame and message. Each World also keeps its last 256 records, which
@@ -95,7 +99,11 @@ POCKET_RENDER_DRIVER=metal ./build/modern-debug/game \
 ```
 
 The standard `ninja-debug` / `ninja-release` and `unix-makefiles-*` configure,
-build and test presets are registered. `make test` runs the debug CTest suite.
+build and test presets are registered, plus `vs2022-x64` (build presets
+`vs-debug` / `vs-release`) and `xcode` (`xcode-debug` / `xcode-release`) for
+the IDE generators. `make test` runs the debug CTest suite, and
+`make compile-commands` copies the debug build's `compile_commands.json` to the
+repository root for clangd.
 For memory validation, an independent Debug build with
 `-fsanitize=address,undefined -fno-omit-frame-pointer` in both C and C++ flags
 exercises runtime and protocol tests without changing normal build settings.
