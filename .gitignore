@@ -15,16 +15,6 @@ sdl_user_input.txt
 recorded_sdl_user_input.txt
 render_logger.txt
 
-# Left in older checkouts by builds that copied executables to the root and
-# kept editor settings in .engine/editor/. Remove these rules once no checkout
-# holds those files.
-/game
-/pocket
-/game.exe
-/pocket.exe
-/*.dll
-/.engine/editor/
-
 # Compiled binaries belong in build/, never in Git.
 *.o
 *.obj
