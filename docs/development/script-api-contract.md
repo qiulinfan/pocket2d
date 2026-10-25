@@ -1,10 +1,10 @@
 # Curated script host contract
 
 The existing Lua 5.4 host has one versioned description at
-[`scripting/api/host-api.json`](../../scripting/api/host-api.json). It generates:
+[`api/host-api.json`](../../api/host-api.json). It generates:
 
-- [`types/pocket2d.d.ts`](../../types/pocket2d.d.ts): ambient TypeScript declarations for optional TypeScriptToLua authoring.
-- [`types/pocket2d.lua`](../../types/pocket2d.lua): LuaLS metadata, never loaded as a component or runtime library.
+- [`api/types/pocket2d.d.ts`](../../api/types/pocket2d.d.ts): ambient TypeScript declarations for optional TypeScriptToLua authoring.
+- [`api/types/pocket2d.lua`](../../api/types/pocket2d.lua): LuaLS metadata, never loaded as a component or runtime library.
 - [`ScriptAPIContract.h`](../../src/engine/scripting/ScriptAPIContract.h): embedded JSON at `PocketScriptAPI::kContractJson`, used by agent discovery without a runtime file dependency.
 
 Regenerate after editing the source:

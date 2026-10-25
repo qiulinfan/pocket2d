@@ -4,7 +4,7 @@
 frontend are implemented. Pocket2D still executes the existing Lua 5.4.9 VM;
 no JavaScript VM or global tool installation was introduced.
 
-`scripting/api/host-api.json` generates TypeScript declarations, LuaLS metadata
+`api/host-api.json` generates TypeScript declarations, LuaLS metadata
 and embedded JSON exposed by agent describe.script_api. Generation checks reject
 stale output. Native conformance tests verify the advertised binding surface,
 representative real calls, readonly/native-value boundaries and nullable results.

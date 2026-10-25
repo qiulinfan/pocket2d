@@ -20,7 +20,7 @@ native allocations or restrict filesystem/network access.
 
 Every command, its access level (`read`, `simulate`, `modify`, `session`) and a
 self-contained JSON Schema 2020-12 for its parameters are defined once in
-`scripting/api/agent-protocol.json`. `tools/generate_agent_protocol.py` embeds
+`api/agent-protocol.json`. `tools/generate_agent_protocol.py` embeds
 that schema in the runtime (`describe.command_schema`, MCP tool definitions) and
 writes the [command reference](agent-commands.md); CTest checks both are current.
 

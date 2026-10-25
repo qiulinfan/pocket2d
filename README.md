@@ -116,7 +116,7 @@ Run the game executable:
 - `.engine/system/*`: editor fonts and icons
 - `.engine/templates/*`: project templates, including the ball game sample
 - `thirdparty/*`: vendored dependencies; SDL3 (with SDL_image, SDL_ttf, SDL_mixer) and Box2D 3 are fetched at configure time
-- `scripting/api/*`: Lua host API contract, agent command schema and asset JSON Schemas
+- `api/*`: Lua host API contract, agent command schema, asset JSON Schemas, and the Lua and TypeScript declarations generated from the contract (`api/types/`)
 - `clients/python/*`, `tools/*`: the Python agent client and the `pocket` command line
 - `tests/*`: CTest suites and fixture projects
 

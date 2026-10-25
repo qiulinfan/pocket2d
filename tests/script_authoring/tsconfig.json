@@ -18,7 +18,7 @@
     "luaBundleEntry": "TypedController.ts"
   },
   "files": [
-    "../../types/pocket2d.d.ts",
+    "../../api/types/pocket2d.d.ts",
     "TypedController.ts",
     "SaveSchema.ts"
   ]

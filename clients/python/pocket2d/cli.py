@@ -80,7 +80,7 @@ def load_validator():
 
 def check_assets(project, report):
     validator = load_validator()
-    schemas = REPOSITORY / "scripting/api/schemas"
+    schemas = REPOSITORY / "api/schemas"
     for pattern, name in ASSET_PATTERNS:
         for path in sorted(project.glob(pattern)):
             try:
@@ -132,7 +132,7 @@ def check_lua(project, report):
     with tempfile.TemporaryDirectory(prefix="pocket-luacheck-") as directory:
         config = Path(directory) / "luarc.json"
         config.write_text(json.dumps({"runtime.version": "Lua 5.4",
-                                      "workspace.library": [str(REPOSITORY / "types")]}), encoding="utf-8")
+                                      "workspace.library": [str(REPOSITORY / "api/types")]}), encoding="utf-8")
         if lua_ls:
             command = [lua_ls, "--check=" + str(project), "--checklevel=Warning", "--configpath=" + str(config)]
         else:
@@ -289,7 +289,7 @@ AGENTS = """# Agent guide for this Pocket2D project
 
 - Gameplay is Lua: component types live in `component_types/` (one global
   table per file, named like the file). Host API declarations for LuaLS are in
-  the engine's `types/pocket2d.lua`.
+  the engine's `api/types/pocket2d.lua`.
 - Scenes are JSON under `scenes/`; inputs are semantic actions in
   `actions.json`; scenarios under `scenarios/` define tasks and regression
   scripts.
@@ -330,7 +330,7 @@ def command_import_unity(options, project):
         return 1
     validator = load_validator()
     if validator is not None:
-        schemas = REPOSITORY / "scripting/api/schemas"
+        schemas = REPOSITORY / "api/schemas"
         checks = [(scene, "scene")] + [(project / "maps" / actor["components"]["map"]["map_resource"], "tilemap")
                                        for actor in json.loads(scene.read_text())["actors"] if "map" in actor["components"]]
         for path, schema in checks:
@@ -362,7 +362,7 @@ def command_import(options):
         return 1
     validator = load_validator()
     if validator is not None:
-        schema_data = json.loads((REPOSITORY / "scripting/api/schemas" / (schema + ".schema.json")).read_text())
+        schema_data = json.loads((REPOSITORY / "api/schemas" / (schema + ".schema.json")).read_text())
         problems = validator.validate(json.loads(written.read_text()), schema_data)
         if problems:
             print("pocket import: wrote an invalid %s: %s" % (schema, "; ".join(problems)), file=sys.stderr)

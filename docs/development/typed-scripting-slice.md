@@ -7,8 +7,8 @@ optional authoring frontend, not a second VM or complete JS/npm compatibility.
 
 ## Single source and outputs
 
-Resource worker owns `scripting/api/host-api.json`, `tools/generate_script_api.py`,
-`types/pocket2d.d.ts`, `types/pocket2d.lua`, and generated
+Resource worker owns `api/host-api.json`, `tools/generate_script_api.py`,
+`api/types/pocket2d.d.ts`, `api/types/pocket2d.lua`, and generated
 `src/engine/scripting/ScriptAPIContract.h`. The header exposes
 `namespace PocketScriptAPI { inline constexpr std::string_view kContractJson=...; }`.
 Generator supports `--check` to reject stale generated outputs. The schema must

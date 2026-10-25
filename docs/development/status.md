@@ -83,7 +83,7 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
   under TSan the World isolation and editor play tests pass, while
   `agent_two_world_village` exceeds its agent deadline from instrumentation
   slowdown without race reports.
-- Agent protocol v2: one schema (`scripting/api/agent-protocol.json`) defines
+- Agent protocol v2: one schema (`api/agent-protocol.json`) defines
   the commands and generates the embedded schema and command reference;
   requests may carry an echoed `id`; `run_until` stops on published events,
   property comparisons or actor presence. `call` delivers a named command with
@@ -114,7 +114,7 @@ Box2D 3.1.1 (`world-instancing-plan.md`, ADR 008).
 - Authoring loop: `tools/pocket` checks projects (JSON Schemas for every asset
   format, runtime startup diagnostics, optional LuaLS/EmmyLua), runs scenario
   scripts and replays as tests, serves JSONL or MCP, renders frames and
-  scaffolds projects with `AGENTS.md`. `scripting/api/schemas/` holds the
+  scaffolds projects with `AGENTS.md`. `api/schemas/` holds the
   asset schemas and `tools/validate_schemas.py` validates all 41 fixture
   assets in CTest. A root `llms.txt` indexes the agent-facing documentation.
 - Project management follows Unity Hub: the editor's project list and

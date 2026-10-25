@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Pocket2D project assets against scripting/api/schemas.
+"""Validate Pocket2D project assets against api/schemas.
 
 A small JSON Schema (draft 2020-12) validator that supports only the keywords
 the Pocket2D asset schemas use, plus a command line that checks every project
@@ -318,7 +318,7 @@ def main(argv=None):
                         help="repository root (default: this script's repository)")
     arguments = parser.parse_args(argv)
     root = arguments.root.resolve()
-    schema_directory = root / "scripting/api/schemas"
+    schema_directory = root / "api/schemas"
 
     schemas = {}
     for _, name, _ in ASSET_PATTERNS:

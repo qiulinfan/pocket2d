@@ -8,7 +8,7 @@ import { compileProject } from './compile.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'pocket-tstl-check-'));
 const output=path.join(temp,'generated'), project=path.join(temp,'tsconfig.json'), source=path.join(temp,'probe.ts');
-const config={compilerOptions:{target:'ES2020',lib:['ES2020'],module:'ESNext',moduleResolution:'Bundler',strict:true,types:[],rootDir:temp,noEmitOnError:true},tstl:{luaTarget:'5.4'},files:[path.join(root,'types/pocket2d.d.ts'),source]};
+const config={compilerOptions:{target:'ES2020',lib:['ES2020'],module:'ESNext',moduleResolution:'Bundler',strict:true,types:[],rootDir:temp,noEmitOnError:true},tstl:{luaTarget:'5.4'},files:[path.join(root,'api/types/pocket2d.d.ts'),source]};
 let checks=0;
 function snapshot(dir){const result={};if(!fs.existsSync(dir))return result;for(const name of fs.readdirSync(dir).sort()){const file=path.join(dir,name);if(fs.statSync(file).isDirectory()){result[name+'/']='<directory>';for(const [key,value]of Object.entries(snapshot(file)))result[name+'/'+key]=value;}else result[name]=fs.readFileSync(file).toString('base64');}return result;}
 function rejected(code,expected){fs.writeFileSync(source,code);const before=snapshot(output);const result=compileProject(project,output);assert(!result.ok,'unexpected compile success');assert.deepEqual(snapshot(output),before);assert(result.diagnostics.some(d=>d.category==='error'&&d.code===expected),JSON.stringify(result));assert(result.diagnostics.some(d=>d.file===source&&d.line>0&&d.column>0));++checks;}
