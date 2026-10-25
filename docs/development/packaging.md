@@ -52,7 +52,9 @@ an ad-hoc signature (Apple silicon requires one; it is not notarized, so
 players open it the first time with right-click, Open). The Windows `.exe` gets the same
 icon: the packager appends a `.rsrc` section (RT_ICON 256, 48, 32 and 16 px
 PNGs, resized by Pillow or `sips`, and RT_GROUP_ICON 1) to the runtime kit's
-executable, which has no resources of its own. The icon file ships in
+executable, which has no resources of its own. An icon file that is not a
+readable image leaves the app and the exe with their defaults and a warning; a
+kit whose `game.exe` is not a Windows executable is an error. The icon file ships in
 `project/` even when `package_exclude` leaves its folder out, and the
 running game shows it as its window icon on every platform. `package_icon` is
 optional: a square PNG in the project; without it everything uses the
