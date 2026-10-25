@@ -5,7 +5,7 @@ at that checkpoint production remained Lua 5.4.9 + LuaBridge 2.7. No production 
 public API declaration or vendored dependency was changed in this phase. The
 Pocket2D modernization and Village_Rim migration goal remains active. The subsequent
 production migration and its corrected result-mode policy are now verified in
-[Phase 13](phase13-checkpoint.md); the opt-in probe below is historical evidence,
+[Phase 13](checkpoints/phase13-checkpoint.md); the opt-in probe below is historical evidence,
 not the current initialization policy.
 
 The candidate is LuaBridge3 prerelease 3.0-rc12 at

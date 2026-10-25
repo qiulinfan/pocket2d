@@ -52,7 +52,9 @@ an ad-hoc signature (Apple silicon requires one; it is not notarized, so
 players open it the first time with right-click, Open). The Windows `.exe` gets the same
 icon: the packager appends a `.rsrc` section (RT_ICON 256, 48, 32 and 16 px
 PNGs, resized by Pillow or `sips`, and RT_GROUP_ICON 1) to the runtime kit's
-executable, which has no resources of its own. The icon file ships in
+executable, which has no resources of its own. An icon file that is not a
+readable image leaves the app and the exe with their defaults and a warning; a
+kit whose `game.exe` is not a Windows executable is an error. The icon file ships in
 `project/` even when `package_exclude` leaves its folder out, and the
 running game shows it as its window icon on every platform. `package_icon` is
 optional: a square PNG in the project; without it everything uses the
@@ -74,7 +76,7 @@ shows the "Made with Pocket2D" splash first.
 
 The web build links SDL statically, runs tasks inline (no threads) and uses
 ASYNCIFY so the game loop yields to the browser until its next animation
-frame: it draws at the display's refresh rate while gameplay ticks at 60 Hz. Its page (`web/shell.html`) fetches `project.pack` before
+frame: it draws at the display's refresh rate while gameplay ticks at 60 Hz. Its page (`src/app/runtime/web_shell.html`) fetches `project.pack` before
 `main`: a little-endian uint32 manifest length, the JSON manifest (`title`,
 `files` with `path` and `size`) and the files' bytes in order, written under
 `/` (`project/` and `.engine/system/`). Saves live in IndexedDB, mounted at
@@ -84,7 +86,7 @@ do not fetch `project.pack` from `file://`), for example with
 
 ## Tests
 
-`tests/package_test.py` (CTest `package`) packages a fixture project for each
+`tests/agent/package_test.py` (CTest `package`) packages a fixture project for each
 platform from stand-in kits and checks the layouts, the exclusions and the
 web pack, then copies this build's runtime beside a project folder and checks
 that it runs and renders it with no arguments.

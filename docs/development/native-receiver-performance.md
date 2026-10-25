@@ -25,7 +25,7 @@ Earlier migration results remain in
 ## Real-runtime workload
 
 Run the retained Phase 13 Release `sprite_animation_benchmark` against
-`build/sdl3-release/tests/sprite_animation_benchmark`, using the same generated
+`build/ninja-release/tests/sprite_animation_benchmark`, using the same generated
 fixtures and explicit settings: 1,000/10,000 actors, 8 warmup ticks, 60 measured
 ticks and a 30,000 ms cooperative budget per case. Three pairs alternate order
 before/after, after/before, before/after.

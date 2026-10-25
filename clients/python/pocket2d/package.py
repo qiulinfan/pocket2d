@@ -96,7 +96,8 @@ ICON_SIZES = (256, 48, 32, 16)
 
 def icon_pngs(source_png):
     """PNG images of the icon for a Windows icon, 256, 48, 32 and 16 pixels: resized by
-    Pillow, else by sips (macOS hosts), else the PNG as it is."""
+    Pillow, else by sips (macOS hosts), else the PNG as it is. None when the file is not an
+    image they can read."""
     try:
         from PIL import Image
         import io
@@ -109,6 +110,8 @@ def icon_pngs(source_png):
         return out
     except ImportError:
         pass
+    except OSError:   # Pillow cannot read the file as an image
+        return None
     if shutil.which("sips"):
         with tempfile.TemporaryDirectory() as temp:
             out = []
@@ -120,15 +123,19 @@ def icon_pngs(source_png):
                 out.append(target.read_bytes())
             else:
                 return out
-    return [source_png.read_bytes()]
+    data = source_png.read_bytes()
+    return [data] if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR" else None
 
 
-def windows_icon(source_png, exe):
-    """Gives a PE executable without resources an icon: a new .rsrc section holding RT_ICON
-    images (PNG, which Windows reads since Vista) and RT_GROUP_ICON 1. False when the
-    executable already has resources or no room for another section header."""
+def windows_icon(images, exe):
+    """Gives a PE executable without resources an icon: a new .rsrc section holding the
+    PNG images as RT_ICON (Windows reads PNG icons since Vista) and RT_GROUP_ICON 1. False
+    when the executable already has resources or no room for another section header."""
     data = bytearray(exe.read_bytes())
-    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    pe = struct.unpack_from("<I", data, 0x3C)[0] if len(data) >= 0x40 and data[:2] == b"MZ" else 0
+    if not pe or data[pe:pe + 4] != b"PE\0\0":
+        raise PackageError("the runtime kit's game.exe is not a Windows executable "
+                           "(build the kit with tools/build_runtime.py windows)")
     sections = struct.unpack_from("<H", data, pe + 6)[0]
     optional_size = struct.unpack_from("<H", data, pe + 20)[0]
     optional = pe + 24
@@ -144,7 +151,6 @@ def windows_icon(source_png, exe):
     virtual_size, virtual_address = struct.unpack_from("<II", data, last + 8)
     rva = align(virtual_address + virtual_size, section_align)
 
-    images = icon_pngs(source_png)
     # Resource tree: types (ICON 3, GROUP_ICON 14) -> ids -> language 0 -> data entries.
     count = len(images)
     root_size = 16 + 8 * 2
@@ -229,8 +235,12 @@ def package_windows(kit, project, files, config, stage):
     exe = folder / (slug(title) + ".exe")
     shutil.copy2(kit / "game.exe", exe)
     icon_png = project / config["package_icon"] if config.get("package_icon") else kit / ".engine/system/icon.png"
-    if icon_png.is_file() and not windows_icon(icon_png, exe):
-        print("pocket package: %s already has resources; its icon is left as it is" % exe.name, file=sys.stderr)
+    if icon_png.is_file():
+        images = icon_pngs(icon_png)
+        if images is None:
+            print("pocket package: %s is not a usable icon; %s keeps none" % (icon_png, exe.name), file=sys.stderr)
+        elif not windows_icon(images, exe):
+            print("pocket package: %s already has resources; its icon is left as it is" % exe.name, file=sys.stderr)
     for dll in sorted(kit.glob("*.dll")):
         shutil.copy2(dll, folder / dll.name)
     copy_tree_resolved(kit / ".engine", folder / ".engine")

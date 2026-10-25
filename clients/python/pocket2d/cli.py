@@ -12,7 +12,8 @@
 
 Diagnostics are text by default; --json prints one JSON object per line with
 severity, code, file and message. The runtime binary comes from --game, the
-POCKET_GAME environment variable, or build/sdl3-{release,debug}/game.
+POCKET_GAME environment variable, or the newest Release build of a CMake preset
+(else the newest Debug build).
 """
 import argparse
 import base64
@@ -53,12 +54,57 @@ class Report:
             print("%s: %s%s [%s]" % (severity, (file + ": ") if file else "", message, code))
 
 
-def find_game(explicit):
-    for candidate in [explicit, os.environ.get("POCKET_GAME"),
-                      REPOSITORY / "build/sdl3-release/game", REPOSITORY / "build/sdl3-debug/game"]:
+def preset_build_dirs(root):
+    """(build directory, is a Release build) for each configure preset in root's
+    CMakePresets.json. A preset without CMAKE_BUILD_TYPE uses a multi-config generator
+    (Visual Studio, Xcode), which builds into <dir>/Release and <dir>/Debug."""
+    try:
+        presets = {p["name"]: p for p in json.loads((root / "CMakePresets.json").read_text(encoding="utf-8"))
+                   ["configurePresets"]}
+    except (OSError, ValueError, KeyError):
+        return []
+
+    def lookup(name, get):
+        preset = presets.get(name, {})
+        value = get(preset)
+        parents = preset.get("inherits", [])
+        for parent in [parents] if isinstance(parents, str) else parents:
+            if value is None:
+                value = lookup(parent, get)
+        return value
+
+    directories = []
+    for name, preset in presets.items():
+        binary = lookup(name, lambda p: p.get("binaryDir"))
+        if preset.get("hidden") or not binary:
+            continue
+        directory = Path(binary.replace("${sourceDir}", str(root)).replace("${presetName}", name))
+        directory = directory if directory.is_absolute() else root / directory
+        build_type = lookup(name, lambda p: p.get("cacheVariables", {}).get("CMAKE_BUILD_TYPE"))
+        build_type = build_type.get("value") if isinstance(build_type, dict) else build_type
+        if build_type:
+            directories.append((directory, build_type != "Debug"))
+        else:
+            directories += [(directory / "Release", True), (directory / "Debug", False)]
+    return directories
+
+
+def find_game(explicit, root=REPOSITORY):
+    """The runtime to drive: --game, else POCKET_GAME, else the newest Release build of a
+    CMake preset, else the newest Debug build."""
+    for candidate in [explicit, os.environ.get("POCKET_GAME")]:
         if candidate and Path(candidate).is_file():
             return str(Path(candidate).resolve())
-    raise SystemExit("pocket: no runtime binary; build the project or pass --game PATH")
+    builds = []
+    for directory, release in preset_build_dirs(root):
+        for name in ("game", "game.exe"):
+            if (directory / name).is_file():
+                builds.append((not release, -(directory / name).stat().st_mtime, directory / name))
+    if builds:
+        return str(min(builds)[2].resolve())
+    raise SystemExit("pocket: no runtime binary in the preset builds under %s; build one (cmake --preset "
+                     "ninja-release, then cmake --build --preset ninja-release), pass --game PATH or set "
+                     "POCKET_GAME" % (root / "build"))
 
 
 def project_path(text):
@@ -80,7 +126,7 @@ def load_validator():
 
 def check_assets(project, report):
     validator = load_validator()
-    schemas = REPOSITORY / "scripting/api/schemas"
+    schemas = REPOSITORY / "api/schemas"
     for pattern, name in ASSET_PATTERNS:
         for path in sorted(project.glob(pattern)):
             try:
@@ -132,7 +178,7 @@ def check_lua(project, report):
     with tempfile.TemporaryDirectory(prefix="pocket-luacheck-") as directory:
         config = Path(directory) / "luarc.json"
         config.write_text(json.dumps({"runtime.version": "Lua 5.4",
-                                      "workspace.library": [str(REPOSITORY / "types")]}), encoding="utf-8")
+                                      "workspace.library": [str(REPOSITORY / "api/types")]}), encoding="utf-8")
         if lua_ls:
             command = [lua_ls, "--check=" + str(project), "--checklevel=Warning", "--configpath=" + str(config)]
         else:
@@ -289,7 +335,7 @@ AGENTS = """# Agent guide for this Pocket2D project
 
 - Gameplay is Lua: component types live in `component_types/` (one global
   table per file, named like the file). Host API declarations for LuaLS are in
-  the engine's `types/pocket2d.lua`.
+  the engine's `api/types/pocket2d.lua`.
 - Scenes are JSON under `scenes/`; inputs are semantic actions in
   `actions.json`; scenarios under `scenarios/` define tasks and regression
   scripts.
@@ -330,7 +376,7 @@ def command_import_unity(options, project):
         return 1
     validator = load_validator()
     if validator is not None:
-        schemas = REPOSITORY / "scripting/api/schemas"
+        schemas = REPOSITORY / "api/schemas"
         checks = [(scene, "scene")] + [(project / "maps" / actor["components"]["map"]["map_resource"], "tilemap")
                                        for actor in json.loads(scene.read_text())["actors"] if "map" in actor["components"]]
         for path, schema in checks:
@@ -362,7 +408,7 @@ def command_import(options):
         return 1
     validator = load_validator()
     if validator is not None:
-        schema_data = json.loads((REPOSITORY / "scripting/api/schemas" / (schema + ".schema.json")).read_text())
+        schema_data = json.loads((REPOSITORY / "api/schemas" / (schema + ".schema.json")).read_text())
         problems = validator.validate(json.loads(written.read_text()), schema_data)
         if problems:
             print("pocket import: wrote an invalid %s: %s" % (schema, "; ".join(problems)), file=sys.stderr)
@@ -389,7 +435,8 @@ def command_package(options):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="pocket", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--game", help="runtime binary (default: POCKET_GAME or build/sdl3-*/game)")
+    parser.add_argument("--game", help="runtime binary (default: POCKET_GAME, else the newest preset build, "
+                                       "Release first)")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="validate a project")
     check.add_argument("project")

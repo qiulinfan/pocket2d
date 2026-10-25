@@ -17,7 +17,7 @@ or current-working-directory default and no recursive slot-name search.
 
 ## Store and file contract
 
-New shared namespace SaveStore, include/shared/persistence/SaveStore.h and matching
+New shared namespace SaveStore, src/shared/persistence/SaveStore.h and matching
 src/shared/persistence/SaveStore.cpp. No new dependency; use existing RapidJSON.
 
 Status {bool ok; string code; string message}; ReadResult {Status status;
@@ -88,9 +88,9 @@ Release and ASan/UBSan. No flaky power-cut simulation or false fsync guarantees.
 
 ## Ownership
 
-Resource worker owns SaveStore header/cpp, tests/save_store_test.cpp and storage
+Resource worker owns SaveStore header/cpp, tests/engine/save_store_test.cpp and storage
 format documentation. QA owns tests/fixtures/persistent_village/** and
- tests/agent_savegame_test.py (may initially build a focused persistent farm plus
+ tests/agent/agent_savegame_test.py (may initially build a focused persistent farm plus
 explicit permanent-world progress; report exact gameplay coverage). Native worker
 independently audits/fixes older Lua getter/callback reentry boundaries in scripting
 manager/Lifecycle/Binding/Runtime/Queries/Shared and EventBus with dedicated tests;

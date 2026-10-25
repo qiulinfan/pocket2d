@@ -1,7 +1,7 @@
 # SpriteAnimation playable fixture
 
 ```sh
-./build/modern-debug/game --project tests/fixtures/sprite_animation
+./build/ninja-debug/game --project tests/fixtures/sprite_animation
 ```
 
 Arrow keys move the player and select walk. Releasing movement selects idle.

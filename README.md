@@ -71,14 +71,14 @@ cmake --preset unix-makefiles-release
 cmake --build --preset unix-makefiles-release -j4
 ```
 
-Run the editor from the project root:
+Run the editor from the repository root:
 ```bash
-./pocket
+./build/unix-makefiles-release/pocket
 ```
 
 Run the game executable:
 ```bash
-./game
+./build/unix-makefiles-release/game
 ```
 
 ### Windows Release
@@ -97,13 +97,13 @@ cmake --build --preset vs-release
 Run the editor:
 
 ```powershell
-.\pocket.exe
+.\build\vs2022-x64\Release\pocket.exe
 ```
 
 Run the game executable:
 
 ```powershell
-.\game.exe
+.\build\vs2022-x64\Release\game.exe
 ```
 
 ## Repository Layout and Architecture
@@ -112,13 +112,13 @@ Run the game executable:
 - `src/engine/*`: runtime systems
 - `src/editor/*`: editor shell, documents, panels
 - `src/shared/*`: config, scene format, resource helpers
-- `include/*`: public headers for the same layers
+- each `src/` folder keeps its headers beside its sources
 - `.engine/system/*`: editor fonts and icons
 - `.engine/templates/*`: project templates, including the ball game sample
 - `thirdparty/*`: vendored dependencies; SDL3 (with SDL_image, SDL_ttf, SDL_mixer) and Box2D 3 are fetched at configure time
-- `scripting/api/*`: Lua host API contract, agent command schema and asset JSON Schemas
+- `api/*`: Lua host API contract, agent command schema, asset JSON Schemas, and the Lua and TypeScript declarations generated from the contract (`api/types/`)
 - `clients/python/*`, `tools/*`: the Python agent client and the `pocket` command line
-- `tests/*`: CTest suites and fixture projects
+- `tests/*`: CTest suites (`engine/`, `editor/`, and `agent/` for the Python tests that drive the runtime), manual benchmarks (`benchmarks/`) and fixture projects (`fixtures/`)
 
 ## Projects
 Projects can live anywhere on disk. Like Unity Hub, the editor keeps a per-user list of project paths in `projects.config`, next to `editor.config`, in `~/Library/Application Support/Pocket2D/` on macOS, `%APPDATA%\Pocket2D\` on Windows, and `$XDG_CONFIG_HOME/pocket2d/` (default `~/.config/pocket2d/`) on Linux. Nothing about your projects is stored in the engine folder. `File -> Open Project...` adds an existing project folder and `File -> Recent Projects` reopens one. The panel layout is saved there too, in `imgui.ini`; the first launch docks the panels as Unity does (Hierarchy left, Scene and Viewport center, Inspector right, Project and Status below), and `View -> Reset Layout` restores that arrangement. The editor starts in the Midnight theme with the system UI font (SF Pro on macOS, Segoe UI on Windows) at 17 px, and Chinese text falls back to Hiragino Sans GB on macOS (PingFang's outline format cannot be loaded), Microsoft YaHei on Windows or Noto Sans CJK on Linux. `Editor -> Editor Settings` switches the theme to Dark (Unity Professional) or Light (Unity Personal), the font to the bundled Inter and the text size between 12 and 24 px. The theme, the font, the text size and the Project browser's icon size (its slider) are saved in `editor.config` as soon as they change.

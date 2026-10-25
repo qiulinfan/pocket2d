@@ -4,7 +4,7 @@ Launch the real runtime with an explicit project. No window or audio device is
 created; the Lua lifecycle, physics and scene systems are the normal engine.
 
 ```sh
-./build/sdl3-debug/game --headless --agent --project tests/fixtures/village_defense --seed 42
+./build/ninja-debug/game --headless --agent --project tests/fixtures/village_defense --seed 42
 ```
 
 Send one JSON object per line on stdin. Each request gets one JSON response on
@@ -20,7 +20,7 @@ native allocations or restrict filesystem/network access.
 
 Every command, its access level (`read`, `simulate`, `modify`, `session`) and a
 self-contained JSON Schema 2020-12 for its parameters are defined once in
-`scripting/api/agent-protocol.json`. `tools/generate_agent_protocol.py` embeds
+`api/agent-protocol.json`. `tools/generate_agent_protocol.py` embeds
 that schema in the runtime (`describe.command_schema`, MCP tool definitions) and
 writes the [command reference](agent-commands.md); CTest checks both are current.
 
@@ -209,7 +209,7 @@ tools over stdio (newline-delimited JSON-RPC 2.0), backed by the same supervised
 worker, limits and recovery rules as JSONL:
 
 ```sh
-./build/sdl3-debug/game --headless --mcp --project tests/fixtures/village_defense --seed 42
+./build/ninja-debug/game --headless --mcp --project tests/fixtures/village_defense --seed 42
 ```
 
 A client configuration such as `.mcp.json` names that command and its arguments.
@@ -245,8 +245,8 @@ request with its response. Client `id`s and `diagnostics` are omitted because
 they describe the session rather than gameplay. `describe` and `quit` are not recorded.
 
 ```sh
-./build/sdl3-debug/game --headless --agent --project P --seed 42 --record session.jsonl
-./build/sdl3-release/game --headless --replay session.jsonl --project P
+./build/ninja-debug/game --headless --agent --project P --seed 42 --record session.jsonl
+./build/ninja-release/game --headless --replay session.jsonl --project P
 ```
 
 `--replay FILE` starts a fresh host with the recorded seed, re-sends each
@@ -273,7 +273,7 @@ return JSON `null`. Responses report the map revision, dimensions and cell size,
 plus requested cell values. UIDs return as decimal strings even when a request
 uses a lossless unsigned JSON integer. Pending `SetCell` writes remain invisible
 until the next pre-physics commit. The real farming fixture and Python protocol
-test are `tests/fixtures/tilemap_farm` and `tests/agent_tilemap_test.py`.
+test are `tests/fixtures/tilemap_farm` and `tests/agent/agent_tilemap_test.py`.
 
 Seeded replay is tested on the same platform/build. Cross-platform bit-exact
 physics, arbitrary Lua IO determinism, controller action schemas,

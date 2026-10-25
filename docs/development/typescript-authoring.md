@@ -18,7 +18,7 @@ npm --prefix tools/script-authoring test
 node tools/script-authoring/compile.mjs --check-toolchain
 ```
 
-Include `types/pocket2d.d.ts` in the TS project. It is generated from the curated
+Include `api/types/pocket2d.d.ts` in the TS project. It is generated from the curated
 host contract described in [script-api-contract.md](script-api-contract.md).
 Static calls use `this:void`; native instance methods/callbacks have explicit
 receiver types, so detached native-method calls fail static checking. Native nominal markers prevent plain objects from masquerading as
@@ -89,9 +89,9 @@ upstream fix passes the same compilation and real-engine replay tests.
 ## Verification and current limits
 
 ```sh
-cmake -S . -B build/modern-debug -DPOCKET_ENABLE_TYPESCRIPT_TESTS=ON
-cmake --build build/modern-debug --parallel
-ctest --test-dir build/modern-debug --output-on-failure
+cmake --preset ninja-debug -DPOCKET_ENABLE_TYPESCRIPT_TESTS=ON
+cmake --build --preset ninja-debug
+ctest --preset ninja-debug
 ```
 
 The core suite has 70 tests and needs no npm installation. Explicitly enabling

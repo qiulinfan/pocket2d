@@ -84,12 +84,3 @@ function(game_engine_link_sdl target)
             COMMAND_EXPAND_LISTS VERBATIM)
     endif()
 endfunction()
-
-function(game_engine_mirror_windows_runtime_to_root target)
-    if(WIN32 AND GAME_ENGINE_STAGE_SDL_RUNTIME)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:${target}> "${PROJECT_SOURCE_DIR}"
-            COMMAND_EXPAND_LISTS VERBATIM)
-    endif()
-endfunction()

@@ -1,15 +1,15 @@
 # Typed host API and TypeScript authoring experiment
 
-Phase 5, 2026-10-15. Implemented and verified; see phase5-checkpoint.md and status.md.
+Phase 5, 2026-10-15. Implemented and verified; see checkpoints/phase5-checkpoint.md and status.md.
 The contract adds a curated, tested host surface and compares one real
 TypeScriptToLua component against a hand-authored Lua reference. This is an
 optional authoring frontend, not a second VM or complete JS/npm compatibility.
 
 ## Single source and outputs
 
-Resource worker owns `scripting/api/host-api.json`, `tools/generate_script_api.py`,
-`types/pocket2d.d.ts`, `types/pocket2d.lua`, and generated
-`include/engine/scripting/ScriptAPIContract.h`. The header exposes
+Resource worker owns `api/host-api.json`, `tools/generate_script_api.py`,
+`api/types/pocket2d.d.ts`, `api/types/pocket2d.lua`, and generated
+`src/engine/scripting/ScriptAPIContract.h`. The header exposes
 `namespace PocketScriptAPI { inline constexpr std::string_view kContractJson=...; }`.
 Generator supports `--check` to reject stale generated outputs. The schema must
 explicitly distinguish instance self from namespace/static calls, nullable results,
@@ -60,7 +60,7 @@ configure/test time.
 
 QA owns `tests/fixtures/typed_gameplay/**` (handwritten Lua reference plus existing
 self-authored animation geometry), `tests/script_authoring/**` (TS source/config),
-and `tests/agent_typed_gameplay_test.py`.
+and `tests/agent/agent_typed_gameplay_test.py`.
 
 Implement the same real movement/animation one-shot attack/health/damage/save-load
 controller in TS and Lua. Use actual Rigidbody, Input, SpriteAnimation callbacks,
@@ -77,7 +77,7 @@ does not overwrite last good Lua. Test valid generated code under the real
 Debug/Release/sanitized engine where meaningful. Source-map runtime diagnostics
 are not claimed until separately verified; TS compiler diagnostics are in scope.
 
-Native worker owns `tests/script_api_contract_test.cpp` and may write a standalone
+Native worker owns `tests/engine/script_api_contract_test.cpp` and may write a standalone
 runtime Lua probe fixture. It verifies declared runtime names/properties and real
 representative calls/readonly failures/nullable behavior; compile-only nominal
 markers and authoring-only readonly rules are distinguished. Coordinate manifest

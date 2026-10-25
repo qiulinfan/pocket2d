@@ -1,6 +1,6 @@
 # Native Tilemap performance boundary
 
-The first local comparison uses `tests/tilemap_benchmark.cpp` in Release on the
+The first local comparison uses `tests/benchmarks/tilemap_benchmark.cpp` in Release on the
 same Mac and SDL3 backend. The baseline instantiates one SpriteRenderer actor
 per cell. The native path owns cell arrays and submits only visible tiles.
 Both use the same generated atlas, cell IDs, camera path, 640×360 render target,
@@ -10,10 +10,10 @@ RGBA pixels before reporting a successful result.
 Commands, from the repository root:
 
 ```sh
-./build/modern-release/tests/tilemap_benchmark 64 metal 21
-./build/modern-release/tests/tilemap_benchmark 128 metal 21
-./build/modern-release/tests/tilemap_benchmark 256 metal 21
-./build/modern-release/tests/tilemap_benchmark 64 software 21
+./build/ninja-release/tests/tilemap_benchmark 64 metal 21
+./build/ninja-release/tests/tilemap_benchmark 128 metal 21
+./build/ninja-release/tests/tilemap_benchmark 256 metal 21
+./build/ninja-release/tests/tilemap_benchmark 64 software 21
 ```
 
 There are three warmup frames and 21 timed frames per fixed-camera, scrolling,

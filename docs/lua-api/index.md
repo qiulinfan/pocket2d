@@ -88,5 +88,5 @@ The [curated script contract](../development/script-api-contract.md) generates
 LuaLS metadata and TypeScript declarations from one source. See the
 [optional TypeScript frontend](../development/typescript-authoring.md) for pinned
 compiler setup, one-component bundling, real replay evidence and limitations.
-Do not put `types/pocket2d.lua` into a runtime component directory; it is editor
+Do not put `api/types/pocket2d.lua` into a runtime component directory; it is editor
 metadata, not an executable replacement for the native API.

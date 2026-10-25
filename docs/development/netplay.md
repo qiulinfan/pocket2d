@@ -194,7 +194,7 @@ numbers keep their gain (`Audio.SetVolume`) and name their latest voice for
 tick is ignored. Music is level triggered: a correction's last `Music.Play` /
 `Music.Halt` is applied when it ends. Requests older than 64 ticks are
 forgotten. Agents see `audio.play` events with `tick`, `nth` and `late`, and
-`audio.cancel` for mispredicted sounds; `tests/netplay_test.py` checks that both
+`audio.cancel` for mispredicted sounds; `tests/agent/netplay_test.py` checks that both
 machines end up with the same sounds, each played once.
 
 ## Determinism requirements
@@ -233,7 +233,7 @@ the same bits.
   computes `math.log(x, 2)` with `log2`, except where `luaconf.h` declares the
   platform C89 (Windows), where it divides two logarithms, which differs in
   the last bits.
-- `tests/determinism_test.py` (CTest `determinism`) hashes 2000 rounds of
+- `tests/agent/determinism_test.py` (CTest `determinism`) hashes 2000 rounds of
   float math, formatting, table order and sorting, one hash per operation, and
   compares each with the recorded value, so a failure names the operation.
   macOS arm64, the Linux x86_64 runtime kit (GCC 14, glibc, under qemu) and
@@ -262,10 +262,10 @@ through `POCKET_NET_SERVER` or their own configuration.
 
 ## Tests
 
-- `tests/netplay_unit_test.cpp` (CTest `netplay_unit`): connection codes
+- `tests/engine/netplay_unit_test.cpp` (CTest `netplay_unit`): connection codes
   (round trip, typos), STUN messages, Lua snapshots (in-place restore,
   identity, upvalues, static tables, hashes) and the sound ledger.
-- `tests/netplay_test.py` (CTest `netplay`): two headless runtimes through a
+- `tests/agent/netplay_test.py` (CTest `netplay`): two headless runtimes through a
   local room server (punching, forced relay, rollback with corrections, the
   relay chosen over a slow direct path behind a NAT-like proxy), a
   direct host found by LAN discovery, connection codes through a local STUN

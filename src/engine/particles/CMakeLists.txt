@@ -3,6 +3,6 @@ target_sources(
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/ParticleManager.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ParticleSystem.cpp"
-        "${PROJECT_SOURCE_DIR}/include/engine/particles/ParticleManager.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/particles/ParticleSystem.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ParticleManager.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ParticleSystem.h"
 )

@@ -5,9 +5,9 @@ target_sources(
         "${CMAKE_CURRENT_SOURCE_DIR}/SpriteRenderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SpriteAnimation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FrameRateOverlay.cpp"
-        "${PROJECT_SOURCE_DIR}/include/engine/rendering/FrameRateOverlay.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/rendering/Renderer.h"
-        "${PROJECT_SOURCE_DIR}/include/engine/rendering/SpriteRenderer.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FrameRateOverlay.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Renderer.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SpriteRenderer.h"
 )
 
 # The splash image is compiled into the runtime so shipped games need no
@@ -29,5 +29,5 @@ target_sources(
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/SplashScreen.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/SplashImage.cpp"
-        "${PROJECT_SOURCE_DIR}/include/engine/rendering/SplashScreen.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SplashScreen.h"
 )

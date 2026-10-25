@@ -15,9 +15,9 @@ TypeScript 游戏脚本也不必引入第二 VM：TypeScriptToLua 已提供保�
 | **研究起点实测，现已修复：默认数组曾在实例间共享。** 第一个 `Probe` 实例修改默认数组会影响第二个实例。 | `Binding.cpp` 现在按实例复制默认 table 图、明确的向量/handle 值，覆盖 table-valued `__index` 原型继承。`component_isolation_test` 验证双实例、深层图、别名/环、metatable、覆盖、模板、动态添加及 reset。 | 函数/upvalue 和方法直接访问的全局仍明确共享；未知 owned userdata/coroutine 默认值被拒绝，应在 `OnStart` 构造。JSON 属性/观察覆盖仍是受限子集。 |
 | **研究起点故障，agent 路径现已受控。** 当时 `frames=1` 的死循环需测试 watchdog 终止；现在普通 Lua 循环触发指令错误，移除 hook 或 native sleep 由 supervisor deadline 终止 worker，显式 reset 后恢复。 | `ScriptBudget.cpp` 使用自定义 `lua_newstate` allocator 与 interval=1 count hook；`AgentSupervisor.cpp` 用 SDL3 子进程保护，`lua_budget_test` / `agent_budget_test` 覆盖协程、吞错、OOM、阻塞和恢复。 | 限制是 agent 请求执行与 Lua allocator 存活字节，不是整进程 RSS 或 OS sandbox。图形可信模式默认仍不限额。精确边界见 [script-budgets](script-budgets.md)。 |
 | 统一的 LuaBoundary 已用于受保护字段访问和生命周期／事件调用。 | `LuaBoundary.h/.cpp` 检查结果、忽略回调返回值、保留调用前栈并提供有界 UTF-8 traceback；`Shared.cpp` 保留错误计数。`lua_boundary` 和 `event_bus` 验证恢复与嵌套调用。 | 生产保持库 result mode，避免全局异常绕过 Lua pcall。预算／进程恢复和显式 reload 合同保留；原始 nil-self 崩溃、更多结构化上下文和 TS source map 仍待完善。 |
-| Lua 细节跨越宿主边界。 | `src/engine`、`include/engine` 中多个文件直接使用 `luabridge::LuaRef`；`ActorHandle` 的组件查询仍返回 LuaRef，EventBus 持有 LuaRef。 | TypeScript 适配不能直接复用这些返回类型。应先抽出少量纯 C++ 查询/写入契约，再让各语言绑定负责包装结果。 |
-| 已增加代际 ActorHandle，不能再把所有脚本 actor 访问概括为原始指针。 | `include/engine/scene/ActorHandle.h`、`ActorAPI.cpp`；UID + generation 在调用时解析。 | 第二种语言应复用同一寿命规则，继续测试销毁、场景替换与 UID 复用。不可让 JS 再持有直接 `Actor*`。 |
-| 显式 reload 已在独立有界候选 VM 准备代码，在 idle 边界保留实例/native 状态并更新 prototype、事件与生命周期缓存。 | `script-reload.md`、`adr-003-script-reload.md`、真实 agent/editor 和编译 TS 重载回归。 | 这是有边界的活实例重载；任意 heap/schema/continuation 迁移、旧 module-local 状态迁移仍不支持。 |
+| Lua 细节跨越宿主边界。 | `src/engine` 中多个文件直接使用 `luabridge::LuaRef`；`ActorHandle` 的组件查询仍返回 LuaRef，EventBus 持有 LuaRef。 | TypeScript 适配不能直接复用这些返回类型。应先抽出少量纯 C++ 查询/写入契约，再让各语言绑定负责包装结果。 |
+| 已增加代际 ActorHandle，不能再把所有脚本 actor 访问概括为原始指针。 | `src/engine/scene/ActorHandle.h`、`ActorAPI.cpp`；UID + generation 在调用时解析。 | 第二种语言应复用同一寿命规则，继续测试销毁、场景替换与 UID 复用。不可让 JS 再持有直接 `Actor*`。 |
+| 显式 reload 已在独立有界候选 VM 准备代码，在 idle 边界保留实例/native 状态并更新 prototype、事件与生命周期缓存。 | `script-reload.md`、`adr/adr-003-script-reload.md`、真实 agent/editor 和编译 TS 重载回归。 | 这是有边界的活实例重载；任意 heap/schema/continuation 迁移、旧 module-local 状态迁移仍不支持。 |
 | Inspector/agent 的属性模型是标量与同质数组，不是任意 Lua heap。 | `Actor::ComponentPropertyValue`、`SceneFormat.cpp`、`Queries.cpp`。 | JSON observe/reset 不等于保存闭包、协程、任意嵌套 table 或完整物理状态。跨语言数据先遵循现有可序列化子集。 |
 
 上述行为测试区分研究起点的故障复现和本轮已经完成的修复，只证明相应本地构建的结果。没有运行候选 VM 的 Pocket2D benchmark，也没有证据说明 Lua 执行本身已成为整帧主瓶颈。此前层级查询与粒子优化的收益属于 C++ 算法和数据并行，不能归因于脚本 VM。
@@ -41,7 +41,7 @@ TypeScript 游戏脚本也不必引入第二 VM：TypeScriptToLua 已提供保�
 
 ### 已完成的 Lua 5.4.9 维护升级
 
-**源码替换、集成构建与升级回归已经完成。** 替换前对官方 5.4.6 archive 与 vendored C/C++ 源文件的只读比较未发现项目补丁，因此无需移植私有 Lua 修改。与官方 5.4.9 比较，`lua.h` 的差异仅涉及版本/版权信息，`lauxlib.h`、`lualib.h`、`lua.hpp` 未变；`luaconf.h` 增加模块名称处理标记。当前保留 LuaBridge 2.7，并新增 `tests/lua_vm_test.cpp` 覆盖 hook/yield、GC/weak userdata、加载/运行错误与现有绑定。原版源码留在忽略的 `build/lua-upgrade-baseline/`；不能把头文件相近当作运行正确证明。
+**源码替换、集成构建与升级回归已经完成。** 替换前对官方 5.4.6 archive 与 vendored C/C++ 源文件的只读比较未发现项目补丁，因此无需移植私有 Lua 修改。与官方 5.4.9 比较，`lua.h` 的差异仅涉及版本/版权信息，`lauxlib.h`、`lualib.h`、`lua.hpp` 未变；`luaconf.h` 增加模块名称处理标记。当前保留 LuaBridge 2.7，并新增 `tests/engine/lua_vm_test.cpp` 覆盖 hook/yield、GC/weak userdata、加载/运行错误与现有绑定。原版源码留在忽略的 `build/lua-upgrade-baseline/`；不能把头文件相近当作运行正确证明。
 
 升级来源应直接固定为 [lua.org 的 5.4.9 官方 archive](https://www.lua.org/ftp/lua-5.4.9.tar.gz)，对照 [官方下载目录](https://www.lua.org/ftp/)；完整保留源码中的许可，校验输出仅保存在忽略目录。官方已知缺陷和差异包含 hook/yield 处理、错误定位、弱 table/GC、finalizer 栈空间、非法 UTF-8 等修复。其中部分错误处理与 GC 路径和后续预算/失败恢复工作相关；REPL 专属修复则不直接作用于目前排除 `lua.c` 的嵌入构建。[Lua 官方 bug 列表](https://www.lua.org/bugs.html)、[5.4.8→5.4.9 官方差异](https://www.lua.org/work/diffs-lua-5.4.8-lua-5.4.9.html)
 
@@ -141,7 +141,7 @@ instance闭包、匿名订阅和元表明确拒绝。错误文本有4096字节UT
 第八阶段随后移除了场景预检中的旧重复加载路径：可信启动脚本执行一次，已知来源
 按路径缓存；新来源用受限候选VM准备，成功才发布。可信启动的任意外部IO、提交后的
 回调副作用和主VM耗尽仍不承诺回滚，详见[场景合同](scene-transitions.md)、
-[ADR 004](adr-004-scene-preparation.md)与[重载合同](script-reload.md)。
+[ADR 004](adr/adr-004-scene-preparation.md)与[重载合同](script-reload.md)。
 
 ## 下一阶段的绑定实验
 
@@ -150,12 +150,12 @@ instance闭包、匿名订阅和元表明确拒绝。错误文本有4096字节UT
 版本的独立边界探针，保持 Lua 5.4.9。该实验现已运行，两版的四项隔离测试分别通过
 Debug/Release/ASan；真实引擎 TU 的不兼容、属性可写性、返回值、错误传播、所有权
 与预算结果见 [实验结果](binding-experiment-results.md)。生产引擎仍是 2.7；
-[ADR 007](adr-007-checked-lua-binding.md) 指定下一步完整接入及不可弱化的验证门槛。
+[ADR 007](adr/adr-007-checked-lua-binding.md) 指定下一步完整接入及不可弱化的验证门槛。
 
 ## 第十三阶段实际进展
 
 LuaBridge3 已接入真实引擎，保留 Lua 5.4.9 和既有 Lua／TypeScript 可见 API。
-[统一宿主边界](../../include/engine/scripting/LuaBoundary.h) 检查转换结果，保留
+[统一宿主边界](../../src/engine/scripting/LuaBoundary.h) 检查转换结果，保留
 回调忽略返回值的规则、既有 Lua 栈、错误计数及有界 UTF-8 traceback。生产保持
 库的 result mode，不打开全局异常开关：真实契约测试发现该开关会使错误 self
 绕过 Lua pcall。完整 Debug／Release／ASan+UBSan 各 66 项通过；保留的 GLM

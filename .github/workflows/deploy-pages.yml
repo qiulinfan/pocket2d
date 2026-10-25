@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - "docs/**"
-      - "mkdocs.yml"
       - "Makefile"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:

@@ -89,7 +89,7 @@ build/agent-authoring/stub-negative-control-16/
 
 ```sh
 python3 tests/agent_authoring/validate_repair.py \
-  --runtime build/sdl3-debug/game \
+  --runtime build/ninja-debug/game \
   --fixture tests/fixtures/village_defense \
   --candidate build/agent-authoring/glm-repair-attempt-1/workspace/project/component_types/Repair.lua \
   --output-dir build/agent-authoring/repair-revalidation

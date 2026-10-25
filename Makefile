@@ -3,6 +3,7 @@
 
 CMAKE ?= cmake
 MKDOCS ?= mkdocs
+MKDOCS_CONFIG := docs/mkdocs.yml
 RSYNC ?= rsync
 JOBS ?= 4
 
@@ -13,14 +14,11 @@ SITE_BUILD_DIR := .site
 DEBUG_BUILD_DIR := build/$(DEBUG_PRESET)
 RUNTIME_BIN := $(DEBUG_BUILD_DIR)/game
 EDITOR_BIN := $(DEBUG_BUILD_DIR)/pocket
-ROOT_RUNTIME_BIN := game
-ROOT_EDITOR_BIN := pocket
 
-.DEFAULT_GOAL := engine
+.DEFAULT_GOAL := build
 
 .PHONY: help configure build configure-release build-release
-.PHONY: stage-runtime stage-editor
-.PHONY: engine editor run run-editor compile-commands
+.PHONY: run run-editor compile-commands
 .PHONY: test
 .PHONY: docs-build docs-serve site-build docs
 .PHONY: clean clean-all
@@ -37,21 +35,13 @@ configure-release:
 build-release: configure-release
 	$(CMAKE) --build --preset $(RELEASE_PRESET) -j$(JOBS)
 
-stage-runtime: build
-	cp $(RUNTIME_BIN) ./$(ROOT_RUNTIME_BIN)
+# Executables stay in the build tree; run them from the repository root, where
+# they find the engine's .engine resources.
+run: build
+	./$(RUNTIME_BIN)
 
-stage-editor: build
-	cp $(EDITOR_BIN) ./$(ROOT_EDITOR_BIN)
-
-engine: stage-runtime
-
-editor: stage-editor
-
-run: engine
-	./$(ROOT_RUNTIME_BIN)
-
-run-editor: editor
-	./$(ROOT_EDITOR_BIN)
+run-editor: build
+	./$(EDITOR_BIN)
 
 test: build
 	ctest --test-dir $(DEBUG_BUILD_DIR) --output-on-failure
@@ -60,25 +50,24 @@ compile-commands: configure
 	cp $(DEBUG_BUILD_DIR)/compile_commands.json ./compile_commands.json
 
 docs-build:
-	$(MKDOCS) build --clean
+	$(MKDOCS) build --clean -f $(MKDOCS_CONFIG)
 
 docs-serve:
-	$(MKDOCS) serve
+	$(MKDOCS) serve -f $(MKDOCS_CONFIG)
 
 site-build:
 	rm -rf $(SITE_BUILD_DIR)
 	mkdir -p $(SITE_BUILD_DIR)
-	$(RSYNC) -av --delete --exclude 'lua-api/' --exclude '*.md' docs/ $(SITE_BUILD_DIR)/
-	$(MKDOCS) build --clean
+	$(RSYNC) -av --delete --prune-empty-dirs --exclude 'lua-api/' --exclude '*.md' --exclude 'mkdocs.yml' docs/ $(SITE_BUILD_DIR)/
+	$(MKDOCS) build --clean -f $(MKDOCS_CONFIG)
 
+# Pages deploys from the published main branch, not from this checkout.
 docs: site-build
-	./scripts/deploy_site_to_gh_pages.sh
+	gh workflow run deploy-pages.yml --ref main
 
 clean:
 	-$(CMAKE) --build --preset $(DEBUG_PRESET) --target clean
 	-$(CMAKE) --build --preset $(RELEASE_PRESET) --target clean
-	-rm -f ./$(ROOT_RUNTIME_BIN) ./$(ROOT_EDITOR_BIN)
 
 clean-all:
 	rm -rf build/$(DEBUG_PRESET) build/$(RELEASE_PRESET)
-	rm -f ./$(ROOT_RUNTIME_BIN) ./$(ROOT_EDITOR_BIN)

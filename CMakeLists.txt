@@ -109,8 +109,8 @@ add_library(engine_runtime STATIC)
 target_include_directories(
     engine_runtime
     PUBLIC
-        "${PROJECT_SOURCE_DIR}/include"
-        "${PROJECT_SOURCE_DIR}/include/engine"
+        "${PROJECT_SOURCE_DIR}/src"
+        "${PROJECT_SOURCE_DIR}/src/engine"
 )
 target_link_libraries(
     engine_runtime
@@ -137,7 +137,7 @@ add_library(editor_core STATIC)
 target_include_directories(
     editor_core
     PUBLIC
-        "${PROJECT_SOURCE_DIR}/include"
+        "${PROJECT_SOURCE_DIR}/src"
 )
 target_link_libraries(
     editor_core

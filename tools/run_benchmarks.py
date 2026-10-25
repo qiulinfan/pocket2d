@@ -85,7 +85,7 @@ def village(game, frames):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--build", default=str(REPOSITORY / "build/sdl3-release"), help="Release build directory")
+    parser.add_argument("--build", default=str(REPOSITORY / "build/ninja-release"), help="Release build directory")
     parser.add_argument("--backend", default="gpu", help="POCKET_RENDER_DRIVER for rendered workloads")
     parser.add_argument("--quick", action="store_true", help="fewer samples (smoke test, not for comparison)")
     options = parser.parse_args()

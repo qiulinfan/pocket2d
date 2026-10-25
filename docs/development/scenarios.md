@@ -52,7 +52,7 @@ Observations are the protocol's dictionaries, so `observation_space` is `None`.
 import sys; sys.path.insert(0, "clients/python")
 from pocket2d import PocketEnv
 
-env = PocketEnv("build/sdl3-release/game", "tests/fixtures/two_world_village",
+env = PocketEnv("build/ninja-release/game", "tests/fixtures/two_world_village",
                 "tests/fixtures/two_world_village/scenarios/plant_and_harvest.scenario.json",
                 save_dir="/tmp/pocket-saves")
 observation, info = env.reset(seed=42)
@@ -66,7 +66,7 @@ dict of action values, and returns Gymnasium 1.x results. `info` carries
 `condition` index and the reported `events`. `Runtime` is the underlying JSONL
 client for direct protocol use.
 
-`tests/scenario_env_test.py` solves all three village scenarios with scripted
+`tests/agent/scenario_env_test.py` solves all three village scenarios with scripted
 key policies and checks reward accounting and episode reproducibility.
 `VectorPocketEnv(executable, project, scenario, num_envs)` runs one runtime
 process per sub-environment and steps them in parallel threads. Its `reset`
@@ -105,7 +105,8 @@ with Bot(PROJECT, seed=3, out="build/my-game", select={"names": ["Player"]}) as 
 ```
 
 - The runtime binary comes from `executable=`, `POCKET_GAME`, or the client's
-  own checkout (`build/sdl3-release/game`, then `sdl3-debug`), so a game
+  own checkout (the newest Release preset build, else the newest Debug one,
+  as `pocket2d.cli.find_game` picks it), so a game
   repository finds the engine once, through `POCKET2D_ENGINE` or the sibling
   folder. `ENGINE_ROOT` in `pocket2d.session` is that checkout.
 - Without `save_dir` the game saves into a fresh temporary directory, removed
@@ -131,6 +132,6 @@ with Bot(PROJECT, seed=3, out="build/my-game", select={"names": ["Player"]}) as 
   `tiles(actor_uid, component_key, layer, cells)` reads tilemap cells without
   advancing; `request` and `reset` reach the protocol directly.
 
-`tests/agent_session_test.py` drives `tests/fixtures/agent_session` through
+`tests/agent/agent_session_test.py` drives `tests/fixtures/agent_session` through
 each of these. PocketTerraria's `tools/tbot.py` and VillageRim's
 `tools/playtest.py` in the games repository build their players on it.

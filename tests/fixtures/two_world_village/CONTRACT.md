@@ -7,7 +7,7 @@ converter. The scene and both regions remain resident; portals do not call
 Scene.Load or prove resource streaming.
 
 Independent automated acceptance is recorded in
-[Phase 15](../../../docs/development/phase15-checkpoint.md). Human playtesting
+[Phase 15](../../../docs/development/checkpoints/phase15-checkpoint.md). Human playtesting
 remains a separate gate; this contract defines behavior, not game feel.
 
 ## Regions, objects and controls
@@ -185,7 +185,7 @@ schema is `unsupported_game_schema`, and native inventory preflight failure is
 Run a built runtime from the repository root with an explicit local save folder:
 
 ```sh
-build/sdl3-debug/game --project tests/fixtures/two_world_village --save-dir build/two-world-playtest-saves
+build/ninja-debug/game --project tests/fixtures/two_world_village --save-dir build/two-world-playtest-saves
 ```
 
 Independent QA must complete the real input-driven farm/equip/food/portal/combat

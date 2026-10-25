@@ -115,10 +115,10 @@ post-publication host failures and their separate reset policies are not redefin
 Run the focused cases with:
 
 ```sh
-ctest --test-dir build/sdl3-debug \
+ctest --preset ninja-debug \
   -R '^(lua_receiver|agent_receiver)$' --output-on-failure
 ```
 
 Final Debug/Release/sanitizer and performance evidence is owned by the integration
-run and recorded in [phase14-checkpoint](phase14-checkpoint.md) / [status](status.md).
+run and recorded in [phase14-checkpoint](checkpoints/phase14-checkpoint.md) / [status](status.md).
 Source/diagnostic expectations are behavioral assertions, not timing thresholds.

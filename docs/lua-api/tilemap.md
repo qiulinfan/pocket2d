@@ -328,5 +328,5 @@ Box2D chain，所以物体沿相邻 cell 滑动不会在接缝处卡住。chain 
 
 有界的 agent cell 查询见 [agent protocol](../development/agent-protocol.md#bounded-tilemap-observations)。
 格式和验收范围见 [Tilemap slice](../development/tilemap-slice.md)；真实用例见
-[native tests](../../tests/tilemap_test.cpp)、[runtime tests](../../tests/tilemap_runtime_test.cpp)
-和 [pixel readback tests](../../tests/tilemap_render_test.cpp)。
+[native tests](../../tests/engine/tilemap_test.cpp)、[runtime tests](../../tests/engine/tilemap_runtime_test.cpp)
+和 [pixel readback tests](../../tests/engine/tilemap_render_test.cpp)。

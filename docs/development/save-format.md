@@ -72,7 +72,7 @@ Shared references duplicate data rather than preserving identity. Empty Lua
 tables serialize as objects. An empty JSON array loads as an empty Lua table and
 may save again as an object; game schemas must tolerate that empty shape or store
 an explicit shape discriminator. Detailed host tests belong to
-[save_lua_test.cpp](../../tests/save_lua_test.cpp).
+[save_lua_test.cpp](../../tests/engine/save_lua_test.cpp).
 
 ## Replacement and failure behavior
 
@@ -125,7 +125,7 @@ player and should save again. Without it, a damaged slot is reported as is.
 | `unsupported_format` | Engine format version is not supported. |
 | `io_error` | Filesystem/open/write/sync/replace failure or unsafe target type. |
 
-[SaveStore tests](../../tests/save_store_test.cpp) exercise exact signed64,
+[SaveStore tests](../../tests/engine/save_store_test.cpp) exercise exact signed64,
 UTF-8/NUL and nested roundtrip; exact depth/node/file-size boundaries; malformed,
 duplicate, future and oversized input; slot confinement and symlinks; successful
 replacement; and preserved old bytes on failure. POSIX tests use `RLIMIT_FSIZE`

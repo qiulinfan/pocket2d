@@ -13,7 +13,7 @@ protocol (`game --headless --agent --project P`), the MCP server
 
 - [Agent protocol](docs/development/agent-protocol.md): commands, observations, events, images, actions, replays and the MCP server
 - [Agent command reference](docs/development/agent-commands.md): generated parameter schemas for every command
-- [Command schema](scripting/api/agent-protocol.json): machine-readable source of the command reference and MCP tools
+- [Command schema](api/agent-protocol.json): machine-readable source of the command reference and MCP tools
 - [Scenarios and the Python client](docs/development/scenarios.md): tasks as data and the Gymnasium-style environment
 - [pocket command line](docs/development/pocket-cli.md): check, test, run, replay, render and new
 
@@ -24,12 +24,12 @@ protocol (`game --headless --agent --project P`), the MCP server
 - [Built-in components](docs/lua-api/builtin-components.md): Transform, SpriteRenderer, Rigidbody, ParticleSystem
 - [Events and physics](docs/lua-api/events-physics.md): Event bus, raycasts, overlap queries, joints, character mover
 - [Rendering, audio and input](docs/lua-api/rendering-audio-input.md): drawing, sound, keys, mouse and semantic actions
-- [Lua type declarations](types/pocket2d.lua): LuaLS `---@meta` declarations generated from the curated host API
-- [Host API contract](scripting/api/host-api.json): machine-readable source of the type declarations
+- [Lua type declarations](api/types/pocket2d.lua): LuaLS `---@meta` declarations generated from the curated host API
+- [Host API contract](api/host-api.json): machine-readable source of the type declarations
 
 ## Project files
 
-- [Asset schemas](scripting/api/schemas/): JSON Schemas for game.config, scenes, templates, tilemaps, animations, items, actions and scenarios
+- [Asset schemas](api/schemas/): JSON Schemas for game.config, scenes, templates, tilemaps, animations, items, actions and scenarios
 - [Tilemaps](docs/lua-api/tilemap.md): map format, layers and collision outlines
 - [Sprite animation](docs/lua-api/sprite-animation.md): animation assets and playback
 - [Inventory](docs/lua-api/inventory.md) and [Savegame](docs/lua-api/savegame.md)

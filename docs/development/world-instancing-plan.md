@@ -39,7 +39,7 @@
 
 ### 阶段 A：World 实例化（仍使用 Box2D 2.4）
 
-1. **A1 World 骨架**：新增 `include/engine/core/World.h` 与实现；`Engine` 持有 World 并在所有入口绑定；测试辅助代码同样绑定。行为不变。
+1. **A1 World 骨架**：新增 `src/engine/core/World.h` 与实现；`Engine` 持有 World 并在所有入口绑定；测试辅助代码同样绑定。行为不变。
 2. **A2 输入**：`Input` 的静态状态迁入 `World::input`。
 3. **A3 粒子**：`ParticleManager` 的发射器数据迁入 World。
 4. **A4 渲染请求与音频开关**：帧内绘制队列、渲染/音频诊断计数迁入 World；资源缓存保持进程级。

@@ -150,9 +150,9 @@ Lua FarmLogic 每 OnUpdate 先把自己的 tick 加1、处理到期生长，再�
 
 | Owner | 独占文件/责任 | 交接合同 |
 | --- | --- | --- |
-| Native map owner | 新 `include/shared/tilemap/TilemapAsset.h`、`src/shared/tilemap/TilemapAsset.cpp`；新 `include/engine/scene/Tilemap.h`、`src/engine/scene/Tilemap.cpp`。拥有 schema、cell/pending/commit、CPU chunk records、Box2D chunks 和 ActorHandle 生命周期。 | 提供小而明确的 load/validate/commit/queue-draw/read-cell API；所有测试先可在无窗口状态运行。不改 Lua注册和 Engine.cpp。 |
-| Editor owner | 新 `include/editor/documents/TilemapDocument.h`、`src/editor/documents/TilemapDocument.cpp`；`src/editor/panels/InspectorPanel.cpp` 和必要的 SceneView preview 接线。 | 使用同一 TilemapAsset parser/writer；负责作者undo/redo与显式保存，不复制 runtime 数据格式。涉及 engine preview入口由协调者接。 |
-| QA/fixture owner | 新 `tests/tilemap_test.cpp`、`tests/tilemap_runtime_test.cpp`、`tests/tilemap_benchmark.cpp`、`tests/agent_tilemap_test.py`、`tests/fixtures/tilemap_farm/**`。 | 使用真实组件/Box2D/JSONL，不写另一套模拟来代替实现；先交 failing correctness cases 和生成器，再加入性能 workload。 |
+| Native map owner | 新 `src/shared/tilemap/TilemapAsset.h`、`src/shared/tilemap/TilemapAsset.cpp`；新 `src/engine/scene/Tilemap.h`、`src/engine/scene/Tilemap.cpp`。拥有 schema、cell/pending/commit、CPU chunk records、Box2D chunks 和 ActorHandle 生命周期。 | 提供小而明确的 load/validate/commit/queue-draw/read-cell API；所有测试先可在无窗口状态运行。不改 Lua注册和 Engine.cpp。 |
+| Editor owner | 新 `src/editor/documents/TilemapDocument.h`、`src/editor/documents/TilemapDocument.cpp`；`src/editor/panels/InspectorPanel.cpp` 和必要的 SceneView preview 接线。 | 使用同一 TilemapAsset parser/writer；负责作者undo/redo与显式保存，不复制 runtime 数据格式。涉及 engine preview入口由协调者接。 |
+| QA/fixture owner | 新 `tests/engine/tilemap_test.cpp`、`tests/engine/tilemap_runtime_test.cpp`、`tests/benchmarks/tilemap_benchmark.cpp`、`tests/agent/agent_tilemap_test.py`、`tests/fixtures/tilemap_farm/**`。 | 使用真实组件/Box2D/JSONL，不写另一套模拟来代替实现；先交 failing correctness cases 和生成器，再加入性能 workload。 |
 | Coordinator | `ComponentManager.h`、manager 的 Shared/Binding/Queries/Lifecycle/Runtime 接口、`BuiltinComponentAPI.cpp`、`Engine.cpp`、`AgentSession.cpp`、必要 SceneFormat 验证及全部 CMake。现有 Renderer 只有需要复用入口时才由此 owner 改。 | 合并前确认 native/editor API；安排 pre-physics/frozen-preview commit；串行构建和集成测试；避免三个 worker 同改大型入口。 |
 
 实施顺序：schema/API 单测 → native 初始化/安全提交/碰撞 → culling/图集渲染 → agent 查询与 farming fixture → editor 明确保存 → Release 对照。每阶段保持原 runtime/editor 能运行，不把完整新组件半成品注册进默认场景。

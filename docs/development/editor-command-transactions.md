@@ -54,7 +54,7 @@ Loading/saving a document, opening another scene, resource I/O and runtime gamep
 
 ## Verification
 
-`tests/editor_command_transaction_test.cpp` uses real Engine, SceneDocument and EditorSceneSession objects with a temporary project and real Box2D body. It checks:
+`tests/editor/editor_command_transaction_test.cpp` uses real Engine, SceneDocument and EditorSceneSession objects with a temporary project and real Box2D body. It checks:
 
 - failed AddComponent and late-failing CreateActor leave no specs, records, actors or delayed lifecycle effects;
 - failed batches keep the old name and native configuration, while a valid in-place rename retains Actor/Lua/nested/native-body identities;

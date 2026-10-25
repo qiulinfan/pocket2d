@@ -97,7 +97,7 @@ preserve the old runtime state.
 
 ## End-to-end verification
 
-`tests/agent_reload_test.py RUNTIME` creates a complete temporary source project
+`tests/agent/agent_reload_test.py RUNTIME` creates a complete temporary source project
 and edits the actual registered files between JSONL requests. It tests two live
 instances with changed health, nested data, consumed native inventory and a real
 moving Rigidbody. It checks frame/pose preservation at reload, retained userdata
@@ -135,7 +135,7 @@ reload or project change. The action does not mark a scene dirty, save it, rebui
 its runtime mirror, discard a map draft, enter/exit play, or advance a paused
 simulation. Invalid candidates remain editable on disk and can be retried.
 
-`tests/script_reload_editor_test.cpp` uses a temporary copy of the tilemap farm,
+`tests/editor/script_reload_editor_test.cpp` uses a temporary copy of the tilemap farm,
 a real SDL software renderer and ImGui. It clicks the actual reload button,
 checks live component identity/start counts, preserves unsaved scene/map drafts,
 renders persistent failure diagnostics in a paused context, retries through the

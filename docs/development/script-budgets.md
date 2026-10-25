@@ -3,7 +3,7 @@
 本文件描述 `--headless --agent` 的实际进程边界。游戏仍运行在真实 Lua 5.4.9 / Box2D / Engine 中；外层 supervisor 负责协议与超时，内部 worker 持有游戏世界。它是故障隔离与资源预算，不是限制文件、网络或 OS 能力的安全 sandbox。
 
 ```sh
-./build/modern-debug/game --headless --agent \
+./build/ninja-debug/game --headless --agent \
   --project tests/fixtures/village_defense \
   --instruction-budget 50000000 \
   --lua-heap-budget 67108864 \
@@ -69,13 +69,13 @@ worker 能报告实际已完成帧时沿用它的 frame。若 worker 被强杀�
 
 核心文件：
 
-- `include/engine/scripting/ScriptBudget.h`、`src/engine/scripting/ScriptBudget.cpp`：allocator、count hook、嵌套作用域与粘性原因。
+- `src/engine/scripting/ScriptBudget.h`、`src/engine/scripting/ScriptBudget.cpp`：allocator、count hook、嵌套作用域与粘性原因。
 - `src/engine/scripting/manager/Runtime.cpp`：创建/关闭预算化 Lua state；不改变 LuaBridge 或 VM 版本。
 - `src/app/runtime/AgentSession.cpp`：启动/命令作用域、失败上报和内部握手。
 - `src/app/runtime/AgentSupervisor.cpp`：非阻塞 SDL3 process pipes、deadline、关联、校验、kill/reap 与恢复。
 
 ```sh
-ctest --test-dir build/modern-debug \
+ctest --preset ninja-debug \
   -R '^(lua_budget|agent_budget|agent_protocol|agent_errors|agent_mouse)$' \
   --output-on-failure
 ```

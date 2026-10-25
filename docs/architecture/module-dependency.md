@@ -22,7 +22,7 @@ graph TD
         EngineInput["engine/input"]
     end
 
-    subgraph Shared["Shared Layer (src/shared + include/shared)"]
+    subgraph Shared["Shared Layer (src/shared)"]
         SharedConfig["shared/config"]
         SharedSceneFormat["shared/scene_format"]
         SharedResource["shared/resources"]
