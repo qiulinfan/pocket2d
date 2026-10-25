@@ -103,7 +103,11 @@ build and test presets are registered, plus `vs2022-x64` (build presets
 `vs-debug` / `vs-release`) and `xcode` (`xcode-debug` / `xcode-release`) for
 the IDE generators. `make test` runs the debug CTest suite, and
 `make compile-commands` copies the debug build's `compile_commands.json` to the
-repository root for clangd.
+repository root for clangd. On Windows,
+`powershell -ExecutionPolicy Bypass -File tools\win_install.ps1` clones or
+updates a checkout (default `%ProgramData%\Pocket2D`), builds `vs-release`
+and puts editor and runtime shortcuts on the desktop.
+
 For memory validation, an independent Debug build with
 `-fsanitize=address,undefined -fno-omit-frame-pointer` in both C and C++ flags
 exercises runtime and protocol tests without changing normal build settings.

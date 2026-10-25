@@ -71,8 +71,9 @@ site-build:
 	$(RSYNC) -av --delete --exclude 'lua-api/' --exclude '*.md' docs/ $(SITE_BUILD_DIR)/
 	$(MKDOCS) build --clean
 
+# Pages deploys from the published main branch, not from this checkout.
 docs: site-build
-	./scripts/deploy_site_to_gh_pages.sh
+	gh workflow run deploy-pages.yml --ref main
 
 clean:
 	-$(CMAKE) --build --preset $(DEBUG_PRESET) --target clean
